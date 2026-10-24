@@ -104,6 +104,11 @@ typedef enum {
 
 typedef struct {
   char root[MAX_PATH];
+  /* Root proyek anggota workspace (mis. "bade"); kosong = single-project.
+     Hanya basis perhitungan path sumber/object. Sengaja TIDAK memengaruhi
+     `root` (yang berarti cwd untuk cmdBuildEx/profile), dan tidak
+     diserialisasi cache: konfigurasi workspace dibangun di memori. */
+  char projRoot[MAX_PATH];
 
   List sources;
   List flags;
@@ -172,6 +177,7 @@ typedef struct {
    * ke child secara eksplisit lalu membatalkan build dengan rapi.
    */
   bool foreground;
+  bool logEnabled;
 
   List excludes; /* nama/path file yang dilepas dari build (mis. main.c) */
 

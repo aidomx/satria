@@ -92,7 +92,8 @@ int bootstrapParse(int argc, const char *argv[], Bootstrap *bs) {
       if (i + 1 < argc && argv[i + 1][0] && argv[i + 1][0] != '-' &&
           strcmp(argv[i + 1], "build") != 0 && strcmp(argv[i + 1], "clean") != 0 &&
           strcmp(argv[i + 1], "init") != 0 && strcmp(argv[i + 1], "help") != 0 &&
-          strcmp(argv[i + 1], "version") != 0 && strcmp(argv[i + 1], "release") != 0)
+          strcmp(argv[i + 1], "version") != 0 && strcmp(argv[i + 1], "release") != 0 &&
+          strcmp(argv[i + 1], "log") != 0)
         bs->ws_only = argv[++i];
       continue;
     }
@@ -231,6 +232,8 @@ int bootstrapParse(int argc, const char *argv[], Bootstrap *bs) {
       /* release di workspace = build + release; di mode satu-proyek, ini
          dianggap command asing — ditolak di satria.c agar jelas. */
       bs->cmd = CMD_RELEASE;
+    } else if (strcmp(cmd, "log") == 0 || strcmp(cmd, "--log") == 0) {
+      bs->cmd = CMD_LOG;
     } else if (strcmp(cmd, "version") == 0) {
       bs->cmd = CMD_VERSION;
     } else {
@@ -350,12 +353,12 @@ int bootstrapApply(Bootstrap *bs) {
      Mode workspace memakai .satria/workspace.state — root workspace tidak
      punya .satria/build.state (itu file per-proyek), jadi cek lama selalu
      melaporkan cold pada tiap run `satria -w`. */
-  bool wsMode = bs->want_workspace || (bs->cmd == CMD_BUILD && workspaceFileExists());
+  bool wsMode = bs->want_workspace;
   /* Mode workspace: cold kasar dari keberadaan file gate — validasi stamp
      gate kini per-closure di workspaceRun (murah untuk `-w <nama>`).
      Status di sini hanya untuk SATRIA_STATUS/evaluasi; mesin build
      menentukan noop/dirty sendiri saat dispatch. */
-  bs->status.cold = wsMode ? !wsStateFileExists() : !fsFileExists(".satria/build.state");
+  bs->status.cold = wsMode ? !wsStateFileExists() : !fsFileExists(".satria/caches/build.state");
   bs->status.has_state = !bs->status.cold;
   if (getenv("SATRIA_STATUS") && *getenv("SATRIA_STATUS") && strcmp(getenv("SATRIA_STATUS"), "0") != 0)
     fprintf(stderr, "satria status: mode=%s cold=%d\n", wsMode ? "workspace" : "project",

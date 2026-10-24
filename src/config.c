@@ -29,7 +29,7 @@ static bool sourcesHaveCpp(const Config *c) {
     if (!fsDirExists(entry)) continue;
     /* Semua .cpp di bawah entry (rekursif), sama dengan scan manual sebelumnya. */
     List all = {0};
-    wsWalkDirCached(entry, ".cpp", &all);
+    stateWalkDirCached(entry, ".cpp", &all);
     bool found = all.count > 0;
     listFree(&all);
     if (found) return true;
@@ -322,6 +322,8 @@ static void configApply(Config *c, const char *section, const char *sub, const c
       copyStr(c->root, sizeof(c->root), value);
     else if (strcmp(key, "std") == 0)
       copyStr(c->std, sizeof(c->std), value);
+    else if (strcmp(key, "log") == 0 && parseBool(value, &b))
+      c->logEnabled = b;
     else if (strcmp(key, "foreground") == 0 && parseBool(value, &b))
       c->foreground = b;
     else if (strcmp(key, "target") == 0)

@@ -1,4 +1,7 @@
 #include "commands.h"
+#include "cache/artifact.h"
+#include "log/build_log.h"
+#include "log/report_blob.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -24,9 +27,63 @@
  *   - cmds/cmds_state.c : fingerprint build, fast no-op snapshot, clean.
  */
 
+/* Workspace menjalankan library pass lalu binary pass dalam satu proses.
+   Simpan verdict byte-object dari pass pertama agar pass binary tidak memakai
+   mtime object yang baru disentuh sebagai alasan relink bila byte object sama. */
+#define WS_PHASE_OBJECT_MAX 128
+#define WS_PHASE_PROJECT_LEN 128
+typedef struct {
+  char project[WS_PHASE_PROJECT_LEN];
+  bool used;
+  bool changed;
+} WsPhaseObjectChange;
+static WsPhaseObjectChange wsPhaseObjectChanges[WS_PHASE_OBJECT_MAX];
+
+/* Varian bernama (commands.h): dipakai juga oleh jalur fork fase library
+   (ws_batch.c) yang menstaging verdict anak ke tabel induk — nama proyek
+   tidak bisa diambil dari cmdsStateWsProject() di induk (sudah direset). */
+void cmdsWsPhaseVerdictSet(const char *project, bool changed) {
+  if (!wsModeActive() || !project || !*project) return;
+  int freeSlot = -1;
+  for (int i = 0; i < WS_PHASE_OBJECT_MAX; i++) {
+    if (wsPhaseObjectChanges[i].used && strcmp(wsPhaseObjectChanges[i].project, project) == 0) {
+      wsPhaseObjectChanges[i].changed = changed;
+      return;
+    }
+    if (!wsPhaseObjectChanges[i].used && freeSlot < 0) freeSlot = i;
+  }
+  if (freeSlot >= 0) {
+    snprintf(wsPhaseObjectChanges[freeSlot].project,
+             sizeof(wsPhaseObjectChanges[freeSlot].project), "%s", project);
+    wsPhaseObjectChanges[freeSlot].used = true;
+    wsPhaseObjectChanges[freeSlot].changed = changed;
+  }
+}
+
+bool cmdsWsPhaseVerdictGet(const char *project, bool *changed) {
+  if (!wsModeActive() || !project || !*project) return false;
+  for (int i = 0; i < WS_PHASE_OBJECT_MAX; i++) {
+    if (wsPhaseObjectChanges[i].used && strcmp(wsPhaseObjectChanges[i].project, project) == 0) {
+      if (changed) *changed = wsPhaseObjectChanges[i].changed;
+      return true;
+    }
+  }
+  return false;
+}
+
+static void wsPhaseObjectChangeSet(bool changed) {
+  cmdsWsPhaseVerdictSet(cmdsStateWsProject(), changed);
+}
+
+static bool wsPhaseObjectChangeGet(bool *changed) {
+  return cmdsWsPhaseVerdictGet(cmdsStateWsProject(), changed);
+}
+
 /* ==================== help (dari src/cmd.txt — sumber tunggal) ==================== */
 
-void showHelp(void) { cmdHelpMain(); }
+void showHelp(void) {
+  cmdHelpMain();
+}
 
 /* ==================== init ==================== */
 
@@ -283,7 +340,8 @@ int cmdInteractiveInit(void) {
       char *item = trim(save);
       if (*item) {
         if (!projectNameValid(item)) {
-          fprintf(stderr, "satria: nama proyek '%s' tidak valid - pakai huruf, angka, '_' atau '-'\n",
+          fprintf(stderr,
+                  "satria: nama proyek '%s' tidak valid - pakai huruf, angka, '_' atau '-'\n",
                   item);
           return 2;
         }
@@ -521,7 +579,8 @@ int cmdCompdbGenerate(const char *buildfilePath) {
   listSort(&srcs); /* urutan entri json = urutan link (reprodusible) */
 
   if (srcs.count == 0) {
-    fprintf(stderr, "satria: tidak ada source .c/.cpp di sources — tidak ada compdb untuk dibuat\n");
+    fprintf(stderr,
+            "satria: tidak ada source .c/.cpp di sources — tidak ada compdb untuk dibuat\n");
     return 1;
   }
 
@@ -646,19 +705,46 @@ static void statPlanBuild(StatPlan *p, const Config *c, const List *srcs) {
 }
 
 int cmdBuildEx(int jobs, const char *buildfilePath, bool libOnly) {
+  /* Sisa state lama (audit §Daftar Implementasi): mode single menyapu file
+     tulisan versi lama sekali per run; mode workspace menyapu lewat
+     wsLegacyStateRemove di workspaceRun. */
+  if (!wsModeActive()) cmdsLegacyStateSweep();
   /* Fast no-op per fase (miniws): fase binary memakai build.state, fase
      library workspace memakai build.lib.state — no-op `satria -w` tidak
      membayar loadConfig + fingerprint + decide penuh per proyek. */
   bool fastOk = wsModeActive() ? wsFastStateValid(buildfilePath, libOnly)
                                : cmdsFastStateValid(buildfilePath, libOnly);
-  if (fastOk) return 0;
+  if (fastOk) return 0; /* no-op: detail sudah dicetak fast-state */
   /* Build mengubah file. Mode single: memo dikosongkan total (aman, perilaku lama).
      Mode workspace: output dibuang per entri saat state disimpan, dan memo total
      dikosongkan bila build gagal (lihat wsExecOne), agar memo bisa dipakai lintas fase. */
   if (!wsModeActive()) cmdsStatMemoReset();
+  /* Cold startup is defined by the absence of the persistent config state,
+     not by missing build outputs. Keep warm startup silent. */
+  bool coldStartup = !wsModeActive() && !fsFileExists(".satria/startup.state");
+  bool showStartup = coldStartup && termIsTTY();
+  if (showStartup) {
+    fprintf(stderr, "startup :\n");
+    fflush(stderr);
+  }
+
+  /* Detail laporan run (design/startup.md §10): tee stdout sejak awal; disimpan
+     ke .satria/report.blob bila build sukses, dibuang bila gagal. */
+  reportBlobBegin();
+
   Config c = configDefaults();
-  if (!loadConfig(&c, buildfilePath)) return 1;
-  if (!resolveCompiler(&c)) return 1;
+  if (!loadConfig(&c, buildfilePath)) {
+    if (showStartup) fprintf(stderr, "> loading configuration: failed\n");
+    reportBlobFinish(false);
+    return 1;
+  }
+  if (showStartup) fprintf(stderr, "> loading configuration: done\n");
+  if (!resolveCompiler(&c)) {
+    if (showStartup) fprintf(stderr, "> preparing execution: failed\n");
+    reportBlobFinish(false);
+    return 1;
+  }
+
   profMark("startup+config");
 
   /* Mode sinyal: build paralel selalu butuh handler forward SIGINT karena
@@ -667,21 +753,70 @@ int cmdBuildEx(int jobs, const char *buildfilePath, bool libOnly) {
   procSetForeground(jobs > 1 ? false : c.foreground);
 
   if (!fsDirExists(c.root)) {
+    if (showStartup) fprintf(stderr, "> preparing execution: failed\n");
     fprintf(stderr, "satria: root '%s' is not a directory\n", c.root);
+    reportBlobFinish(false);
     return 1;
   }
   if (!fsSetCwd(c.root)) {
+    if (showStartup) fprintf(stderr, "> preparing execution: failed\n");
     fprintf(stderr, "satria: cannot enter root '%s'\n", c.root);
+    reportBlobFinish(false);
     return 1;
   }
+  if (showStartup) {
+    fprintf(stderr, "> preparing execution: done\n");
+    fflush(stderr);
+  }
 
-  return cmdsBuildPassRun(jobs, c, buildfilePath, libOnly);
+  bool logging = !wsModeActive() && c.logEnabled;
+  if (logging) buildLogBegin();
+  int result = cmdsBuildPassRun(jobs, c, buildfilePath, libOnly);
+  if (logging) buildLogEnd(result);
+  reportBlobFinish(result == 0);        /* sukses: jadikan report.blob; gagal: tahan yang lama */
+  if (result == 0) artifactCacheSave(); /* metadata artefak (design/startup.md §9) */
+  return result;
+}
+
+/* Pasangan (object, sumber) untuk deteksi tabrakan: diurutkan per object. */
+typedef struct {
+  char obj[MAX_PATH];
+  const char *src;
+} ObjEntry;
+
+static int objEntryCmp(const void *a, const void *b) {
+  return strcmp(((const ObjEntry *)a)->obj, ((const ObjEntry *)b)->obj);
+}
+
+bool cmdsCheckObjectCollisions(const Config *c, const List *srcs) {
+  if (srcs->count < 2) return true;
+  ObjEntry *e = calloc((size_t)srcs->count, sizeof(ObjEntry));
+  if (!e) return true; /* kehabisan memori: tidak ada perbandingan; build lanjut */
+  int m = 0;
+  for (int i = 0; i < srcs->count; i++) {
+    const char *src = srcs->items[i];
+    if (!objectPathFor(c, src, e[m].obj, sizeof(e[m].obj))) continue;
+    e[m].src = src;
+    m++;
+  }
+  qsort(e, (size_t)m, sizeof(ObjEntry), objEntryCmp);
+  bool ok = true;
+  for (int i = 1; i < m; i++) {
+    if (strcmp(e[i].obj, e[i - 1].obj) != 0) continue;
+    fprintf(stderr,
+            "satria: tabrakan object: '%s' dan '%s' sama-sama -> %s\n"
+            "        ubah nama salah satu file atau pindahkan dari root sumber yang sama\n",
+            e[i - 1].src, e[i].src, e[i].obj);
+    ok = false;
+  }
+  free(e);
+  return ok;
 }
 
 /*
  * cmdsCollectSources — koleksi source .c/.cpp dari Config: entri FILE
  * (mis. hasil `satria -xf` untuk build.ninja flat) masuk langsung; selain
- * itu dianggap folder dan discan rekursif (walk cache .satria/ws.src bila
+ * itu dianggap folder dan discan rekursif (walk cache .satria/sources.cache bila
  * mode workspace aktif — lihat wsModeSet). Urutan hasil = urutan link:
  * .c dan .cpp dihasilkan dua walkDir terpisah per folder root, jadi di-sort
  * ulang jadi satu barisan stabil — baris link reprodusible antar mesin dan
@@ -699,8 +834,8 @@ void cmdsCollectSources(const Config *c, List *out) {
       listAdd(out, entry);
       continue;
     }
-    wsWalkDirCached(entry, ".c", out);
-    wsWalkDirCached(entry, ".cpp", out);
+    stateWalkDirCached(entry, ".c", out);
+    stateWalkDirCached(entry, ".cpp", out);
   }
   listSort(out);
 }
@@ -749,7 +884,17 @@ int cmdsBuildPassRun(int jobs, Config c, const char *buildfilePath, bool libOnly
   }
 
   List srcs = {0};
+  if (!wsModeActive()) cmdsSingleSourcesCacheBegin();
   cmdsCollectSources(&c, &srcs);
+  if (!wsModeActive()) cmdsSingleSourcesCacheEnd();
+
+  /* Dua sumber yang berbeda tidak boleh memetakan ke object yang sama: itu
+     akan menimpa object diam-diam (design/workspace.md: nama output yang
+     bentrok harus dideteksi). */
+  if (!cmdsCheckObjectCollisions(&c, &srcs)) {
+    listFree(&srcs);
+    return 1;
+  }
 
   /* One-pass stat plan: stamp source (selalu) + object (default; hilangkan
    * dengan SATRIA_STATPLAN_OBS=0) SEKALI di sini. Konsumen berikutnya memakai
@@ -757,6 +902,7 @@ int cmdsBuildPassRun(int jobs, Config c, const char *buildfilePath, bool libOnly
   StatPlan plan;
   statPlanInit(&plan);
   statPlanBuild(&plan, &c, &srcs);
+  profMark("collect+plan");
 
   if (srcs.count == 0) {
     fprintf(stderr, "satria: tidak ada source .c/.cpp di sources — proyek standar memakai folder "
@@ -855,6 +1001,10 @@ int cmdsBuildPassRun(int jobs, Config c, const char *buildfilePath, bool libOnly
    * MSVC, .d belum ada). Lihat deps/.
    */
   List pending = {0};
+  /* Hash objek lama untuk tiap source yang perlu dikompilasi. Setelah compiler
+     selesai, hasil byte dibandingkan: source/header boleh berubah tanpa
+     memaksa relink bila object efektif tetap identik. */
+  List pendingObjHashes = {0};
   DepCache *deps = depsNew(&c);
   int headerStale = 0, headerTouched = 0;
   /* mtime object terbesar & apakah ada object yang hilang — dikumpulkan di
@@ -897,7 +1047,22 @@ int cmdsBuildPassRun(int jobs, Config c, const char *buildfilePath, bool libOnly
         continue;
       }
     }
+    /* Sumber lebih baru dari object (mis. `touch` yang tidak sempat di-PATCH,
+       lalu run berikutnya membangun proyek lain lebih dulu): buktikan lewat
+       hash isi terhadap snapshot build sukses terakhir (.satria/deps.cache).
+       Konten sama -> tanpa kompilasi (design/startup.md §4 — sentuh tanpa
+       perubahan isi tak memicu build; jalur cache on & incremental lama
+       kini sepakat). Snapshot tak ada (sumber baru / build pertama) atau
+       isi berbeda -> tetap masuk antrean kompilasi. */
+    if (!compileConfigChanged && objM >= 0 && srcM > objM && depsContentUpToDate(deps, src)) {
+      skipped++;
+      continue;
+    }
     listAdd(&pending, src);
+    char oldHash[32];
+    uint64_t h = objM >= 0 ? cmdsStateFileHash(obj) : 0;
+    snprintf(oldHash, sizeof(oldHash), "%016llx", (unsigned long long)h);
+    listAdd(&pendingObjHashes, oldHash);
   }
   profMark("decide");
   if (headerTouched > 0)
@@ -941,6 +1106,7 @@ int cmdsBuildPassRun(int jobs, Config c, const char *buildfilePath, bool libOnly
        ditulis dengan konfigurasi baru sebelum interupsi. */
     if (compileConfigChanged) cmdsFingerprintInvalidate();
     fprintf(stderr, "\nsatria: build interrupted; stopping\n");
+    listFree(&pendingObjHashes);
     free(inc);
     free(wf);
     statPlanFree(&plan);
@@ -952,12 +1118,33 @@ int cmdsBuildPassRun(int jobs, Config c, const char *buildfilePath, bool libOnly
        state agar build berikutnya tidak melewatkan rebuild konfigurasi penuh. */
     if (compileConfigChanged) cmdsFingerprintInvalidate();
     fprintf(stderr, "\nsatria: build failed with %d error(s); linking skipped\n", failed);
+    listFree(&pendingObjHashes);
     free(inc);
     free(wf);
     statPlanFree(&plan);
     return 1;
   }
 
+  bool objectsChanged = compiled > 0; /* fallback konservatif */
+  if (compiled > 0 && pendingObjHashes.count == pending.count) {
+    objectsChanged = false;
+    for (int i = 0; i < pending.count; i++) {
+      char objPath[MAX_PATH];
+      if (!objectPathFor(&c, pending.items[i], objPath, sizeof(objPath))) {
+        objectsChanged = true;
+        break;
+      }
+      uint64_t before = (uint64_t)strtoull(pendingObjHashes.items[i], NULL, 16);
+      uint64_t after = cmdsStateFileHash(objPath);
+      if (!before || !after || before != after) {
+        objectsChanged = true;
+        break;
+      }
+    }
+  }
+  listFree(&pendingObjHashes);
+
+  profMark("objhash");
   if (!buildEmbedded(&c)) {
     free(inc);
     free(wf);
@@ -965,6 +1152,7 @@ int cmdsBuildPassRun(int jobs, Config c, const char *buildfilePath, bool libOnly
     profReport();
     return 1;
   }
+  profMark("embed");
 
   /* Fase library workspace (pass 1 dari cmdBuildEx, lihat commands.h):
      kemas lib<name>.a/.so dari object milik proyek ini lalu berhenti —
@@ -980,6 +1168,7 @@ int cmdsBuildPassRun(int jobs, Config c, const char *buildfilePath, bool libOnly
       depsFree(deps);
       return 1;
     }
+    profMark("libs");
     if (depsSnapshotIncomplete(deps)) {
       for (int i = 0; i < srcs.count; i++)
         depsRecordUpdate(deps, srcs.items[i]);
@@ -990,6 +1179,7 @@ int cmdsBuildPassRun(int jobs, Config c, const char *buildfilePath, bool libOnly
     depsSave(deps);
     if (wsModeActive()) wsFastStateSave(deps, &c, &srcs, "", buildfilePath, true);
     depsFree(deps);
+    wsPhaseObjectChangeSet(objectsChanged);
     /* libOnly=true: commit hash compile saja — sources/link diserahkan ke
        pass binary supaya source set/link config berubah tetap terdeteksi
        di pass yang sama (lihat cmdsFingerprintSave). */
@@ -1033,13 +1223,20 @@ int cmdsBuildPassRun(int jobs, Config c, const char *buildfilePath, bool libOnly
   }
 #endif
 
-  bool linkNeeded = !fsFileExists(target) || linkConfigChanged || sourceSetChanged || compiled > 0;
+  bool phaseObjectsChanged = false;
+  bool phaseObjectVerdict = compiled == 0 && wsPhaseObjectChangeGet(&phaseObjectsChanged);
+  bool linkNeeded = !fsFileExists(target) || linkConfigChanged || sourceSetChanged || objectsChanged ||
+                    (phaseObjectVerdict && phaseObjectsChanged);
   if (!linkNeeded) {
     int64_t targetMtime = fsMTimeNs(target);
     if (targetMtime < 0) {
       linkNeeded = true;
     } else {
-      if (compiled == 0 && !anyObjMissing) {
+      if ((compiled > 0 && !objectsChanged) || (phaseObjectVerdict && !phaseObjectsChanged)) {
+        /* Object pass ini atau library pass sebelumnya boleh saja menulis
+           ulang object, tetapi byte hasilnya identik. Mtime baru bukan input
+           linker baru, jadi jangan relink hanya karena timestamp. */
+      } else if (compiled == 0 && !anyObjMissing) {
         /* Tidak ada object yang ditulis ulang sejak fase 1: mtime yang sudah
            dikumpulkan masih berlaku — nol stat tambahan pada build no-op. */
         if (maxObjM > targetMtime) linkNeeded = true;

@@ -1,6 +1,6 @@
 # Buildfile Field Reference
 
-The following fields are part of the v0.2.0 configuration model or are exercised by the v0.2.0 project/workspace examples.
+The following fields are part of the current configuration model (v0.2.4) or are exercised by the project/workspace examples.
 
 | Field | Purpose |
 |---|---|

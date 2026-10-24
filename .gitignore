@@ -25,3 +25,6 @@ RELEASE_*.md
 
 editor/*
 !*.zip
+
+# lockfile npm liar (repo ini bukan paket npm); aturan artefak fixture ada di tests/.gitignore
+package-lock.json

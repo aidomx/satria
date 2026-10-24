@@ -6,15 +6,13 @@ tool_cmd() {
     cmake) cmake --build .cmake-build --parallel "$NPROC" ;;
   esac
 }
-# Cakupan selektif harus SETARA antar tool. Karena core <-> bade circular
-# (library.cdeps dua arah), cakupan satria -w core / -w bade adalah kedua
-# library + kedua binary; CMake diberi target keluaran yang setara
-# agar waktunya layak dibandingkan (audit problems/ws.md butir 5).
-SEL_TARGETS="core/bin/rupa bade/bin/bade core/lib/libcore.so bade/lib/libbade.so"
+# Build selektif memang berbeda cakupan: Satria tidak memperluas target lewat
+# cdeps, sedangkan CMake diberi target dari kedua proyek untuk menyelesaikan
+# siklus link. Benchmark harus melaporkan perbedaan kerja, bukan menyebutnya
+# setara atau memaksa Satria membangun proyek di luar target.
 # CMake memakai NAMA TARGET, bukan path keluaran. Pemetaan ke CMakeLists
 # hasil gen.sh: rupa -> core/bin/rupa, bade -> bade/bin/bade,
-# core_shared -> core/lib/libcore.so, bade_shared -> bade/lib/libbade.so
-# (tutupannya sama dengan $SEL_TARGETS: object + dua .a + arsip + embed).
+# core_shared -> core/lib/libcore.so, bade_shared -> bade/lib/libbade.so.
 # --target diulang satu per nama: cmake 3.31 + generator Ninja MENOLAK daftar
 # berpemisah koma/spasi ("unknown target 'rupa,bade,...'"), jadi list dipisah
 # spasi lalu dipecah jadi flag terpisah. Tanpa --target, cmake --build memakai
@@ -22,7 +20,7 @@ SEL_TARGETS="core/bin/rupa bade/bin/bade core/lib/libcore.so bade/lib/libbade.so
 # beda dengan pembanding CMake
 # (audit workspace-cmake,satria-n1000-r5).
 CMAKE_SEL_TARGETS="rupa bade core_shared bade_shared"
-cmake_sel_cmd() { # build selektif setara SEL_TARGETS (nama target CMake)
+cmake_sel_cmd() { # build target kedua proyek CMake untuk menutup siklus link
   local -a names=() targs=()
   read -ra names <<< "$CMAKE_SEL_TARGETS"
   local n

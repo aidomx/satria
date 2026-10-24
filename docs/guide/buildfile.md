@@ -2,7 +2,7 @@
 
 satria uses a declarative `Buildfile` with `key = value` assignments and `use` declarations.
 
-A representative v0.2.0 Buildfile is:
+A representative Buildfile is:
 
 ```text
 use project
@@ -113,7 +113,7 @@ The platform/compiler implementation chooses an available compiler.
 
 ## Aliases
 
-The v0.2.0 configuration supports aliases:
+The configuration supports aliases:
 
 ```text
 clean as c

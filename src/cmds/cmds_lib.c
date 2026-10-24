@@ -227,7 +227,11 @@ bool cmdsBuildLibraryEx(const Config *c, const List *srcs, bool linkPathLibs) {
     if (excludedSource(c, srcs->items[i])) continue;
     if (objectPathFor(c, srcs->items[i], obj, sizeof(obj))) listAdd(&objs, obj);
   }
-  for (int i = 0; i < c->embCount; i++)
+  /* Workspace embed belongs to the consuming executable, not its exported
+     libraries. Otherwise an asset update rewrites libbade.a and needlessly
+     relinks unrelated consumers (e.g. core/rupa via cdeps). Preserve the
+     existing single-project library behavior. */
+  for (int i = 0; !wsModeActive() && i < c->embCount; i++)
     if (c->emb[i].enable && fsFileExists(c->emb[i].objectPath))
       listAdd(&objs, c->emb[i].objectPath);
 
@@ -359,7 +363,7 @@ bool cmdsLibVariantUpToDate(const Config *c, bool isStatic, const List *srcs) {
     int64_t om = fsMTimeNs(obj);
     if (om < 0 || om > mtime) return false;
   }
-  for (int i = 0; i < c->embCount; i++) {
+  for (int i = 0; !wsModeActive() && i < c->embCount; i++) {
     if (!c->emb[i].enable) continue;
     int64_t om = fsMTimeNs(c->emb[i].objectPath);
     if (om < 0 || om > mtime) return false;

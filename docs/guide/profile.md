@@ -2,7 +2,7 @@
 
 `satria profile <context>` measures the real cost of satria's operations without
 performing a normal build. It is a diagnostic tool, not an alternative build
-mode: it does not require Buildfile overrides, does not touch `.satria/build.state`,
+mode: it does not require Buildfile overrides, does not touch fast-state caches,
 fingerprints, `Buildfile`, or build artifacts, and cleans up its temporary data
 afterwards — so profiling never changes the result of your next incremental build.
 

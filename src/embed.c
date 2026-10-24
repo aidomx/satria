@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "cache/cache_store.h"
 #include "compile.h"
 #include "embed_ld_cache.h"
 #include "portability.h"
@@ -126,6 +127,324 @@ static void embArchiveStateSave(const EmbeddedEntry *e) {
   fclose(fp);
 }
 
+/* ==================== caches/embed.cache (design/startup.md §3/§4) ====================
+   Validasi arsip embed lewat entri terpusat: satu entri grup (config hash +
+   stamp arsip) + satu entri per input (file: stamp + hash isi; folder: stamp
+   mtime), semua berpayload "<kind> <archivePath> <path>". Bila SEMUA entri
+   grup masih cocok, arsip segar TANPA walk file (lompatan cepat); sentuhan
+   (mtime beda, isi sama) dipulihkan lewat hash — tanpa re-archive, tanpa
+   membaca seluruh tree. Bila ada yang meleset, keputusan tetap di jalur lama
+   (embArchiveFresh) — cache ini murni lompatan, tidak pernah menggugurkan
+   rebuild yang seharusnya terjadi. */
+
+#define EMBED_CACHE_FILE WS_CACHES_DIR "/embed.cache"
+
+static bool embExcluded(const EmbeddedEntry *e, const char *rel); /* di bawah */
+static void embRelPath(const EmbeddedEntry *e, const char *path, char *rel, size_t n);
+
+/* FNV-1a 64 atas isi file (streaming 4KB); 0 = tak terbaca. */
+static uint64_t embFileHash(const char *path) {
+  FILE *fp = fopen(path, "rb");
+  if (!fp) return 0;
+  uint64_t h = 14695981039346656037ULL;
+  unsigned char buf[4096];
+  size_t n;
+  while ((n = fread(buf, 1, sizeof(buf), fp)) > 0)
+    for (size_t i = 0; i < n; i++) {
+      h ^= buf[i];
+      h *= 1099511628211ULL;
+    }
+  fclose(fp);
+  return h;
+}
+
+static uint64_t embCacheGrpAddr(const EmbeddedEntry *e) { return csHash(e->archivePath); }
+static uint64_t embCacheEntryAddr(const EmbeddedEntry *e, char kind, const char *path) {
+  char key[MAX_PATH * 4 + 8];
+  snprintf(key, sizeof(key), "%s|%c|%s", e->archivePath, kind, path);
+  return csHash(key);
+}
+
+/* Parse payload "<kind> <archivePath> [path]" (path boleh berisi spasi). */
+static char embPayloadParse(const char *payload, const char **archive, const char **path) {
+  if (!payload || !payload[0] || payload[1] != ' ') return 0;
+  const char *a = payload + 2;
+  const char *sp = strchr(a, ' ');
+  *archive = a;
+  *path = sp ? sp + 1 : "";
+  return payload[0];
+}
+
+/* Stamp folder rekursif (mode single — stateWalkDirStamps hanya ada di cache
+   walk workspace). Set = root + seluruh subfolder; filter exclude/ad
+   diterapkan pemanggil saat mencatat. */
+static void embCollectDirStamps(const char *dir, List *out) {
+  int64_t mt = 0;
+  long long sz = 0;
+  if (!fsStampNsSize(dir, &mt, &sz)) return;
+  char entry[WS_PATH_LEN + 32];
+  snprintf(entry, sizeof(entry), "D %lld %s", (long long)mt, dir);
+  listAdd(out, entry);
+  List dirs = {0}, files = {0};
+  listReserve(&dirs, 64);
+  listReserve(&files, 64);
+  fsListDir(dir, &dirs, &files);
+  for (int i = 0; i < dirs.count; i++) embCollectDirStamps(dirs.items[i], out);
+  listFree(&dirs);
+  listFree(&files);
+}
+
+/* true bila token archivePath pada payload == want. Payload TIDAK diputus
+   (tanpa menulis NUL di tengah) — dibandingkan sepanjang want lalu dicek
+   boundary-nya. */
+static bool embPayloadArchiveIs(const char *payload, const char *want) {
+  if (!payload || !payload[0] || payload[1] != ' ') return false;
+  const char *a = payload + 2;
+  size_t wl = strlen(want);
+  return strncmp(a, want, wl) == 0 && (a[wl] == ' ' || a[wl] == '\0');
+}
+
+typedef struct {
+  CsStore *st;
+  uint64_t proj;
+  const EmbeddedEntry *e;
+  int seen;
+  bool ok;
+  uint64_t *prunes; /* kunci entri file yang hilang dari disk (dihapus setelah iterasi) */
+  size_t pn, pcap;
+} EmbValCtx;
+
+/* Validasi satu entri input milik grup e. PATCH aman saat iterasi (hanya
+   mengubah isi node, bukan struktur hash). */
+static bool embCacheValidateVisit(const CsEntry *ent, CsOp op, void *ctxp) {
+  (void)op;
+  EmbValCtx *ctx = ctxp;
+  if (!ctx->ok || ent->proj != ctx->proj || !ent->payload) return true;
+  if (ent->payload[0] == 'G') return true;
+  const char *archive = NULL, *path = NULL;
+  char kind = embPayloadParse(ent->payload, &archive, &path);
+  (void)archive;
+  if (!kind || !embPayloadArchiveIs(ent->payload, ctx->e->archivePath)) return true;
+
+  ctx->seen++;
+  int64_t mt = 0;
+  long long sz = 0;
+  if (!cmdsStatCached(path, &mt, &sz)) {
+    if (kind == 'D') {
+      ctx->ok = false; /* folder hilang: biarkan jalur lama memutuskan */
+      return true;     /* tetap lanjut: entri lain masih bisa di-prune */
+    }
+    /* File hilang dari disk: prune entri (penghapusan selalu diikuti
+       perubahan stamp folder, jadi D-entry menangkap dampaknya). */
+    if (ctx->pn == ctx->pcap) {
+      size_t nc = ctx->pcap ? ctx->pcap * 2 : 16;
+      uint64_t *nv = realloc(ctx->prunes, nc * sizeof(uint64_t));
+      if (!nv) return true;
+      ctx->prunes = nv;
+      ctx->pcap = nc;
+    }
+    ctx->prunes[ctx->pn++] = ent->file;
+    return true;
+  }
+  if (kind == 'D') {
+    if ((long long)mt != ent->time) ctx->ok = false;
+    return true;
+  }
+  if (kind != 'F') return true;
+  if ((long long)mt == ent->time && sz == ent->size) return true;
+  /* Stamp beda: baca isi — sama (mis. touch) -> PATCH stamp; beda -> gugur. */
+  uint64_t h = embFileHash(path);
+  if (h == 0 || h != ent->content) {
+    ctx->ok = false;
+    return false;
+  }
+  CsPatch p = {0};
+  p.hasContent = true;
+  p.content = h;
+  p.hasTime = true;
+  p.time = (long long)mt;
+  p.hasSize = true;
+  p.size = sz;
+  return csPatch(ctx->st, ent->proj, ent->file, &p);
+}
+
+/* True bila seluruh entri grup arsip masih cocok — arsip segar TANPA walk. */
+static bool embEmbedCacheFresh(const EmbeddedEntry *e) {
+  if (e->usePrebuilt || !e->archivePath[0]) return false;
+  if (wsModeActive()) cmdsStatMemoSetCwd();
+  CsStore *st = csOpen(EMBED_CACHE_FILE);
+  if (!st) return false;
+  uint64_t proj = cmdsCacheProjAddr();
+  CsEntry g;
+  if (!csGet(st, proj, embCacheGrpAddr(e), &g) || !g.payload || g.payload[0] != 'G') {
+    csClose(st);
+    return false;
+  }
+  int64_t at = 0;
+  long long asz = 0;
+  bool archiveOk = fsStampNsSize(e->archivePath, &at, &asz) && g.time == (long long)at &&
+                   g.size == asz && g.content == embArchiveConfigHash(e);
+  if (!archiveOk) {
+    csClose(st);
+    return false;
+  }
+  EmbValCtx ctx = {st, proj, e, 0, true, NULL, 0, 0};
+  csForEach(st, embCacheValidateVisit, &ctx);
+  for (size_t i = 0; i < ctx.pn; i++) csDelete(st, proj, ctx.prunes[i]);
+  free(ctx.prunes);
+  bool fresh = ctx.ok && ctx.seen > 0;
+  if (csIsDirty(st)) csCommit(st); /* PATCH stamp (touch) & prune dipersist */
+  csClose(st);
+  return fresh;
+}
+
+typedef struct {
+  uint64_t proj;
+  const EmbeddedEntry *e;
+  uint64_t *keys;
+  size_t kn, kcap;
+} EmbKeyCtx;
+
+static bool embCacheCollectVisit(const CsEntry *ent, CsOp op, void *ctxp) {
+  (void)op;
+  EmbKeyCtx *ctx = ctxp;
+  if (ent->proj != ctx->proj || !ent->payload) return true;
+  const char *archive = NULL, *path = NULL;
+  char kind = embPayloadParse(ent->payload, &archive, &path);
+  (void)archive;
+  (void)path;
+  if (!kind || !embPayloadArchiveIs(ent->payload, ctx->e->archivePath)) return true;
+  if (ctx->kn == ctx->kcap) {
+    size_t nc = ctx->kcap ? ctx->kcap * 2 : 64;
+    uint64_t *nv = realloc(ctx->keys, nc * sizeof(uint64_t));
+    if (!nv) return false;
+    ctx->keys = nv;
+    ctx->kcap = nc;
+  }
+  ctx->keys[ctx->kn++] = ent->file;
+  return true;
+}
+
+/* Entri grup sudah ada untuk arsip ini? (dipakai recordIfMissing) */
+static bool embEmbedCacheHasGroup(const EmbeddedEntry *e) {
+  CsStore *st = csOpen(EMBED_CACHE_FILE);
+  if (!st) return false;
+  CsEntry g;
+  bool has = csGet(st, cmdsCacheProjAddr(), embCacheGrpAddr(e), &g) && g.payload &&
+             g.payload[0] == 'G';
+  csClose(st);
+  return has;
+}
+
+static void embEmbedCacheRecord(const EmbeddedEntry *e); /* di bawah */
+
+/* Self-healing: arsip segar lewat jalur lama tetapi entri grup hilang (mis.
+   cache baru dihapus) -> rekam sekarang, supaya run berikutnya bisa
+   melompati walk. Tanpa ini cache tidak pernah terbentuk kembali sampai
+   rebuild berikutnya. */
+static void embEmbedCacheRecordIfMissing(const EmbeddedEntry *e) {
+  if (e->usePrebuilt || !e->archivePath[0]) return;
+  if (!embEmbedCacheHasGroup(e)) embEmbedCacheRecord(e);
+}
+
+/* Rekam entri grup + input setelah arsip dibangun ulang. Himpunan input =
+   persis yang divalidasi embArchiveFresh (walk file + stamp folder). */
+static void embEmbedCacheRecord(const EmbeddedEntry *e) {
+  if (e->usePrebuilt || !e->archivePath[0]) return;
+  mkdirs(WS_CACHES_DIR);
+  CsStore *st = csOpen(EMBED_CACHE_FILE);
+  if (!st) {
+    remove(EMBED_CACHE_FILE); /* rusak: tulis ulang bersih */
+    st = csOpen(EMBED_CACHE_FILE);
+  }
+  if (!st) return;
+  uint64_t proj = cmdsCacheProjAddr();
+
+  EmbKeyCtx col = {proj, e, NULL, 0, 0};
+  bool collected = csForEach(st, embCacheCollectVisit, &col);
+  if (collected)
+    for (size_t i = 0; i < col.kn; i++) csDelete(st, proj, col.keys[i]);
+  free(col.keys);
+  if (!collected) {
+    csClose(st);
+    return;
+  }
+
+  int64_t at = 0;
+  long long asz = 0;
+  if (!fsStampNsSize(e->archivePath, &at, &asz)) {
+    csClose(st);
+    return; /* arsip hilang sesudah rebuild? jangan catat apa pun */
+  }
+  char gpay[MAX_PATH * 2 + 4];
+  snprintf(gpay, sizeof(gpay), "G %s", e->archivePath);
+  CsEntry g = {proj, embCacheGrpAddr(e), embArchiveConfigHash(e), (long long)at, asz, gpay};
+  csPut(st, &g);
+
+  List files = {0};
+  if (e->pattern[0])
+    stateWalkDirCached(e->src, e->pattern, &files);
+  else
+    stateWalkDirCached(e->src, "", &files);
+  char rel[MAX_PATH * 2];
+  for (int i = 0; i < files.count; i++) {
+    const char *path = files.items[i];
+    embRelPath(e, path, rel, sizeof(rel));
+    if (!*rel || embExcluded(e, rel)) continue;
+    int64_t mt = 0;
+    long long sz = 0;
+    if (!fsStampNsSize(path, &mt, &sz)) continue;
+    size_t pl = strlen(e->archivePath) + strlen(path) + 8;
+    char *pay = malloc(pl);
+    if (!pay) continue;
+    snprintf(pay, pl, "F %s %s", e->archivePath, path);
+    CsEntry en = {proj, embCacheEntryAddr(e, 'F', path), embFileHash(path), (long long)mt, sz, pay};
+    csPut(st, &en);
+    free(pay);
+  }
+  listFree(&files);
+
+  /* Folder sumber: penambahan/penghapusan file mengubah mtime folder —
+     tanpa stamp folder, lompatan cache melewatkan file BARU (walk tidak
+     dijalankan). ws: dari cache walk; single: fsListDir rekursif. */
+  {
+    char adir[MAX_PATH * 2];
+    snprintf(adir, sizeof(adir), "%s", e->archivePath);
+    char *slash = strrchr(adir, '/');
+    if (slash)
+      *slash = '\0';
+    else
+      snprintf(adir, sizeof(adir), ".");
+    const char *ad = adir;
+    if (ad[0] == '.' && ad[1] == '/') ad += 2;
+
+    List dirs = {0};
+    if (wsModeActive())
+      stateWalkDirStamps(e->src, e->pattern[0] ? e->pattern : "", &dirs);
+    else
+      embCollectDirStamps(e->src, &dirs);
+    for (int i = 0; i < dirs.count; i++) {
+      long long mt = -1;
+      char p[WS_PATH_LEN];
+      if (sscanf(dirs.items[i], "D %lld %" WS_SCAN "s", &mt, p) != 2 || mt < 0) continue;
+      const char *relp = p;
+      if (relp[0] == '.' && relp[1] == '/') relp += 2;
+      if (strcmp(relp, ".") != 0 && *relp && embExcluded(e, relp)) continue;
+      if (strcmp(relp, ad) == 0 || (strcmp(relp, ".") == 0 && strcmp(ad, ".") == 0)) continue;
+      size_t pl = strlen(e->archivePath) + strlen(p) + 8;
+      char *pay = malloc(pl);
+      if (!pay) continue;
+      snprintf(pay, pl, "D %s %s", e->archivePath, p);
+      CsEntry en = {proj, embCacheEntryAddr(e, 'D', p), 0, mt, 0, pay};
+      csPut(st, &en);
+      free(pay);
+    }
+    listFree(&dirs);
+  }
+  csCommit(st);
+  csClose(st);
+}
+
 /* Entri exclude arsip (archive.exclude / embedded.<n>.exclude): nama file,
    path relatif, atau direktori. Pencocokan konsisten dengan excludedSource
    (compile.c), plus prefix direktori untuk entri tanpa ekstensi:
@@ -166,6 +485,9 @@ static bool embArchiveFresh(const EmbeddedEntry *e) {
   /* Arsip jadi (embedded.<n>.file): cukup bandingkan mtime file — tidak
      ada direktori sumber untuk discan. */
   if (e->usePrebuilt) return fsFileExists(e->archivePath);
+  /* Lompatan cepat caches/embed.cache: semua entri grup masih cocok ->
+     segar tanpa walk; kalau meleset, jalur normal di bawah memutuskan. */
+  if (embEmbedCacheFresh(e)) return true;
   int64_t at = fsMTimeNs(e->archivePath);
   if (at < 0 || !embArchiveStateMatches(e)) return false;
 
@@ -175,9 +497,9 @@ static bool embArchiveFresh(const EmbeddedEntry *e) {
      sama seperti saat arsip dibangun. */
   List files = {0};
   if (e->pattern[0])
-    wsWalkDirCached(e->src, e->pattern, &files);
+    stateWalkDirCached(e->src, e->pattern, &files);
   else
-    wsWalkDirCached(e->src, "", &files);
+    stateWalkDirCached(e->src, "", &files);
   int64_t newest = 0;
   char rel[MAX_PATH * 2];
   /* Mode workspace: mtime lewat memo stat (kunci memo butuh cwd proyek ini). */
@@ -205,7 +527,7 @@ static bool embArchiveFresh(const EmbeddedEntry *e) {
     if (ad[0] == '.' && ad[1] == '/') ad += 2;
 
     List st = {0};
-    wsWalkDirStamps(e->src, e->pattern[0] ? e->pattern : "", &st);
+    stateWalkDirStamps(e->src, e->pattern[0] ? e->pattern : "", &st);
     for (int i = 0; i < st.count; i++) {
       long long mt = -1;
       char p[WS_PATH_LEN];
@@ -453,7 +775,10 @@ static bool buildEmbeddedArchiveEntryEx(const EmbeddedEntry *e, bool *rebuilt) {
     fprintf(stderr, "satria: %s: src '%s' not found\n", e->name, e->src);
     return false;
   }
-  if (embArchiveFresh(e)) return true;
+  if (embArchiveFresh(e)) {
+    embEmbedCacheRecordIfMissing(e); /* self-healing bila entri hilang */
+    return true;
+  }
 
   /* File sementara (tmp arsip dan list) dibuat di .satria/, bukan di folder sumber.
      Rename tmp keluar dari folder sumber mengubah mtime folder itu tepat setelah
@@ -472,9 +797,9 @@ static bool buildEmbeddedArchiveEntryEx(const EmbeddedEntry *e, bool *rebuilt) {
        otherwise observes the tree changing while it is being read. */
     List files = {0};
     if (e->pattern[0])
-      wsWalkDirCached(e->src, e->pattern, &files);
+      stateWalkDirCached(e->src, e->pattern, &files);
     else
-      wsWalkDirCached(e->src, "", &files);
+      stateWalkDirCached(e->src, "", &files);
     /* Listfile tar menentukan urutan entri arsip: sortir sekali pada data
        lengkap agar arsip reprodusible antar mesin (urutan readdir tidak
        lagi melekat pada hasil). */
@@ -520,13 +845,13 @@ static bool buildEmbeddedArchiveEntryEx(const EmbeddedEntry *e, bool *rebuilt) {
     return false;
   }
   mkparent(e->archivePath);
-  fsRemoveFile(e->archivePath);
-  if (rename(tmpArchive, e->archivePath) != 0) {
+  if (!fsRenameReplace(tmpArchive, e->archivePath)) {
     fsRemoveFile(tmpArchive);
     fprintf(stderr, "satria: %s: cannot move archive into place (%s)\n", e->name, e->archivePath);
     return false;
   }
   embArchiveStateSave(e);
+  embEmbedCacheRecord(e); /* entri grup + input di caches/embed.cache */
   if (rebuilt) *rebuilt = true;
   return true;
 }
@@ -617,3 +942,4 @@ void configFinalizeEntry(EmbeddedEntry *e, const char *buildDir) {
   /* object ada di bawah build dir, mis. build/rupa_modules.o */
   snprintf(e->objectPath, sizeof(e->objectPath), "%s/%s.o", buildDir, e->archiveName);
 }
+/* stamp-meta: pemicu rebuild verifikasi */

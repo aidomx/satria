@@ -13,4 +13,4 @@ Documentation package for satria. This archive contains documentation only; it d
 
 ## Version scope
 
-The implementation reference in this package is based on **satria v0.2.0**. Later design discussions are explicitly marked as proposed direction and should not be read as features guaranteed by v0.2.0.
+The implementation reference in this package is based on **satria v0.2.4**. Later design discussions are explicitly marked as proposed direction and should not be read as features guaranteed by the release.

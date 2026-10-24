@@ -9,7 +9,7 @@
  * config_cache — Persistent Buildfile cache.
  *
  * Dipindah apa adanya dari config.c: hasil parse Buildfile diserialisasi
- * ke .satria/buildfile.cache (per-nama file konfigurasi) dan divalidasi
+ * ke .satria/startup.state (per-nama file konfigurasi) dan divalidasi
  * lewat mtime+size. Format biner dibaca/ditulis lewat helper cache*()
  * internal di file .c-nya.
  *

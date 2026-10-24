@@ -10,14 +10,20 @@
  *     compile_commands.json, deps.cache).
  */
 #include "cmds_internal.h"
+#include "../log/report_blob.h"
+#include "../cache/artifact.h"
+#include "../cache/state_blob.h"
+#include "../cache/router.h"
 
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include "../cache/cache_store.h"
 #include "../commands.h"
 #include "../compdb.h"
+#include "../deps.h"
 #include "../compile.h"
 #include "../embed_ld_cache.h"
 #include "../portability.h"
@@ -44,7 +50,7 @@ void cmdsStatePath(char *out, size_t n, const char *leaf) {
   if (g_stateWsProj[0])
     snprintf(out, n, ".satria/workspace/%s.%s", g_stateWsProj, leaf);
   else
-    snprintf(out, n, ".satria/%s", leaf);
+    snprintf(out, n, ".satria/caches/%s", leaf);
 }
 
 void cmdsStateMkdirFor(const char *path) {
@@ -120,14 +126,31 @@ void cmdsFingerprintMake(const Config *c, const List *srcs, CmdsBuildFingerprint
   }
 }
 
+/* Build fingerprint is a metadata record in the shared fingerprint cache.
+   Project address differs by execution path, storage format does not. */
+#define BUILD_FP_CACHE ".satria/caches/fingerprint.cache"
+#define BUILD_FP_KEY "<build-fingerprint-v1>"
+
 bool cmdsFingerprintLoad(CmdsBuildFingerprint *fp) {
-  char path[256];
-  cmdsStatePath(path, sizeof(path), "build.fingerprint");
-  FILE *f = fopen(path, "r");
-  if (!f) return false;
+  const char *wsp = cmdsStateWsProject();
+  if (wsp) {
+    char *b = NULL;
+    size_t bn = 0;
+    if (!stateBlobGet(wsp, "build.fingerprint", &b, &bn)) return false;
+    unsigned long long c = 0, l = 0, src = 0;
+    bool ok = sscanf(b, "%llx %llx %llx", &c, &l, &src) == 3;
+    free(b);
+    if (!ok) return false;
+    fp->compile = c; fp->link = l; fp->sources = src;
+    return true;
+  }
+  CsStore *st = csOpen(BUILD_FP_CACHE);
+  if (!st) return false;
+  CsEntry e;
+  bool found = csGet(st, cmdsCacheProjAddr(), csHash(BUILD_FP_KEY), &e);
   unsigned long long c = 0, l = 0, s = 0;
-  bool ok = fscanf(f, "%llx %llx %llx", &c, &l, &s) == 3;
-  fclose(f);
+  bool ok = found && e.payload && sscanf(e.payload, "%llx %llx %llx", &c, &l, &s) == 3;
+  csClose(st);
   if (!ok) return false;
   fp->compile = (uint64_t)c;
   fp->link = (uint64_t)l;
@@ -138,42 +161,41 @@ bool cmdsFingerprintLoad(CmdsBuildFingerprint *fp) {
 void cmdsFingerprintSave(const CmdsBuildFingerprint *fp, bool libOnly) {
   CmdsBuildFingerprint out = *fp;
   if (libOnly) {
-    /* Fase library (pass 1 workspace) TIDAK meng-commit hash sources/link:
-       pass binary dalam run yang sama membaca file ini dan harus tetap
-       mendeteksi source set / link config berubah (mis. source dihapus ->
-       binary wajib di-link ulang; dulu pass men Cetak "up-to-date" dan
-       binary tetap basi). Hash compile tetap current agar pass binary tidak
-       mengulang kompilasi yang baru selesai pass library. Bila belum ada
-       catatan (proyek segar), hash current dipakai sebagai baseline. */
     CmdsBuildFingerprint prev;
     if (cmdsFingerprintLoad(&prev)) {
       out.sources = prev.sources;
       out.link = prev.link;
     }
   }
-  char path[256], tmp[272];
-  cmdsStatePath(path, sizeof(path), "build.fingerprint");
-  cmdsStateMkdirFor(path);
-  snprintf(tmp, sizeof(tmp), "%s.tmp", path);
-  FILE *f = fopen(tmp, "w");
-  if (!f) return;
-  fprintf(f, "%016llx %016llx %016llx\n", (unsigned long long)out.compile,
-          (unsigned long long)out.link, (unsigned long long)out.sources);
-  bool ok = fclose(f) == 0;
-  if (ok) {
-#ifdef _WIN32
-    fsRemoveFile(path);
-#endif
-    if (rename(tmp, path) != 0) fsRemoveFile(tmp);
-  } else {
-    fsRemoveFile(tmp);
+  const char *wsp = cmdsStateWsProject();
+  if (wsp) {
+    char txt[80];
+    snprintf(txt, sizeof(txt), "%016llx %016llx %016llx\n",
+             (unsigned long long)out.compile, (unsigned long long)out.link,
+             (unsigned long long)out.sources);
+    stateBlobPut(wsp, "build.fingerprint", txt, strlen(txt));
+    return;
   }
+  mkdirs(".satria/caches");
+  CsStore *st = csOpen(BUILD_FP_CACHE);
+  if (!st) return;
+  char value[80];
+  snprintf(value, sizeof(value), "%016llx %016llx %016llx",
+           (unsigned long long)out.compile, (unsigned long long)out.link,
+           (unsigned long long)out.sources);
+  CsEntry e = {cmdsCacheProjAddr(), csHash(BUILD_FP_KEY), 0, 0, 0, value};
+  if (csPut(st, &e)) csCommit(st);
+  csClose(st);
 }
 
 void cmdsFingerprintInvalidate(void) {
-  char path[256];
-  cmdsStatePath(path, sizeof(path), "build.fingerprint");
-  fsRemoveFile(path);
+  const char *wsp = cmdsStateWsProject();
+  if (wsp) { stateBlobDelete(wsp, "build.fingerprint"); return; }
+  CsStore *st = csOpen(BUILD_FP_CACHE);
+  if (!st) return;
+  csDelete(st, cmdsCacheProjAddr(), csHash(BUILD_FP_KEY));
+  csCommit(st);
+  csClose(st);
 }
 
 /* ==================== Fast no-op snapshot ==================== */
@@ -184,15 +206,18 @@ void cmdsFingerprintInvalidate(void) {
      library; state-nya murni "semua input & object masih sama").
    Dengan state fase library, no-op `satria -w` tidak membayar loadConfig +
    scan fingerprint + decide penuh per proyek (miniws: jalur ringan). */
-#define BUILD_STATE_FILE ".satria/build.state"
-#define BUILD_STATE_FILE_LIB ".satria/build.lib.state"
-#define BUILD_STATE_MAGIC "SATRIAFAST4"
+/* FAST5: baris stamp kini membawa hash isi
+   (<kind> <mtime> <size> <content> <path>) agar "sentuh tanpa perubahan isi"
+   bisa divalidasi (hash sama) lalu di-PATCH, tanpa rebuild (design §4).
+   State FAST4 lama ditolak -> cold sekali, lalu ditulis ulang (self-heal). */
+#define BUILD_STATE_MAGIC "SATRIAFAST5"
 
 typedef struct {
   char kind;
   char path[MAX_PATH];
   int64_t mtime;
   long long size;
+  uint64_t content; /* hash isi (F); 0 = tak terhitung / bukan file */
 } FastStamp;
 
 typedef struct {
@@ -241,9 +266,36 @@ static void fastCollectTree(const char *dir, List *paths) {
   listFree(&files);
 }
 
-static const char *stateFileFor(bool libOnly) {
-  return libOnly ? BUILD_STATE_FILE_LIB : BUILD_STATE_FILE;
+/* Header yang benar-benar dikonsumsi source harus ikut fast-state walaupun
+   berada di luar sources/includeDirs/headerInternal. Pakai graph dependensi
+   yang sama dengan keputusan incremental (depfile .d bila tersedia, scanner
+   sebagai fallback), bukan menelusuri semua direktori header secara global. */
+static void fastCollectDepPath(const char *path, void *ctx) {
+  List *paths = (List *)ctx;
+  if (path && *path) fastStampAdd(paths, path);
 }
+
+/* FNV-1a 64 atas isi file (streaming 4KB) — padanan wsStartupHash.
+   Dipakai bukti sentuh: stamp beda tapi hash sama -> entri tetap valid dan
+   stamp di-PATCH, tanpa rebuild (design/startup.md §4). 0 = tak terbaca. */
+static uint64_t fastStateHash(const char *path) {
+  FILE *fp = fopen(path, "rb");
+  if (!fp) return 0;
+  uint64_t h = 14695981039346656037ULL;
+  unsigned char buf[4096];
+  size_t n;
+  while ((n = fread(buf, 1, sizeof(buf), fp)) > 0)
+    for (size_t i = 0; i < n; i++) {
+      h ^= buf[i];
+      h *= 1099511628211ULL;
+    }
+  fclose(fp);
+  return h;
+}
+
+/* Pemapilan fastStateHash untuk validator workspace/lib (cmds_wsstate.c):
+   bukti sentuh di jalur incremental lama memakai hash yang sama. */
+uint64_t cmdsStateFileHash(const char *path) { return fastStateHash(path); }
 
 /*
  * Pemindai state berbasis buffer (dipakai baik oleh jalur mmap maupun
@@ -298,8 +350,9 @@ static bool fastStateScan(const char *buf, size_t size, FastState *s) {
   }
   for (int i = 0; ok && i < s->count; i++) {
     long long mt = 0, sz = 0;
-    if (sscanf(cur, " %c %lld %lld %4095s%n", &s->stamps[i].kind, &mt, &sz,
-               s->stamps[i].path, &consumed) != 4) {
+    unsigned long long content = 0;
+    if (sscanf(cur, " %c %lld %lld %16llx %4095s%n", &s->stamps[i].kind, &mt, &sz,
+               &content, s->stamps[i].path, &consumed) != 5) {
       fastStateFree(s);
       ok = false;
       break;
@@ -307,42 +360,101 @@ static bool fastStateScan(const char *buf, size_t size, FastState *s) {
     cur += consumed;
     s->stamps[i].mtime = (int64_t)mt;
     s->stamps[i].size = sz;
+    s->stamps[i].content = (uint64_t)content;
   }
   free(tmp);
   return ok;
 }
 
+static bool fastStateLoadLib(FastState *s); /* definisi di bagian lib.cache */
+
+/* ---- Snapshot fast state single-project di fingerprint.cache ----
+   Sama seperti build fingerprint: satu record per cwd (alamat proyek = hash
+   cwd) di BUILD_FP_CACHE. Payload record tidak boleh memuat '\n', jadi isi
+   snapshot di-escape: '\\' -> "\\\\", '\n' -> "\\n", '\r' -> "\\r". */
+static char *fastSnapEscape(const char *s, size_t n, size_t *out) {
+  char *o = malloc(n * 2 + 1);
+  if (!o) return NULL;
+  size_t j = 0;
+  for (size_t i = 0; i < n; i++) {
+    char c = s[i];
+    if (c == '\\') { o[j++] = '\\'; o[j++] = '\\'; }
+    else if (c == '\n') { o[j++] = '\\'; o[j++] = 'n'; }
+    else if (c == '\r') { o[j++] = '\\'; o[j++] = 'r'; }
+    else o[j++] = c;
+  }
+  o[j] = '\0';
+  *out = j;
+  return o;
+}
+
+static char *fastSnapUnescape(const char *s, size_t n, size_t *out) {
+  char *o = malloc(n + 1);
+  if (!o) return NULL;
+  size_t j = 0;
+  for (size_t i = 0; i < n; i++) {
+    if (s[i] == '\\' && i + 1 < n) {
+      char d = s[++i];
+      o[j++] = d == 'n' ? '\n' : d == 'r' ? '\r' : d;
+    } else {
+      o[j++] = s[i];
+    }
+  }
+  o[j] = '\0';
+  *out = j;
+  return o;
+}
+
+static uint64_t fastSnapFile(void) { return csHash("build.state"); }
+
+static bool fastSnapGet(char **buf, size_t *len) {
+  CsStore *st = csOpen(BUILD_FP_CACHE);
+  if (!st) return false;
+  CsEntry e;
+  bool ok = false;
+  if (csGet(st, cmdsCacheProjAddr(), fastSnapFile(), &e) && e.payload && *e.payload) {
+    char *u = fastSnapUnescape(e.payload, strlen(e.payload), len);
+    if (u) {
+      *buf = u;
+      ok = true;
+    }
+  }
+  csClose(st);
+  return ok;
+}
+
+static bool fastSnapPut(const char *buf, size_t len) {
+  size_t el = 0;
+  char *esc = fastSnapEscape(buf, len, &el);
+  if (!esc) return false;
+  CsStore *st = csOpen(BUILD_FP_CACHE);
+  bool ok = false;
+  if (st) {
+    CsEntry e = {cmdsCacheProjAddr(), fastSnapFile(), 0, 0, (long long)len, esc};
+    ok = csPut(st, &e) && csCommit(st);
+    csClose(st);
+  }
+  free(esc);
+  return ok;
+}
+
+static void fastSnapDelete(void) {
+  CsStore *st = csOpen(BUILD_FP_CACHE);
+  if (!st) return;
+  csDelete(st, cmdsCacheProjAddr(), fastSnapFile());
+  csCommit(st);
+  csClose(st);
+}
+
 static bool fastStateLoad(FastState *s, bool libOnly) {
-  /* design/bootstrap.md fase 2: map state sebagai READ-ONLY lewat mmap
-     (POSIX) / CreateFileMapping (Windows) — evaluasi noop tidak menyalin
-     file lewat stdio. Fallback tradisional (aturan 4) tetap ada bila map
-     gagal (file kosong/OS terbatas): body identik dengan fastStateScan. */
-  void *map = NULL;
-  size_t mapSize = 0;
-  bool mapped = stateFileFor(libOnly) != NULL && fsMapRead(stateFileFor(libOnly), &map, &mapSize);
-  if (mapped) {
-    bool ok = fastStateScan(map, mapSize, s);
-    fsMapClose(map, mapSize);
-    return ok;
-  }
-  /* Fallback: baca file tradisional ke memori, lalu pakai scanner sama. */
-  FILE *f = fopen(stateFileFor(libOnly), "rb");
-  if (!f) return false;
-  fseek(f, 0, SEEK_END);
-  long n = ftell(f);
-  fseek(f, 0, SEEK_SET);
-  if (n < 0 || n > 64 * 1024 * 1024) {
-    fclose(f);
-    return false;
-  }
-  char *buf = malloc((size_t)n + 1);
-  if (!buf) {
-    fclose(f);
-    return false;
-  }
-  size_t rd = fread(buf, 1, (size_t)n, f);
-  fclose(f);
-  bool ok = fastStateScan(buf, rd, s);
+  /* Fase library kini dari caches/lib.cache (design/startup.md §3). */
+  if (libOnly) return fastStateLoadLib(s);
+  char cwd[MAX_PATH];
+  if (!fsGetCwd(cwd, sizeof(cwd))) return false;
+  char *buf = NULL;
+  size_t len = 0;
+  if (!fastSnapGet(&buf, &len)) return false;
+  bool ok = fastStateScan(buf, len, s);
   free(buf);
   return ok;
 }
@@ -487,21 +599,39 @@ bool cmdsStatCached(const char *path, int64_t *mtimeNs, long long *size) {
   return memoStampNsSize(path, mtimeNs, size);
 }
 
-/* Parser baris format state F/D/X (format bersama ws.state, ws.lib.state dan
-   workspace.state — lihat header cmds_wsstate.c). Dipakai validator di
-   cmds_wsstate.c dan gate workspace di uses/workspace.c agar format hidup
-   di SATU tempat. */
-bool cmdsParseStateEntry(const char *line, char *kind, long long *mt, long long *sz, char *path) {
+/* Parser baris format state F/D/X (format bersama ws.state dan workspace.state
+   lama — lihat header cmds_wsstate.c). Dipakai validator di cmds_wsstate.c
+   agar format hidup di SATU tempat. Baris F opsional membawa content16hex
+   (bukti sentuh; lihat cmdsParseStateEntry). */
+bool cmdsParseStateEntry(const char *line, char *kind, long long *mt, long long *sz,
+                         unsigned long long *content, char *path) {
   char k = line[0];
   path[0] = '\0';
   *mt = 0;
   *sz = 0;
+  *content = 0;
   if (k == 'X') {
     if (sscanf(line, "X %*d %*d %" WS_SCAN "s", path) != 1) return false;
   } else if (k == 'D') {
     if (sscanf(line, "D %lld %*d %" WS_SCAN "s", mt, path) != 2) return false;
-  } else if (k == 'F') {
-    if (sscanf(line, "F %lld %lld %" WS_SCAN "s", mt, sz, path) != 3) return false;
+  } else if (k == 'F' || k == 'O' || k == 'I') {
+    /* Bentuk lama: F <mt> <sz> <path>. Bentuk baru (bukti sentuh, design §4):
+       F <mt> <sz> <content16hex> <path> — path tidak pernah mengandung spasi
+       (guard yang sama dengan seluruh format teks state), jadi jumlah token
+       membedakan keduanya secara unik. */
+    long long m2 = 0, s2 = 0;
+    char a[WS_PATH_LEN], b[WS_PATH_LEN];
+    int n = sscanf(line, "%*c %lld %lld %" WS_SCAN "s %" WS_SCAN "s", &m2, &s2, a, b);
+    if (n == 4) {
+      if (sscanf(a, "%16llx", content) != 1) return false;
+      snprintf(path, WS_PATH_LEN, "%s", b);
+    } else if (n == 3) {
+      snprintf(path, WS_PATH_LEN, "%s", a);
+    } else {
+      return false;
+    }
+    *mt = m2;
+    *sz = s2;
   } else {
     return false;
   }
@@ -516,15 +646,27 @@ bool cmdsParseStateEntry(const char *line, char *kind, long long *mt, long long 
 bool cmdsStateEntryFresh(const char *line) {
   char kind = 0;
   long long mt = 0, sz = 0;
+  unsigned long long content = 0;
   char p[WS_PATH_LEN];
   int64_t cm = -1;
   long long cs = -1;
-  if (!cmdsParseStateEntry(line, &kind, &mt, &sz, p)) return false;
-  bool exists = cmdsStatCached(p, &cm, &cs);
+  if (!cmdsParseStateEntry(line, &kind, &mt, &sz, &content, p)) return false;
+  bool exists = kind == 'I' ? fsStampNsSize(p, &cm, &cs) : cmdsStatCached(p, &cm, &cs);
   if (kind == 'X') return !exists;
   if (!exists) return false;
   if (kind == 'D') return cm == (int64_t)mt;
-  return cm == (int64_t)mt && cs == sz;
+  if (cm == (int64_t)mt && cs == sz) return true;
+  /* Output O tetap stamp-based; tidak hash semua object/output pada setiap
+     penyimpanan state. Input library lintas-proyek I menyimpan hash konten:
+     perubahan stamp/ukuran yang tidak mengubah byte bukan perubahan input
+     linker dan tidak boleh memaksa relink. Format lama tanpa hash konservatif. */
+  if (kind == 'O') return false;
+  if (kind == 'I' && !content) return false;
+  if (content && cs == sz) {
+    uint64_t h = fastStateHash(p);
+    if (h && h == (uint64_t)content) return true;
+  }
+  return false;
 }
 
 void cmdsStatMemoReset(void) {
@@ -535,8 +677,321 @@ void cmdsStatMemoReset(void) {
   statMemoCount = 0;
 }
 
+/* ==================== caches/lib.cache (design/startup.md §3/§4) ====================
+   Fast-state FASE LIBRARY (dulu .satria/build.lib.state untuk single dan
+   .satria/workspace/<proyek>.ws.lib.state untuk workspace) kini berbagi
+   SATU file terpusat `.satria/caches/lib.cache` (cache_store), dibedakan
+   lewat alamat proyek: satu entri meta (payload token k=v) + satu entri per
+   input (payload "<kind> <path>"; kind F file / D direktori / M hilang /
+   L verdict ld). Fase binary (build.state / ws.state) TETAP memakai format
+   lamanya — migrasinya lewat fingerprint.cache (default on; off via
+   SATRIA_CACHE_NOOP=0).
+   File lama fase library tidak lagi dibaca/ditulis; clean tetap membuangnya. */
+
+/* Kunci entri meta (mustahil tabrakan dengan csHash(path) file nyata). */
+static uint64_t libMetaAddr(void) { return csHash("<libmeta>"); }
+
+uint64_t cmdsCacheProjAddr(void) {
+  const char *name = cmdsStateWsProject();
+  if (name && *name) return csHash(name);
+  char cwd[MAX_PATH];
+  if (!fsGetCwd(cwd, sizeof(cwd))) return 0;
+  return csHash(cwd);
+}
+
+typedef struct {
+  uint64_t *v;
+  size_t n, cap;
+  uint64_t proj;
+} LibKeyCtx;
+
+static bool libKeysCollect(const CsEntry *e, CsOp op, void *ctxp) {
+  (void)op;
+  LibKeyCtx *ctx = ctxp;
+  if (e->proj != ctx->proj) return true;
+  if (ctx->n == ctx->cap) {
+    size_t nc = ctx->cap ? ctx->cap * 2 : 256;
+    uint64_t *nv = realloc(ctx->v, nc * sizeof(uint64_t));
+    if (!nv) return false;
+    ctx->v = nv;
+    ctx->cap = nc;
+  }
+  ctx->v[ctx->n++] = e->file;
+  return true;
+}
+
+/* Payload meta: token "k=v" dipisah spasi (path tanpa spasi — guard yang
+   sama dengan format teks lama). lib=<path> diulang untuk daftar library. */
+static char *libMetaPayload(const LibCacheMeta *m) {
+  size_t cap = (strlen(m->cwd) + strlen(m->buildfile) + strlen(m->target) +
+                strlen(m->libStaticPath) + strlen(m->libSharedPath)) *
+                   2 +
+               4096;
+  for (int i = 0; i < m->nlibs; i++) cap += strlen(m->libs[i]) + 8;
+  char *buf = malloc(cap);
+  if (!buf) return NULL;
+  snprintf(buf, cap,
+           "v1 cwd=%s bf=%s bfm=%lld bfs=%lld tgt=%s tm=%lld ts=%lld "
+           "skipped=%d compiled=%d libReq=%d libStUp=%d libShUp=%d "
+           "libSt=%s libSh=%s stSz=%lld shSz=%lld",
+           m->cwd, m->buildfile, m->bfm, m->bfs, m->target[0] ? m->target : "-", m->tm,
+           m->ts, m->skipped, m->compiled, m->libRequested ? 1 : 0, m->libStaticUp ? 1 : 0,
+           m->libSharedUp ? 1 : 0, m->libStaticPath[0] ? m->libStaticPath : "-",
+           m->libSharedPath[0] ? m->libSharedPath : "-", m->libStaticSize, m->libSharedSize);
+  size_t used = strlen(buf);
+  for (int i = 0; i < m->nlibs; i++) {
+    int w = snprintf(buf + used, cap - used, " lib=%s", m->libs[i]);
+    if (w < 0 || (size_t)w >= cap - used) break;
+    used += (size_t)w;
+  }
+  return buf;
+}
+
+bool libCacheSave(const LibCacheMeta *m, const LibStampRec *stamps, int n) {
+  mkdirs(WS_CACHES_DIR);
+  CsStore *st = csOpen(LIB_CACHE_FILE);
+  if (!st) {
+    remove(LIB_CACHE_FILE); /* rusak: tulis ulang bersih (self-healing) */
+    st = csOpen(LIB_CACHE_FILE);
+  }
+  if (!st) return false;
+  uint64_t proj = cmdsCacheProjAddr();
+
+  LibKeyCtx keys = {NULL, 0, 0, proj};
+  bool collected = csForEach(st, libKeysCollect, &keys);
+  if (collected)
+    for (size_t i = 0; i < keys.n; i++) csDelete(st, proj, keys.v[i]);
+  free(keys.v);
+  if (!collected) {
+    csClose(st);
+    return false;
+  }
+
+  char *meta = libMetaPayload(m);
+  if (meta) {
+    CsEntry e = {proj, libMetaAddr(), 0, 0, 0, meta};
+    csPut(st, &e);
+    free(meta);
+  }
+  for (int i = 0; i < n; i++) {
+    /* F membawa content16hex (bukti sentuh, design §4); D/M/L tetap "<kind> <path>". */
+    char payload[WS_PATH_LEN + 32];
+    if (stamps[i].kind == 'F')
+      snprintf(payload, sizeof(payload), "%c %016llx %s", stamps[i].kind,
+               (unsigned long long)stamps[i].content, stamps[i].path);
+    else
+      snprintf(payload, sizeof(payload), "%c %s", stamps[i].kind, stamps[i].path);
+    CsEntry e = {proj, csHash(stamps[i].path), 0, stamps[i].mtime, stamps[i].size, payload};
+    csPut(st, &e);
+  }
+  bool ok = csCommit(st);
+  csClose(st);
+  return ok;
+}
+
+typedef struct {
+  LibStampRec *v;
+  size_t n, cap;
+  uint64_t proj;
+  uint64_t metaAddr;
+} LibStampCtx;
+
+static bool libStampVisit(const CsEntry *e, CsOp op, void *ctxp) {
+  (void)op;
+  LibStampCtx *ctx = ctxp;
+  if (e->proj != ctx->proj || e->file == ctx->metaAddr || !e->payload) return true;
+  if (!e->payload[0] || e->payload[1] != ' ') return true;
+  char kind = e->payload[0];
+  if (kind != 'F' && kind != 'D' && kind != 'M' && kind != 'L') return true;
+  if (ctx->n == ctx->cap) {
+    size_t nc = ctx->cap ? ctx->cap * 2 : 128;
+    LibStampRec *nv = realloc(ctx->v, nc * sizeof(LibStampRec));
+    if (!nv) return false;
+    ctx->v = nv;
+    ctx->cap = nc;
+  }
+  LibStampRec *r = &ctx->v[ctx->n++];
+  r->kind = kind;
+  r->content = 0;
+  if (kind == 'F') {
+    /* F baru: "<kind> <content16hex> <path>"; lama: "<kind> <path>". */
+    char a[WS_PATH_LEN], b[WS_PATH_LEN];
+    int ntok = sscanf(e->payload + 2, "%" WS_SCAN "s %" WS_SCAN "s", a, b);
+    if (ntok == 2 && sscanf(a, "%16llx", &r->content) == 1)
+      snprintf(r->path, sizeof(r->path), "%s", b);
+    else
+      snprintf(r->path, sizeof(r->path), "%s", a);
+  } else {
+    snprintf(r->path, sizeof(r->path), "%s", e->payload + 2);
+  }
+  r->mtime = e->time;
+  r->size = e->size;
+  return true;
+}
+
+bool libCacheLoad(LibCacheMeta *m, LibStampRec **stampsOut, int *nOut) {
+  memset(m, 0, sizeof(*m));
+  *stampsOut = NULL;
+  *nOut = 0;
+  CsStore *st = csOpen(LIB_CACHE_FILE);
+  if (!st) return false;
+  uint64_t proj = cmdsCacheProjAddr();
+  CsEntry meta;
+  if (!csGet(st, proj, libMetaAddr(), &meta) || !meta.payload) {
+    csClose(st);
+    return false;
+  }
+
+  char *copy = strdup(meta.payload);
+  if (!copy) {
+    csClose(st);
+    return false;
+  }
+  int libsCap = 0;
+  for (char *save = NULL, *tok = strtok_r(copy, " ", &save); tok; tok = strtok_r(NULL, " ", &save)) {
+    char *eq = strchr(tok, '=');
+    if (!eq) continue;
+    *eq = '\0';
+    const char *k = tok, *v = eq + 1;
+    if (strcmp(k, "cwd") == 0) snprintf(m->cwd, sizeof(m->cwd), "%s", v);
+    else if (strcmp(k, "bf") == 0) snprintf(m->buildfile, sizeof(m->buildfile), "%s", v);
+    else if (strcmp(k, "bfm") == 0) m->bfm = atoll(v);
+    else if (strcmp(k, "bfs") == 0) m->bfs = atoll(v);
+    else if (strcmp(k, "tgt") == 0) {
+      if (strcmp(v, "-") != 0) snprintf(m->target, sizeof(m->target), "%s", v);
+    } else if (strcmp(k, "tm") == 0) m->tm = atoll(v);
+    else if (strcmp(k, "ts") == 0) m->ts = atoll(v);
+    else if (strcmp(k, "skipped") == 0) m->skipped = atoi(v);
+    else if (strcmp(k, "compiled") == 0) m->compiled = atoi(v);
+    else if (strcmp(k, "libReq") == 0) m->libRequested = atoi(v) != 0;
+    else if (strcmp(k, "libStUp") == 0) m->libStaticUp = atoi(v) != 0;
+    else if (strcmp(k, "libShUp") == 0) m->libSharedUp = atoi(v) != 0;
+    else if (strcmp(k, "libSt") == 0) {
+      if (strcmp(v, "-") != 0) snprintf(m->libStaticPath, sizeof(m->libStaticPath), "%s", v);
+    } else if (strcmp(k, "libSh") == 0) {
+      if (strcmp(v, "-") != 0) snprintf(m->libSharedPath, sizeof(m->libSharedPath), "%s", v);
+    } else if (strcmp(k, "stSz") == 0) m->libStaticSize = atoll(v);
+    else if (strcmp(k, "shSz") == 0) m->libSharedSize = atoll(v);
+    else if (strcmp(k, "lib") == 0) {
+      if (m->nlibs == libsCap) {
+        int nc = libsCap ? libsCap * 2 : 4;
+        char **nv = realloc(m->libs, (size_t)nc * sizeof(char *));
+        if (!nv) break;
+        m->libs = nv;
+        libsCap = nc;
+      }
+      m->libs[m->nlibs] = strdup(v);
+      if (!m->libs[m->nlibs]) break;
+      m->nlibs++;
+    }
+  }
+  free(copy);
+
+  LibStampCtx ctx = {NULL, 0, 0, proj, libMetaAddr()};
+  bool walked = csForEach(st, libStampVisit, &ctx);
+  csClose(st);
+  if (!walked || ctx.n == 0) {
+    free(ctx.v);
+    libCacheMetaFree(m);
+    return false;
+  }
+  *stampsOut = ctx.v;
+  *nOut = (int)ctx.n;
+  return true;
+}
+
+void libCacheMetaFree(LibCacheMeta *m) {
+  if (!m) return;
+  for (int i = 0; i < m->nlibs; i++) free(m->libs[i]);
+  free(m->libs);
+  m->libs = NULL;
+  m->nlibs = 0;
+}
+
+/* Muat fase library dari caches/lib.cache ke FastState — validasi & cetak
+   di bawah tetap sama persis dengan jalur teks lama. */
+static bool fastStateLoadLib(FastState *s) {
+  LibCacheMeta m;
+  LibStampRec *stamps = NULL;
+  int n = 0;
+  memset(s, 0, sizeof(*s));
+  if (!libCacheLoad(&m, &stamps, &n)) return false;
+  copyStr(s->cwd, sizeof(s->cwd), m.cwd);
+  copyStr(s->buildfile, sizeof(s->buildfile), m.buildfile);
+  s->buildfileMtime = m.bfm;
+  s->buildfileSize = m.bfs;
+  copyStr(s->target, sizeof(s->target), m.target[0] ? m.target : "-");
+  s->targetMtime = m.tm;
+  s->targetSize = m.ts;
+  s->compiled = m.compiled;
+  s->skipped = m.skipped;
+  s->count = n;
+  s->phase = 1;
+  s->libRequested = m.libRequested;
+  s->libStaticUp = m.libStaticUp;
+  s->libSharedUp = m.libSharedUp;
+  copyStr(s->libStaticPath, sizeof(s->libStaticPath), m.libStaticPath);
+  copyStr(s->libSharedPath, sizeof(s->libSharedPath), m.libSharedPath);
+  s->libStaticSize = m.libStaticSize;
+  s->libSharedSize = m.libSharedSize;
+  s->stamps = calloc((size_t)n, sizeof(FastStamp));
+  if (!s->stamps) {
+    free(stamps);
+    memset(s, 0, sizeof(*s));
+    return false;
+  }
+  for (int i = 0; i < n; i++) {
+    s->stamps[i].kind = stamps[i].kind;
+    snprintf(s->stamps[i].path, sizeof(s->stamps[i].path), "%s", stamps[i].path);
+    s->stamps[i].mtime = stamps[i].mtime;
+    s->stamps[i].size = stamps[i].size;
+    s->stamps[i].content = stamps[i].content; /* 0 untuk entri lama (kompat mundur) */
+  }
+  free(stamps);
+  return true;
+}
+
+/* Tulis ulang build.state dari fast-state tervalidasi — jalur PATCH sentuh
+   (mtime berubah, isi sama): perbarui stamp di tempat supaya run berikutnya
+   tidak meng-hash ulang. Gagal tulis tidak masalah: run berikutnya cukup
+   meng-hash file tersentuh lagi. */
+static void fastStateWriteFrom(const FastState *s) {
+  size_t cap = 4096;
+  for (int i = 0; i < s->count; i++) cap += strlen(s->stamps[i].path) + 96;
+  char *buf = malloc(cap);
+  if (!buf) return;
+  int written = snprintf(buf, cap,
+          "%s\n%s %s %lld %lld %s %lld %lld %d %d %d %d %d %d %d %s %s %lld %lld\n",
+          BUILD_STATE_MAGIC, s->cwd, s->buildfile, (long long)s->buildfileMtime,
+          s->buildfileSize, s->target[0] ? s->target : "-", (long long)s->targetMtime,
+          s->targetSize, s->compiled, s->skipped, s->count, s->phase,
+          s->libRequested ? 1 : 0, s->libStaticUp ? 1 : 0, s->libSharedUp ? 1 : 0,
+          s->libStaticPath[0] ? s->libStaticPath : "-",
+          s->libSharedPath[0] ? s->libSharedPath : "-", s->libStaticSize,
+          s->libSharedSize);
+  bool ok = written > 0 && (size_t)written < cap;
+  size_t used = ok ? (size_t)written : 0;
+  for (int i = 0; ok && i < s->count; i++) {
+    written = snprintf(buf + used, cap - used, "%c %lld %lld %016llx %s\n",
+                       s->stamps[i].kind, (long long)s->stamps[i].mtime,
+                       s->stamps[i].size, (unsigned long long)s->stamps[i].content,
+                       s->stamps[i].path);
+    ok = written > 0 && (size_t)written < cap - used;
+    if (ok) used += (size_t)written;
+  }
+  if (ok) {
+    fastSnapPut(buf, used);
+  }
+  free(buf);
+}
+
 bool cmdsFastStateValid(const char *buildfilePath, bool libOnly) {
   if (!fsGetCwd(statMemoCwd, sizeof(statMemoCwd))) statMemoCwd[0] = '\0';
+  /* Router (opts.cache) dibaca lebih dulu: cache yang dirutekan hilang /
+     kosong -> batal cepat tanpa memuat build.state. */
+  if (!optsRouterValidate()) return false;
+  /* Metadata artefak (design/startup.md §9): file hilang/berubah -> batal. */
+  if (!artifactCacheValid()) return false;
   FastState s;
   if (!fastStateLoad(&s, libOnly)) return false;
   if (s.phase != (libOnly ? 1 : 0)) {
@@ -556,6 +1011,7 @@ bool cmdsFastStateValid(const char *buildfilePath, bool libOnly) {
       strcmp(buildfilePath && *buildfilePath ? buildfilePath : "Buildfile", s.buildfile) == 0 &&
       buildfileStamp && buildfileMtime == s.buildfileMtime && buildfileSize == s.buildfileSize &&
       targetOk;
+  bool patched = false; /* sentuh: stamp di-PATCH setelah seluruh entri lolos */
   for (int i = 0; ok && i < s.count; i++) {
     FastStamp *st = &s.stamps[i];
     int64_t currentMtime = -1;
@@ -580,16 +1036,32 @@ bool cmdsFastStateValid(const char *buildfilePath, bool libOnly) {
       }
       continue;
     }
-    if (!exists || currentMtime != st->mtime) {
-      ok = false;
-      break;
-    }
-    if (st->kind == 'F' && currentSize != st->size) {
-      ok = false;
-      break;
+    if (!exists || currentMtime != st->mtime ||
+        (st->kind == 'F' && currentSize != st->size)) {
+      /* Sentuh: stamp beda tapi ISI sama -> buktikan via hash lalu PATCH
+         stamp; tanpa rebuild. Ukuran wajib sama; folder (D) tak punya hash
+         -> tetap batal (add/remove folder memang harus rebuild). */
+      bool touchOk = false;
+      if (st->kind == 'F' && st->content && currentSize == st->size) {
+        uint64_t h = fastStateHash(st->path);
+        if (h && h == st->content) {
+          st->mtime = currentMtime;
+          st->size = currentSize;
+          patched = true;
+          touchOk = true;
+        }
+      }
+      if (!touchOk) {
+        ok = false;
+        break;
+      }
     }
   }
-  if (ok) {
+  if (ok && s.phase != 1 && reportBlobHas()) {
+    /* No-op binary: putar laporan tersimpan (design §10) — blok STATUS di
+       dalamnya adalah pesan no-op. Tanpa laporan tersimpan -> jalur di bawah. */
+    reportBlobShow();
+  } else if (ok) {
     if (s.phase == 1) {
       /* Fase library: tidak ada link binary — lapor status library saja. */
       if (s.libRequested) {
@@ -637,18 +1109,49 @@ bool cmdsFastStateValid(const char *buildfilePath, bool libOnly) {
     printf("    Compiled : %d\n", s.compiled);
     printf("    Skipped  : %d\n", s.skipped);
     printf("    Status   : Success\n");
+    /* No-op single menutup dengan pesan yang sama dengan workspace (§10):
+       putar laporan tersimpan (STATUS = pesan no-op) atau cetak mandiri. */
+    if (s.phase != 1) {
+      if (reportBlobHas())
+        reportBlobShow();
+      else
+        printf("STATUS\n  > Nothing to build\n  > Cache valid: %s\n", BUILD_FP_CACHE);
+    }
   }
+  if (ok && patched) fastStateWriteFrom(&s); /* PATCH sentuh: perbarui stamp */
   fastStateFree(&s);
   return ok;
 }
 
+/* Stamp proyek single (paralel `wsProjStamp` workspace, §4): hash isi
+   Buildfile + daftar sumber terurut (koleksi sudah kanonik) — dipakai
+   sebagai content metadata grup P di opts.cache (optsProjMetaStamp). */
+static uint64_t fastProjStamp(const char *bf, const List *srcs) {
+  uint64_t h = 1469598103934665603ULL;
+  h ^= fastStateHash(bf);
+  h *= 1099511628211ULL;
+  if (srcs)
+    for (int i = 0; i < srcs->count; i++) {
+      const unsigned char *p = (const unsigned char *)srcs->items[i];
+      for (; *p; p++) {
+        h ^= *p;
+        h *= 1099511628211ULL;
+      }
+      h ^= 0xff;
+      h *= 1099511628211ULL;
+    }
+  return h;
+}
+
 void cmdsFastStateSave(const Config *c, const List *srcs, const char *target,
                        const char *buildfilePath, bool libOnly) {
-  const char *stateFile = stateFileFor(libOnly);
   /* Fast path hanya aman bila root build sama dengan cwd. Untuk root khusus,
      gunakan jalur normal sampai tersedia normalisasi path absolut. */
   if (strcmp(c->root, ".") != 0) {
-    fsRemoveFile(stateFile);
+    char key[MAX_PATH];
+    if (fsGetCwd(key, sizeof(key))) {
+      fastSnapDelete();
+    }
     return;
   }
   char cwd[MAX_PATH];
@@ -713,14 +1216,37 @@ void cmdsFastStateSave(const Config *c, const List *srcs, const char *target,
     const char *d = c->headerInternal.items[i];
     if (d && *d && d[0] != '-' && strcmp(d, ".") != 0) fastCollectTree(d, &paths);
   }
+  /* Direktori di atas hanya discovery kasar. Lengkapi dengan closure header
+     aktual tiap translation unit agar include relatif seperti ../shared.h,
+     computed include, dan header transitif di luar root tetap membatalkan
+     fast-state. depsNew menggunakan cache edges/.d dan fallback scanner. */
+  if (srcs && srcs->count > 0) {
+    DepCache *deps = depsNew(c);
+    if (deps) {
+      /* depsNew hanya menginisialisasi konteks; closure tidak menemukan root
+         sampai graph source dimuat. Seed tiap source melalui resolver yang
+         sama dengan incremental compile (cache .d/edge lebih dulu). */
+      for (int i = 0; i < srcs->count; i++)
+        (void)depsNewestHeaderMTime(deps, srcs->items[i]);
+      depsClosureVisitMany(deps, (const char *const *)srcs->items, srcs->count,
+                           fastCollectDepPath, &paths);
+      depsFree(deps);
+    } else {
+      /* Gagal membentuk graph: jangan simpan fast-state yang bisa melewatkan
+         header; kembali ke build normal pada run berikutnya. */
+      listFree(&paths);
+      return;
+    }
+  }
   /* Include file inputs that are not necessarily inside source/header roots. */
   fastStampAdd(&paths, bf);
   fastStampAdd(&paths, ".satria-version");
   if (compdbEnabled(c) && fsFileExists("compile_commands.json"))
     fastStampAdd(&paths, "compile_commands.json");
   for (int i = 0; i < srcs->count; i++) {
-    char obj[MAX_PATH];
-    if (objectPathFor(c, srcs->items[i], obj, sizeof(obj))) fastStampAdd(&paths, obj);
+    /* Objek tidak lagi distamp: no-op hanya memeriksa sumber, header, dan
+       output akhir (binary/library). Stat per-objek membuat no-op ~2x lebih
+       banyak panggilan filesystem tanpa menambah kebenaran output. */
   }
   bool hasEmbedded = false;
   for (int i = 0; i < c->embCount; i++) {
@@ -780,6 +1306,9 @@ void cmdsFastStateSave(const Config *c, const List *srcs, const char *target,
     snprintf(stamps[count].path, sizeof(stamps[count].path), "%s", path);
     stamps[count].mtime = mt;
     stamps[count].size = stamps[count].kind == 'F' ? sz : 0;
+    /* Hash isi file F: bukti sentuh pada validasi berikutnya (PATCH tanpa
+       rebuild). Gagal hash -> 0 -> sentuh diperlakukan sebagai perubahan. */
+    stamps[count].content = stamps[count].kind == 'F' ? fastStateHash(path) : 0;
     count++;
   }
   if (!safePaths) {
@@ -788,30 +1317,80 @@ void cmdsFastStateSave(const Config *c, const List *srcs, const char *target,
     return;
   }
   listFree(&paths);
-  mkdirs(".satria");
-  char stateTmp[MAX_PATH + 16];
-  snprintf(stateTmp, sizeof(stateTmp), "%s.tmp", stateFile);
-  FILE *f = fopen(stateTmp, "w");
-  if (!f) {
+  /* Fase library: simpan ke caches/lib.cache (design/startup.md §3) —
+     entri meta + stamp per proyek, bukan file per fase. */
+  if (libOnly) {
+    LibCacheMeta m;
+    memset(&m, 0, sizeof(m));
+    snprintf(m.cwd, sizeof(m.cwd), "%s", cwd);
+    snprintf(m.buildfile, sizeof(m.buildfile), "%s", bf);
+    m.bfm = (long long)bfm;
+    m.bfs = bfs;
+    snprintf(m.target, sizeof(m.target), "%s", tgt); /* "-" bila tanpa target */
+    m.tm = (long long)tm;
+    m.ts = ts;
+    m.skipped = srcs->count;
+    m.compiled = 0;
+    m.libRequested = c->libRequested;
+    m.libStaticUp = staticUp;
+    m.libSharedUp = sharedUp;
+    snprintf(m.libStaticPath, sizeof(m.libStaticPath), "%s", staticLib);
+    snprintf(m.libSharedPath, sizeof(m.libSharedPath), "%s", sharedLib);
+    m.libStaticSize = staticSz;
+    m.libSharedSize = sharedSz;
+    LibStampRec *recs = calloc(count ? (size_t)count : 1, sizeof(LibStampRec));
+    if (recs) {
+      for (int i = 0; i < count; i++) {
+        recs[i].kind = stamps[i].kind;
+        snprintf(recs[i].path, sizeof(recs[i].path), "%s", stamps[i].path);
+        recs[i].mtime = (long long)stamps[i].mtime;
+        recs[i].size = stamps[i].size;
+        recs[i].content = stamps[i].content; /* FNV-1a isi F: bukti sentuh */
+      }
+      libCacheSave(&m, recs, count);
+      free(recs);
+    }
+    if (optsRouterRecord(c, libOnly)) { /* router: deps + lib (fase library) */
+      /* Grup P (§4) seragam: opts + semua cache grup (deps/embed/lib/state)
+         memakai content & format identik — jejak lintas-cache & lintas mode. */
+      uint64_t content = fastProjStamp(bf, srcs);
+      long long t = csNowNs();
+      optsProjMetaStamp(cmdsCacheProjAddr(), content); /* grup P (§4) */
+      csProjMetaStamp(cmdsCacheProjAddr(), content, t); /* P seragam: deps/embed/lib */
+      csProjMetaStampFile(BUILD_FP_CACHE, cmdsCacheProjAddr(), content, t); /* P seragam: fingerprint.cache */
+    }
     free(stamps);
     return;
   }
-  fprintf(f, "%s\n%s %s %lld %lld %s %lld %lld %d %d %d %d %d %d %d %s %s %lld %lld\n",
+  /* Serialize the unchanged FAST4 payload into a hashed state.cache record. */
+  size_t cap = 4096;
+  for (int i = 0; i < count; i++) cap += strlen(stamps[i].path) + 96;
+  char *buf = malloc(cap);
+  if (!buf) { free(stamps); return; }
+  int written = snprintf(buf, cap,
+          "%s\n%s %s %lld %lld %s %lld %lld %d %d %d %d %d %d %d %s %s %lld %lld\n",
           BUILD_STATE_MAGIC, cwd, bf, (long long)bfm, bfs, tgt, (long long)tm, ts, 0, srcs->count,
           count, libOnly ? 1 : 0, c->libRequested ? 1 : 0, staticUp ? 1 : 0, sharedUp ? 1 : 0,
           staticLib[0] ? staticLib : "-", sharedLib[0] ? sharedLib : "-", staticSz, sharedSz);
-  for (int i = 0; i < count; i++)
-    fprintf(f, "%c %lld %lld %s\n", stamps[i].kind, (long long)stamps[i].mtime, stamps[i].size,
-            stamps[i].path);
-  bool ok = fclose(f) == 0;
+  bool ok = written > 0 && (size_t)written < cap;
+  size_t used = ok ? (size_t)written : 0;
+  for (int i = 0; ok && i < count; i++) {
+    written = snprintf(buf + used, cap - used, "%c %lld %lld %016llx %s\n",
+                       stamps[i].kind, (long long)stamps[i].mtime, stamps[i].size,
+                       (unsigned long long)stamps[i].content, stamps[i].path);
+    ok = written > 0 && (size_t)written < cap - used;
+    if (ok) used += (size_t)written;
+  }
   free(stamps);
-  if (ok) {
-#ifdef _WIN32
-    fsRemoveFile(stateFile);
-#endif
-    if (rename(stateTmp, stateFile) != 0) fsRemoveFile(stateTmp);
-  } else
-    fsRemoveFile(stateTmp);
+  if (ok && fastSnapPut(buf, used) && optsRouterRecord(c, libOnly)) {
+    /* Grup P (§4) seragam — lihat catatan di cabang lib di atas. */
+    uint64_t content = fastProjStamp(bf, srcs);
+    long long t = csNowNs();
+    optsProjMetaStamp(cmdsCacheProjAddr(), content);
+    csProjMetaStamp(cmdsCacheProjAddr(), content, t);
+    csProjMetaStampFile(BUILD_FP_CACHE, cmdsCacheProjAddr(), content, t); /* P seragam: fingerprint.cache */
+  }
+  free(buf);
 }
 
 /* ==================== clean ==================== */
@@ -822,34 +1401,107 @@ int cmdClean(const char *buildfilePath) {
   return cmdsCleanRun(&c);
 }
 
+/* Kosongkan ISI folder; folder itu sendiri tetap ada (design/startup.md §6).
+   Hanya anak langsung yang dihapus: file lewat fsRemoveFile, subfolder lewat
+   fsRemoveTree. Folder tidak ada -> tidak ada yang dilakukan. */
+bool cmdsEmptyDir(const char *dir, int *removed) {
+  if (!fsDirExists(dir)) return true;
+  List dirs = {0}, files = {0};
+  fsListDir(dir, &dirs, &files);
+  bool ok = true;
+  for (int i = 0; i < files.count; i++) {
+    if (fsRemoveFile(files.items[i]))
+      (*removed)++;
+    else
+      ok = false;
+  }
+  for (int i = 0; i < dirs.count; i++) {
+    if (fsRemoveTree(dirs.items[i]))
+      (*removed)++;
+    else
+      ok = false;
+  }
+  listFree(&dirs);
+  listFree(&files);
+  return ok;
+}
+
+/* ==================== Pembersihan state lama (audit §Daftar Implementasi) ==
+   Jalur tulis lama yang sudah digantikan blob (caches/state.cache) dan store
+   (fingerprint.cache) tidak pernah dibaca lagi — file sisa dari versi lama
+   dibuang sekali per run dan saat clean agar tidak menumpuk:
+     .satria/workspace.state               gerbang no-op ws lama
+     .satria/workspace/<p>.<leaf>          state per-proyek lama; leaf lama di
+                                           bawah — <p>.Buildfile di folder yang
+                                           SAMA adalah CURRENT, jangan disentuh
+     .satria/{build.state, build.lib.state, build.fingerprint}   single lama
+     .satria/caches/paths.cache            sudah dimigrasi ke sources.cache
+   Menghapus path yang tidak ada = tanpa efek; aman dipanggil tiap run. */
+static const char *kWsLegacySuffixes[] = {".build.fingerprint", ".ws.state",
+                                          ".ws.lib.state",      ".deps.cache",
+                                          ".src",               ".hdr"};
+
+void cmdsLegacyStateSweep(void) {
+  if (fsDirExists(".satria")) {
+    fsRemoveFile(".satria/build.state");
+    fsRemoveFile(".satria/build.lib.state");
+    fsRemoveFile(".satria/build.fingerprint");
+    fsRemoveFile(".satria/caches/paths.cache");
+    /* sisa format v0.2.3 dan sebelumnya: log workspace dan daftar sumber lama */
+    fsRemoveFile(".satria/workspace_log");
+    fsRemoveFile(".satria/ws.src");
+  }
+  if (!fsDirExists(".satria/workspace")) return;
+  List dirs = {0}, files = {0};
+  fsListDir(".satria/workspace", &dirs, &files);
+  for (int i = 0; i < files.count; i++) {
+    const char *p = files.items[i];
+    const char *base = strrchr(p, '/');
+    base = base ? base + 1 : p;
+    size_t bl = strlen(base);
+    for (size_t k = 0; k < sizeof(kWsLegacySuffixes) / sizeof(kWsLegacySuffixes[0]); k++) {
+      size_t ln = strlen(kWsLegacySuffixes[k]);
+      if (bl > ln && strcmp(base + bl - ln, kWsLegacySuffixes[k]) == 0) {
+        fsRemoveFile(p);
+        break;
+      }
+    }
+  }
+  for (int i = 0; i < dirs.count; i++) { /* <p>.hdr/ lama (salinan header semantik) */
+    const char *p = dirs.items[i];
+    const char *base = strrchr(p, '/');
+    base = base ? base + 1 : p;
+    size_t bl = strlen(base);
+    if (bl > 4 && strcmp(base + bl - 4, ".hdr") == 0) fsRemoveTree(p);
+  }
+  /* folder .satria/workspace yang sudah kosong (sisa format lama) ikut dibuang */
+  List restDirs = {0}, restFiles = {0};
+  fsListDir(".satria/workspace", &restDirs, &restFiles);
+  if (restDirs.count == 0 && restFiles.count == 0) fsRemoveTree(".satria/workspace");
+  listFree(&restDirs);
+  listFree(&restFiles);
+  listFree(&dirs);
+  listFree(&files);
+}
+
 /* Jalankan logika bersih TANPA loadConfig — dipakai jalur clean tunggal
    (cmdClean) dan mode workspace (Config disusun dari Buildfile.ws oleh
    wsBuildConfig; path state mengikuti cmdsStateSetWsProject). */
-int cmdsCleanRun(const Config *c) {
+int cmdsCleanRunEx(const Config *c, bool *anyOut) {
   bool any = false;
-  if (c->cleanBuildDir && safeRelative(c->outBuildDir)) {
-    if (fsRemoveTree(c->outBuildDir))
-      printf("> Removed   : %s\n", c->outBuildDir);
-    else
-      printf("> Removed   : %s (sebagian gagal dihapus)\n", c->outBuildDir);
-    any = true;
-  }
-  /* Hapus FILE library (.a/.so/.dll), bukan foldernya — dulu fsRemoveTree
-     pada outLibDir menghapus folder lib/ sekaligus isinya. Folder tetap
-     ada; build berikutnya membuat ulang isinya bila diminta. */
-  if (c->cleanBuildDir && c->libRequested && safeRelative(c->outLibDir)) {
-    char libPath[MAX_PATH * 2];
-    if (c->libStatic) {
-      cmdsLibStaticPath(c, libPath, sizeof(libPath));
-      if (fsRemoveFile(libPath)) {
-        printf("> Removed   : %s\n", libPath);
-        any = true;
-      }
-    }
-    if (c->libShared) {
-      cmdsLibSharedPath(c, libPath, sizeof(libPath));
-      if (fsRemoveFile(libPath)) {
-        printf("> Removed   : %s\n", libPath);
+  /* bin/, build/, lib/, modules/: yang dibersihkan ISINYA saja. Folder
+     dibuat sekali oleh startup dan tetap ada, jadi build berikutnya tidak
+     perlu membuatnya ulang. modules/ hanya berisi arsip embed hasil generate
+     (dibuat ulang oleh build), bukan input. "." dan path kosong ditolak. */
+  if (c->cleanBuildDir) {
+    const char *emptied[] = {c->outBuildDir, c->outBinaryDir, c->outLibDir, "modules"};
+    for (int i = 0; i < (int)(sizeof(emptied) / sizeof(emptied[0])); i++) {
+      const char *d = emptied[i];
+      if (!d[0] || strcmp(d, ".") == 0 || !safeRelative(d) || !fsDirExists(d)) continue;
+      int removed = 0;
+      bool ok = cmdsEmptyDir(d, &removed);
+      if (removed || !ok) {
+        printf("> Emptied   : %s (%d entri%s)\n", d, removed, ok ? "" : ", sebagian gagal");
         any = true;
       }
     }
@@ -859,49 +1511,49 @@ int cmdsCleanRun(const Config *c) {
     printf("> Removed   : compile_commands.json\n");
     any = true;
   }
-  /* Snapshot hash dependensi dihapus juga: verifikasi konten dimulai dari
-     nol pada build berikutnya (build sukses merekam ulang dari awal). */
-  char depsLeaf[256];
-  cmdsStatePath(depsLeaf, sizeof(depsLeaf), "deps.cache");
-  if (fsFileExists(depsLeaf)) {
-    fsRemoveFile(depsLeaf);
-    printf("> Removed   : %s\n", depsLeaf);
-    any = true;
+  /* deps.cache tidak dihapus: file dipertahankan dan isinya dikosongkan
+     bersama file cache lain di bawah (design/startup.md §6). Snapshot hash
+     dependensi kosong -> verifikasi dimulai dari nol pada build berikutnya. */
+  /* Isi tiap file cache di .satria/caches dikosongkan (design/startup.md §6)
+     — file tetap ada (csOpen menerima file kosong), sehingga jumlah file tidak
+     berubah dan router opts.cache tetap menunjuk target yang sah. Router
+     sendiri TIDAK disentuh: setelah clean, optsRouterValidate gagal (grup
+     proyek hilang dari caches) -> run berikutnya tidak boleh no-op, lalu
+     build sukses merekam ulang entri + router. */
+  if (fsDirExists(WS_CACHES_DIR)) {
+    List cdirs = {0}, cfiles = {0};
+    fsListDir(WS_CACHES_DIR, &cdirs, &cfiles);
+    int n = 0;
+    for (int i = 0; i < cfiles.count; i++) {
+      FILE *fp = fopen(cfiles.items[i], "w");
+      if (fp) {
+        fclose(fp);
+        n++;
+      }
+    }
+    listFree(&cdirs);
+    listFree(&cfiles);
+    if (n) {
+      printf("> Emptied   : %s (%d file)\n", WS_CACHES_DIR, n);
+      any = true;
+    }
   }
   /* Mode workspace: state fast & snapshot source per proyek ikut dibuang
      (root-centric) — clean berarti build berikutnya mulai dari nol. */
   if (cmdsStateWsProject()) {
-    static const char *wsLeaves[] = {"ws.state", "ws.lib.state", "src", NULL};
+    static const char *wsLeaves[] = {"ws.state", "src", NULL};
     for (int i = 0; wsLeaves[i]; i++) {
-      char p[256];
-      cmdsStatePath(p, sizeof(p), wsLeaves[i]);
-      if (fsFileExists(p)) {
-        fsRemoveFile(p);
-        printf("> Removed   : %s\n", p);
+      if (stateBlobExists(cmdsStateWsProject(), wsLeaves[i])) {
+        stateBlobDelete(cmdsStateWsProject(), wsLeaves[i]);
+        printf("> Removed   : caches/state.cache [%s.%s]\n", cmdsStateWsProject(), wsLeaves[i]);
         any = true;
       }
     }
   }
-  /* State fast no-op kedua fase (binary & library) ikut dibuang. */
-  if (fsFileExists(BUILD_STATE_FILE)) {
-    fsRemoveFile(BUILD_STATE_FILE);
-    printf("> Removed   : %s\n", BUILD_STATE_FILE);
-    any = true;
-  }
-  if (fsFileExists(BUILD_STATE_FILE_LIB)) {
-    fsRemoveFile(BUILD_STATE_FILE_LIB);
-    printf("> Removed   : %s\n", BUILD_STATE_FILE_LIB);
-    any = true;
-  }
-  /* Cache verdict deteksi GNU ld (.satria/ld.cache) ikut dibuang: clean
-     berarti mulai dari nol, run berikutnya mem-probe ulang `ld --version`
-     sekali lalu merekamnya lagi. */
-  const char *ldCache = ldCacheFile(); /* satu sumber nama file: embed_ld_cache */
-  if (fsFileExists(ldCache)) {
-    fsRemoveFile(ldCache);
-    printf("> Removed   : %s\n", ldCache);
-    any = true;
-  }
+  /* ld.cache (verdict deteksi GNU ld) TIDAK dihapus: file dan isinya
+     dipertahankan. Validasinya sudah memeriksa path, mtime ns, dan ukuran
+     binary ld yang sedang di-resolve (embed_ld_cache.c), sehingga verdict
+     basi atau dari mesin lain otomatis dibuang dan diprobe ulang. */
   /* Staging packaging (.satria/pack) adalah cache — artefak final di dist/
      TIDAK disentuh (bisa jadi dirujuk embedded.* proyek lain). */
   if (fsDirExists(".satria/pack")) {
@@ -909,8 +1561,20 @@ int cmdsCleanRun(const Config *c) {
     printf("> Removed   : .satria/pack\n");
     any = true;
   }
-  if (!any) printf("> Nothing to clean (see Buildfile: clean)\n");
+  /* Sisa state lama (audit): file tulisan versi lama yang sudah digantikan
+     blob/store — dibuang juga saat clean (lihat cmdsLegacyStateSweep). */
+  cmdsLegacyStateSweep();
+  /* startup.state TIDAK dihapus clean: workspaceRun (mode ws) menyinkronkannya
+     dengan Buildfile.ws sebelum clean berjalan (design/startup.md §6). */
+  if (anyOut) *anyOut = any;
   return 0;
+}
+
+int cmdsCleanRun(const Config *c) {
+  bool any = false;
+  int rc = cmdsCleanRunEx(c, &any);
+  if (!any) printf("> Nothing to clean (see Buildfile: clean)\n");
+  return rc;
 }
 
 /* Buang satu entri memo (kunci = path ternormalisasi, sama seperti insert). */

@@ -68,13 +68,11 @@ bool workspaceFileExists(void);
 bool wsMemberCwdDetect(char *wsRootOut, size_t wsRootN, char *memberOut, size_t memberN);
 
 /*
- * wsStateFileExists — true bila .satria/workspace.state di root workspace ada
- * (tanpa validasi stamp). Dipakai bootstrap.c untuk status cold kasar mode
- * workspace: root workspace tidak punya .satria/build.state (itu file
- * per-proyek). Validasi stamp gate (Buildfile.ws + stamp input per proyek)
- * kini berjalan di workspaceRun per-closure (wsStateValidFiltered) — `-w
- * <nama>` tidak memvalidasi seluruh workspace; sekaligus menyetel
- * wsGateStartValid untuk wsStateSave (lihat workspace.c).
+ * wsStateFileExists — true bila cache fingerprint workspace
+ * (.satria/caches/fingerprint.cache) ada. Dipakai bootstrap.c hanya untuk
+ * status cold kasar di SATRIA_STATUS; keputusan no-op sebenarnya diambil
+ * wsCacheNoopValid di workspaceRun (opts.cache -> fingerprint.cache).
+ * workspace.state (gerbang legacy) sudah tidak ditulis.
  */
 bool wsStateFileExists(void);
 

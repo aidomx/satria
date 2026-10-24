@@ -66,6 +66,20 @@ run_once() {
     sed 's/^/   /' "$RB_CC_LOG" 2> /dev/null; } >> "$WORK_LOG"
 
   expect_check "$label" "$scen" "$nobj" "$narc" "$nlib" "$nbin" "$ncc"
+  # Modul .rp hanya di-embed oleh bade. Pastikan binary yang berubah
+  # benar-benar bade, bukan rupa (jumlah bin=1 saja tidak cukup).
+  if [ "$label" = satria ] && [ "$scen" = mod ] && [ "$rc" -eq 0 ]; then
+    if ! awk -F '|' '
+      FILENAME==ARGV[1] { old[$1]=$0; next }
+      $1 ~ /(^|\/)bin\/(bade|rupa)$/ && (!( $1 in old) || old[$1] != $0) {
+        if ($1 ~ /\/bin\/bade$/) bade++
+        else rupa++
+      }
+      END { exit !(bade == 1 && rupa == 0) }
+    ' "$OUTDIR/.artifacts.before" "$OUTDIR/.artifacts.after"; then
+      EXPECT_MISS+=" embed-bin-scope(harap hanya bade)"
+    fi
+  fi
   # Jejak ringkas per run untuk laporan view: aktual + harapan (EXP_* = -1
   # bila tidak di-hard-check) + miss flag (kerja berbeda dari harapan).
   printf '%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n' \

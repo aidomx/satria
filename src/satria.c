@@ -5,12 +5,13 @@
 #include <string.h>
 
 #include "bootstrap.h"
+#include "log/build_log.h"
 #include "cmdhelp.h"
 #include "commands.h"
-#include "portability.h"
-#include "profile.h"
 #include "package_cli.h"
+#include "portability.h"
 #include "prof/prof.h"
+#include "profile.h"
 #include "uses/workspace.h"
 
 #if __has_include("version.h")
@@ -27,8 +28,30 @@ const char *satriaVersion(void) {
 #ifdef SATRIA_VERSION_EMBEDDED
   return SATRIA_VERSION_EMBEDDED;
 #else
-  return "v0.2.0";
+  return "v0.2.4";
 #endif
+}
+
+/* helper fungsi
+ * e.g: satria help|--help|-h <topic>
+ *
+ * Menerapkan clean code untuk memudahkan pembacaan.
+ */
+static bool cmdHelpCond(const char *args) {
+  return !strcmp(args, "help") || !strcmp(args, "--help") || !strcmp(args, "-h");
+}
+
+/* Guard keanggotaan: build/clean/release dari direktori anggota sebuah
+   workspace induk ditolak (design/workspace.md aturan 1 & 5). Dipakai baik
+   untuk `-w` maupun build single-project di dalam folder anggota. */
+static bool memberCwdRejected(void) {
+  char wsRoot[MAX_PATH], member[64];
+  if (!wsMemberCwdDetect(wsRoot, sizeof(wsRoot), member, sizeof(member))) return false;
+  fprintf(stderr,
+          "satria: direktori ini adalah anggota workspace '%s' (proyek '%s')\n"
+          "        build hanya dari root workspace — build selektif: satria -w %s\n",
+          wsRoot, member, member);
+  return true;
 }
 
 /*
@@ -51,10 +74,10 @@ int satriaRun(int argc, const char *argv[]) {
      (satu kata; kata berikutnya diabaikan seperti command lain). */
   if (bs.cmd == CMD_HELP) {
     for (int i = 0; i < argc; i++) {
-      if (argv[i] && (strcmp(argv[i], "help") == 0 || strcmp(argv[i], "--help") == 0 ||
-                      strcmp(argv[i], "-h") == 0)) {
-        if (i + 1 < argc && argv[i + 1][0] && argv[i + 1][0] != '-')
-          bs.help_topic = argv[i + 1];
+      const char *args = argv[i];
+      const char *next = argv[i + 1];
+      if (args && cmdHelpCond(args)) {
+        if (i + 1 < argc && next[0] && next[0] != '-') bs.help_topic = next;
         break;
       }
     }
@@ -66,6 +89,12 @@ int satriaRun(int argc, const char *argv[]) {
     printf("satria %s\n", satriaVersion());
     bootstrapCleanup(&bs);
     return 0;
+  }
+
+  if (bs.cmd == CMD_LOG) {
+    rc = buildLogShow();
+    bootstrapCleanup(&bs);
+    return rc;
   }
 
   rc = bootstrapApply(&bs);
@@ -84,11 +113,14 @@ int satriaRun(int argc, const char *argv[]) {
     return cmdProfile(bs.profile_argv, bs.profile_argc);
   }
 
-  /* Mode workspace: -w eksplisit, atau auto-detect Buildfile.ws saat satria
-     polos di root workspace. init tetap jalur satu-project kecuali `init -w`
-     yang menulis template workspace (Buildfile.ws). */
-  bs.ws_auto = !bs.want_workspace && (bs.cmd == CMD_BUILD) && workspaceFileExists();
-  if (bs.want_workspace || bs.ws_auto) {
+  /* Workspace hanya dipilih melalui -w. Keberadaan Buildfile.ws tidak
+     boleh mengubah mode CLI secara implisit. */
+  if (bs.want_workspace) {
+    if ((bs.cmd == CMD_BUILD || bs.cmd == CMD_CLEAN || bs.cmd == CMD_RELEASE) &&
+        memberCwdRejected()) {
+      bootstrapCleanup(&bs);
+      return 2;
+    }
     /* init -p di mode workspace: scaffold interaktif bisa menghasilkan
        Buildfile.ws sendiri (pilihan "Uses workspace?"), jadi diajukan
        sebelum template cmdInitWorkspace. */
@@ -127,10 +159,21 @@ int satriaRun(int argc, const char *argv[]) {
       bootstrapCleanup(&bs);
       return 2;
     }
+    /* Workspace logging uses the already restored WsModel (startup.state). */
     rc = workspaceRun(bs.cmd == CMD_CLEAN ? "clean" : "build", bs.jobs, bs.ws_only, sel);
     if (sel) free(sel);
     bootstrapCleanup(&bs);
     return rc;
+  }
+
+  /* Di root workspace tanpa Buildfile single-project, jangan jatuh ke
+     parser single-project; tampilkan petunjuk flag yang benar. */
+  if ((bs.cmd == CMD_BUILD || bs.cmd == CMD_CLEAN || bs.cmd == CMD_RELEASE) &&
+      !bs.have_f && !fsFileExists("Buildfile") && workspaceFileExists()) {
+    fprintf(stderr, "satria: Buildfile single-project tidak ditemukan\n"
+                    "        gunakan 'satria -w' untuk workspace\n");
+    rc = 2;
+    goto done;
   }
 
   /* Guard keanggotaan: build/clean dari direktori anggota sebuah workspace
@@ -138,60 +181,55 @@ int satriaRun(int argc, const char *argv[]) {
      (design/workspace_v1.md aturan 1 & 5). `-g compdb` ikut tercakup (ada
      di jalur CMD_BUILD); proyek standalone di luar workspace tidak
      terpengaruh. */
-  if (bs.cmd == CMD_BUILD || bs.cmd == CMD_CLEAN) {
-    char wsRoot[MAX_PATH], member[64];
-    if (wsMemberCwdDetect(wsRoot, sizeof(wsRoot), member, sizeof(member))) {
-      fprintf(stderr,
-              "satria: direktori ini adalah anggota workspace '%s' (proyek '%s')\n"
-              "        build hanya dari root workspace — build selektif: satria -w %s\n",
-              wsRoot, member, member);
-      rc = 2;
-      goto done;
-    }
+  if ((bs.cmd == CMD_BUILD || bs.cmd == CMD_CLEAN) && memberCwdRejected()) {
+    rc = 2;
+    goto done;
   }
 
   /* Dispatch perintah standar — switch enum, bukan strcmp. */
   switch (bs.cmd) {
-    case CMD_BUILD:
-      if (bs.generate_compdb)
-        rc = cmdCompdbGenerate(bs.buildfile);
-      else
-        rc = cmdBuild(bs.jobs, bs.buildfile);
-      break;
+  case CMD_BUILD:
+    if (bs.generate_compdb)
+      rc = cmdCompdbGenerate(bs.buildfile);
+    else {
+      rc = cmdBuild(bs.jobs, bs.buildfile);
+    }
+    break;
 
-    case CMD_INIT:
-      rc = bs.interactive ? cmdInteractiveInit() : cmdInit(bs.buildfile);
-      break;
+  case CMD_INIT:
+    rc = bs.interactive ? cmdInteractiveInit() : cmdInit(bs.buildfile);
+    break;
 
-    case CMD_CLEAN:
-      rc = cmdClean(bs.buildfile);
-      break;
+  case CMD_CLEAN:
+    rc = cmdClean(bs.buildfile);
+    break;
 
-    case CMD_HELP:
-      if (bs.help_topic) {
-        /* help <topic>: topic = nama section di src/cmd.txt. Tidak
+  case CMD_HELP:
+    if (bs.help_topic) {
+      /* help <topic>: topic = nama section di src/cmd.txt. Tidak
            dikenal -> pesan + help utama (pola rupa/loader.c). */
-        if (cmdHelpSection(bs.help_topic)) {
-          rc = 0;
-        } else {
-          fprintf(stderr, "satria: unknown help topic '%s'\n", bs.help_topic);
-          showHelp();
-          rc = 1;
-        }
-      } else {
-        showHelp();
+      if (cmdHelpSection(bs.help_topic)) {
         rc = 0;
+      } else {
+        fprintf(stderr, "satria: unknown help topic '%s'\n", bs.help_topic);
+        showHelp();
+        rc = 1;
       }
-      break;
+    } else {
+      showHelp();
+      rc = 0;
+    }
+    break;
 
-    case CMD_RELEASE: /* tanpa -w ditolak di bawah */
-      fprintf(stderr, "satria: release memerlukan mode workspace (pakai 'satria -w release -- name=rupa')\n");
-      rc = 2;
-      break;
+  case CMD_RELEASE: /* tanpa -w ditolak di bawah */
+    fprintf(stderr,
+            "satria: release memerlukan mode workspace (pakai 'satria -w release -- name=rupa')\n");
+    rc = 2;
+    break;
 
-    default:
-      rc = 1; /* tidak terjangkau: parser menolak command asing */
-      break;
+  default:
+    rc = 1; /* tidak terjangkau: parser menolak command asing */
+    break;
   }
 
   /* -xf: hapus file sementara setelah command selesai. Buildfile asli

@@ -14,6 +14,7 @@
 #include "../portability.h"
 #include "../util.h"
 #include "pack.h"
+#include "../cache/artifact.h" /* daftarkan paket/checksum ke artifact.cache (§9) */
 #include "../cmds/cmds_internal.h"
 #include "pack_stage.h"
 
@@ -117,12 +118,12 @@ int64_t packNewestInput(const Config *c) {
       if (m > newest) newest = m;
     } else if (fsDirExists(eff)) {
       /* folder: semua file di dalamnya + mtime folder itu sendiri.
-         Mode workspace: daftar file dari cache walk (ws.src, divalidasi mtime
+         Mode workspace: daftar file dari cache walk (sources.cache, divalidasi mtime
          folder) dan mtime lewat memo, sehingga embed freshness ikut memakainya. */
       List files = {0};
       if (wsModeActive()) {
         cmdsStatMemoSetCwd();
-        wsWalkDirCached(eff, "", &files);
+        stateWalkDirCached(eff, "", &files);
       } else {
         walkDir(eff, "", &files);
       }
@@ -178,6 +179,7 @@ static bool packChecksumApply(const Config *c, const char *artifactPath) {
   }
   char sumPath[MAX_PATH * 2 + 8];
   snprintf(sumPath, sizeof(sumPath), "%s.sha256", artifactPath);
+  artifactCacheAdd(sumPath); /* checksum = artefak tanpa kode C (§9) */
   int64_t artM = fsMTimeNs(artifactPath), sumM = fsMTimeNs(sumPath);
   if (artM >= 0 && sumM >= artM) {
     printf("%s Checksum: %s (up-to-date)\n", repPrefix(), sumPath);
@@ -259,6 +261,7 @@ bool packRun(const Config *c) {
       printf("%s Package : %s (%.1fKB)\n", repPrefix(), a.path, sz > 0 ? (double)sz / 1024.0 : 0);
       g_packRebuilt = true;
     }
+    artifactCacheAdd(a.path);
     if (!packChecksumApply(c, a.path)) return false;
   }
 
@@ -281,6 +284,7 @@ bool packRun(const Config *c) {
       printf("%s Package : %s (%.1fKB)\n", repPrefix(), a.path, sz > 0 ? (double)sz / 1024.0 : 0);
       g_packRebuilt = true;
     }
+    artifactCacheAdd(a.path);
     if (!packChecksumApply(c, a.path)) return false;
   } else if (c->pack.format[0] && strcmp(c->pack.format, "tar") != 0 &&
              strcmp(c->pack.format, "none") != 0) {

@@ -81,7 +81,7 @@ o.compileCommands = auto
 # ─── PACKAGING & RELEASE ──────────────────────────────────────────────────────
 # Metadata dasar untuk paket distribusi.
 release.name = satria
-release.version = 0.2.3
+release.version = 0.2.4
 # Pola nama file output. {name} dan {version} akan diganti secara otomatis.
 release.output = dist/{name}-v{version}.tar.gz
 

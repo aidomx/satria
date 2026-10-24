@@ -65,10 +65,13 @@ Dengan ini `library/` dan `include/` tetap aman tanpa dicatat per file.
 
 Yang sudah ada per proyek (cocok dengan single project): `build.state`,
 `build.lib.state`, `build.fingerprint`, `deps.cache`, `compile_commands.*`,
-`ld.cache`. Yang di workspace: `.satria/workspace/.satria/*.Buildfile.cache`
-(config cache per proyek) dan `.satria/workspace.state`.
+`ld.cache`. Mode workspace kini memusatkan semuanya di root: config cache di
+`.satria/startup.state`, fingerprint + fast state di
+`.satria/caches/fingerprint.cache`, blob per proyek (`ws.state`, `src`) di
+`.satria/caches/state.cache`, dan stamp fase library di
+`.satria/caches/lib.cache` — tidak ada lagi `.satria/workspace.state`.
 
-Catatan penting: `workspace.state` tidak mengurangi jumlah stat. Verifikasi
+Catatan penting: gerbang no-op tidak mengurangi jumlah stat. Verifikasi
 "tidak ada yang berubah" tetap perlu men-stat setiap input (ninja juga
 begitu). Yang bisa dikurangi: overhead per proyek (membuka state, parse,
 pindah cwd). Pada pengukuran, `open` sudah hanya 5 per run, jadi manfaatnya
@@ -204,7 +207,7 @@ Target yang realistis: stat sel dari 324 turun ke sekitar 150, opendir ke 0.
 
 Perubahan:
 
-1. **Cache daftar sumber** (`.satria/ws.src`, mode workspace): walk folder sumber
+1. **Cache daftar sumber** (`.satria/sources.cache`, mode workspace): walk folder sumber
    dan folder embed disimpan bersama stamp mtime folder yang ditelusuri. Mtime
    dicatat sebelum folder dibaca. Dipakai di pengumpulan source build, scan
    `.cpp` di config, dan walk embed. Cache dikosongkan di awal setiap proyek.
@@ -221,7 +224,7 @@ Bug yang ditemukan dan diperbaiki selama langkah ini:
 - Folder sumber tidak tercatat di `ws.state`, sehingga file .c baru tidak
   memicu kompilasi. Sekarang folder yang ditelusuri ikut dicatat sebagai D.
 - Cache daftar sumber tidak dikosongkan antar proyek; record proyek sebelumnya
-  terbawa dan ditulis ke `ws.src` proyek berikutnya.
+  terbawa dan ditulis ke `sources.cache` proyek berikutnya.
 - Record folder yang tidak ada selalu dianggap tidak valid, sehingga setiap run
   membuka folder itu lagi (sekarang valid selama tetap tidak ada).
 

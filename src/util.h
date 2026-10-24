@@ -52,9 +52,9 @@ void mkparent(const char *path);
    Pemanggil yang urutannya menentukan output (link, listfile tar, staging
    pack) memanggil listSort(out) SETELAH walkDir selesai. */
 void walkDir(const char *dir, const char *ext, List *out);
-/* Sama dengan walkDir; di mode workspace hasilnya di-cache (.satria/ws.src).
+/* Sama dengan walkDir; di mode workspace hasilnya di-cache (.satria/sources.cache).
    Implementasi di cmds/cmds_wsstate.c. */
-void wsWalkDirCached(const char *dir, const char *ext, List *out);
+void stateWalkDirCached(const char *dir, const char *ext, List *out);
 bool newerThan(const char *a, const char *b);
 bool safeRelative(const char *path);
 

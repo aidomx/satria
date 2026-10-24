@@ -59,6 +59,18 @@ int cmdBuildEx(int jobs, const char *buildfilePath, bool libOnly);
 int cmdClean(const char *buildfilePath);
 
 /*
+ * Verdict byte-object antar fase workspace (library pass -> binary pass):
+ * true bila object proyek yang ditulis ulang BERUBAH byte-nya, false bila
+ * identik (edit komentar dsb — pass binary tidak boleh relink hanya karena
+ * mtime). Tabel in-memory per proses; jalur fork fase library
+ * (src/workspace/ws_batch.c) menstaging verdict lewat file agar tetap
+ * sampai ke pass binary di induk. project = nama proyek workspace (NULL /
+ * mode single-project = abaikan).
+ */
+bool cmdsWsPhaseVerdictGet(const char *project, bool *changed);
+void cmdsWsPhaseVerdictSet(const char *project, bool changed);
+
+/*
  * cmdCompdbGenerate — `satria -g compdb`: hasilkan/
  * refresh compile_commands.json TANPA membangun apa pun. Jalur query-only:
  * loadConfig -> gather source -> fingerprint compdb -> cache hit / restore

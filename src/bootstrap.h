@@ -23,6 +23,7 @@ typedef enum {
   CMD_VERSION,
   CMD_RELEASE,
   CMD_PROFILE,
+  CMD_LOG,
   CMD_INTERACTIVE_INIT
 } Command;
 
@@ -54,7 +55,6 @@ typedef struct {
   bool generate_compdb; // -g compdb
 
   // Workspace specific
-  bool ws_auto;             // auto-detect Buildfile.ws (satria polos di root ws)
   const char *ws_only;      // -w <nama>
   const char **ws_sel_argv; // [malloc] token `-- key=value ...`, NULL-terminasi
 

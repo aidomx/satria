@@ -99,6 +99,9 @@ long long fsFileSize(const char *path);
 bool fsStampNsSize(const char *path, int64_t *mtimeNs, long long *size);
 bool fsNewerThan(const char *a, const char *b);
 bool fsRemoveFile(const char *path);
+/* Ganti `to` dengan `from` (atomik; Windows: MoveFileEx
+   REPLACE_EXISTING|WRITE_THROUGH, fallback salin + hapus — design/startup.md §4). */
+bool fsRenameReplace(const char *from, const char *to);
 bool fsRemoveTree(const char *path); /* rm -rf portabel */
 /* Set permission mode (POSIX: chmod; Windows: _chmod — hanya bit
    read-only yang berarti). Dipakai pack saat menyiapkan staging .deb

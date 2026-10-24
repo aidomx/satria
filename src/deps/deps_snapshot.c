@@ -2,13 +2,22 @@
  * deps_snapshot — snapshot hash+mtime lintas-run & API publik deps
  * (dipindah apa adanya dari deps.c).
  *
- * Snapshot (.satria/deps.cache) merekam hash konten seluruh file yang
- * terlibat build sukses terakhir: mtime dipakai sebagai shortcut (file
- * dengan mtime sama tidak dibaca ulang), hash memverifikasi `touch`
- * tanpa perubahan isi. Juga memuat section cache edges (!e/!k) dalam
- * satu buka file — lihat deps_dotd.c.
+ * Snapshot merekam hash konten seluruh file yang terlibat build sukses
+ * terakhir: mtime dipakai sebagai shortcut (file dengan mtime sama tidak
+ * dibaca ulang), hash memverifikasi `touch` tanpa perubahan isi. Cache
+ * edges (.d) ikut dalam file yang sama — lihat deps_dotd.c.
+ *
+ * Penyimpanan (design/startup.md §3/§4): SATU file terpusat
+ * `.satria/caches/deps.cache` (cache_store) untuk semua proyek, dibedakan
+ * lewat alamat proyek. Baris snapshot: payload = path, time = mtime_ns,
+ * content = hash isi, size = 0 (tanpa shortcut ukuran — semantik cache lama).
+ * Baris edges: payload ":edge:<src>\x01<kid1>\x01...", time = mtime file .d,
+ * size = jumlah kid (expect). File lama (.satria/deps.cache dan
+ * .satria/workspace/<p>.deps.cache) tidak lagi dibaca/ditulis; clean tetap
+ * membuangnya bila masih ada.
  */
 #include "deps_internal.h"
+#include "../cache/cache_store.h"
 #include "../cmds/cmds_internal.h"
 
 #include <limits.h>
@@ -33,6 +42,7 @@ void depsFree(DepCache *dc) {
   for (int i = 0; i < dc->count; i++) {
     free(dc->nodes[i].path);
     free(dc->nodes[i].kids);
+    free(dc->nodes[i].semText);
   }
   free(dc->nodes);
   free(dc->hbucket);
@@ -92,112 +102,123 @@ static int snapFind(const DepCache *dc, const char *path) {
   }
 }
 
-/* Format baris cache: "<path> <mtime_ns_hex> <hash_hex>". Versi 2: mtime
-   diikutkan sebagai shortcut — file dengan mtime sama tidak perlu dibaca
-   ulang untuk di-hash. Cache tanpa mtime (versi 1) tetap terbaca: mtime
-   dianggap 0, alias "hash wajib dihitung ulang sekali". */
+/* ============ cache terpusat .satria/caches/deps.cache (cache_store) ========= */
+
+#define DEPS_EDGE_PREFIX ":edge:"
+
+/* Alamat proyek untuk entri cache terpusat: cmdsCacheProjAddr (cmds_state.c)
+   — nama proyek (workspace) atau cwd (single / sandbox profile). */
+
+/* Kunci entri edges: berprefix agar tidak tabrakan dengan entri snapshot
+   milik source yang sama — (proj, file) dalam cache_store unik. */
+static uint64_t depsEdgeAddr(const char *src) {
+  char buf[MAX_PATH + 16];
+  snprintf(buf, sizeof(buf), DEPS_EDGE_PREFIX "%s", src);
+  return csHash(buf);
+}
+
+/* Tambah baris snapshot tanpa menandai dirty (muatan cache, bukan perubahan). */
+static void snapAppend(DepCache *dc, const char *path, int64_t mtime, uint64_t hash) {
+  if (dc->snapCount == dc->snapCap) {
+    int ncap = dc->snapCap ? dc->snapCap * 2 : 256;
+    void *nn = realloc(dc->snap, (size_t)ncap * sizeof(*dc->snap));
+    if (!nn) return;
+    dc->snap = nn;
+    dc->snapCap = ncap;
+  }
+  dc->snap[dc->snapCount].path = strdup(path);
+  if (!dc->snap[dc->snapCount].path) return;
+  dc->snap[dc->snapCount].mtime = mtime;
+  dc->snap[dc->snapCount].hash = hash;
+  snapHashInsert(dc, dc->snapCount);
+  dc->snapCount++;
+}
+
+typedef struct {
+  DepCache *dc;
+  uint64_t proj;
+  bool wantEdges;
+} DepSnapCtx;
+
+/* Satu entri caches/deps.cache -> baris snapshot atau edge. Payload rusak
+   diabaikan (entri hilang = verifikasi menghitung ulang — selalu aman). */
+static bool depSnapVisit(const CsEntry *e, CsOp op, void *ctxp) {
+  (void)op;
+  DepSnapCtx *ctx = ctxp;
+  if (e->proj != ctx->proj || !e->payload) return true;
+  size_t preLen = strlen(DEPS_EDGE_PREFIX);
+  if (strncmp(e->payload, DEPS_EDGE_PREFIX, preLen) != 0) {
+    snapAppend(ctx->dc, e->payload, e->time, e->content);
+    return true;
+  }
+  if (!ctx->wantEdges) return true;
+
+  const char *rest = e->payload + preLen;
+  const char *sep = strchr(rest, '\x01');
+  size_t sl = sep ? (size_t)(sep - rest) : strlen(rest);
+  if (sl == 0 || sl >= MAX_PATH) return true;
+  char src[MAX_PATH];
+  memcpy(src, rest, sl);
+  src[sl] = '\0';
+
+  int nk = 0;
+  for (const char *q = sep ? sep + 1 : NULL; q && *q; nk++) {
+    q = strchr(q, '\x01');
+    if (q) q++;
+  }
+  DepCache *dc = ctx->dc;
+  if (dc->edgeCount == dc->edgeCap) {
+    int ncap = dc->edgeCap ? dc->edgeCap * 2 : 128;
+    void *nn = realloc(dc->edges, (size_t)ncap * sizeof(*dc->edges));
+    if (!nn) return true;
+    dc->edges = nn;
+    dc->edgeCap = ncap;
+  }
+  int idx = dc->edgeCount;
+  memset(&dc->edges[idx], 0, sizeof(dc->edges[idx]));
+  dc->edges[idx].src = strdup(src);
+  if (!dc->edges[idx].src) return true;
+  if (nk > 0) {
+    dc->edges[idx].kids = calloc((size_t)nk, sizeof(char *));
+    if (!dc->edges[idx].kids) {
+      free(dc->edges[idx].src);
+      return true;
+    }
+  }
+  int k = 0;
+  for (const char *q = sep ? sep + 1 : NULL; q && *q && k < nk; k++) {
+    const char *end = strchr(q, '\x01');
+    size_t len = end ? (size_t)(end - q) : strlen(q);
+    char *dup = malloc(len + 1);
+    if (!dup) break;
+    memcpy(dup, q, len);
+    dup[len] = '\0';
+    dc->edges[idx].kids[k] = dup;
+    q = end ? end + 1 : NULL;
+  }
+  dc->edges[idx].nkids = k;
+  dc->edges[idx].dm = e->time;
+  dc->edges[idx].expect = (int)e->size; /* jumlah kid saat direkam */
+  dc->edges[idx].used = false;
+  dc->edgeCount++;
+  return true;
+}
+
 void depSnapshotLoad(DepCache *dc) {
   if (dc->snapLoaded) return;
   dc->snapLoaded = true;
 
-  char snapPath[256];
-  cmdsStatePath(snapPath, sizeof(snapPath), "deps.cache");
-  FILE *fp = fopen(snapPath, "r");
-  if (!fp) {
-    dc->snapIncomplete = true; /* belum ada snapshot — wajib direkam */
-    return;
-  }
-
-  /* Satu pass untuk SEMUA section: snapshot hash + cache edges (!e/!k).
-     Sebelumnya edgesLoad membuka & mem-parsing file ini lagi — dua kali
-     baca+parsesetiap run, terasa di proot maupun termux. */
   bool wantEdges = !dc->edgesLoaded;
   dc->edgesLoaded = true;
-  int curEdge = -1;
-
-  char line[MAX_PATH + 128];
-  while (fgets(line, sizeof(line), fp)) {
-    if (line[0] == '!') {
-      if (!wantEdges) continue;
-      if (line[1] == 'e' && line[2] == ' ') {
-        char src[MAX_PATH];
-        unsigned long long dm = 0;
-        int cnt = -1;
-        int got = sscanf(line + 3, "%1023s %16llx %d", src, &dm, &cnt);
-        if (got < 2) continue;
-        if (got < 3) cnt = -1;
-        if (dc->edgeCount == dc->edgeCap) {
-          int ncap = dc->edgeCap ? dc->edgeCap * 2 : 128;
-          void *nn = realloc(dc->edges, (size_t)ncap * sizeof(*dc->edges));
-          if (!nn) continue;
-          dc->edges = nn;
-          dc->edgeCap = ncap;
-        }
-        int idx = dc->edgeCount;
-        dc->edges[idx].src = strdup(src);
-        if (!dc->edges[idx].src) continue;
-        dc->edges[idx].dm = (int64_t)dm;
-        dc->edges[idx].kids = NULL;
-        dc->edges[idx].nkids = 0;
-        dc->edges[idx].expect = cnt;
-        dc->edges[idx].used = false;
-        dc->edgeCount++;
-        curEdge = idx;
-        /* hash table dibangun SEKALI setelah semua baris dibaca (di bawah).
-           Dulu tabel hanya dibangun ulang saat load > 0.75, sehingga entri
-           yang dimuat setelah rebuild terakhir tidak pernah masuk tabel:
-           edgeFind meleset, file .d dibuka ulang dan deps.cache ditulis
-           ulang pada SETIAP build, termasuk no-op. */
-      } else if (line[1] == 'k' && line[2] == ' ') {
-        if (curEdge < 0 || curEdge >= dc->edgeCount) continue;
-        /* Baris "!k <path>": ambil sisa baris apa adanya (tanpa sscanf —
-           ~1800 baris pada project 200 source). Path dengan spasi ikut utuh. */
-        char *path = line + 3;
-        size_t pl = strlen(path);
-        while (pl && (path[pl - 1] == '\n' || path[pl - 1] == '\r')) path[--pl] = '\0';
-        if (!pl) continue;
-        /* kapasitas kids tumbuh geometris: 4, 8, 16, ... (bukan realloc per
-           kid). Kapasitas tersirat dari nkids: 4 untuk nkids 0..3, lalu
-           digandakan tiap nkids mencapai pangkat dua >= 4. */
-        int nk0 = dc->edges[curEdge].nkids;
-        if (nk0 == 0 || (nk0 >= 4 && (nk0 & (nk0 - 1)) == 0)) {
-          size_t ncap = nk0 == 0 ? 4 : (size_t)nk0 * 2;
-          char **nk = realloc(dc->edges[curEdge].kids, ncap * sizeof(char *));
-          if (!nk) continue;
-          dc->edges[curEdge].kids = nk;
-        }
-        char *dup = strdup(path);
-        if (!dup) continue;
-        dc->edges[curEdge].kids[nk0] = dup;
-        dc->edges[curEdge].nkids = nk0 + 1;
-      }
-      continue;
-    }
-    char path[MAX_PATH];
-    unsigned long long h = 0;
-    unsigned long long m = 0;
-    int got = sscanf(line, "%1023s %16llx %16llx", path, &m, &h);
-    if (got == 2) { h = m; m = 0; } /* versi 1: path hash */
-    if (got >= 2 && depIsObjectPath(path)) {
-      dc->snapDirty = true; /* entri object peninggalan bug lama: buang */
-      continue;
-    }
-    if (got >= 2) {
-      if (dc->snapCount == dc->snapCap) {
-        int ncap = dc->snapCap ? dc->snapCap * 2 : 256;
-        void *nn = realloc(dc->snap, (size_t)ncap * sizeof(*dc->snap));
-        if (!nn) break;
-        dc->snap = nn;
-        dc->snapCap = ncap;
-      }
-      dc->snap[dc->snapCount].path = strdup(path);
-      dc->snap[dc->snapCount].mtime = (int64_t)m;
-      dc->snap[dc->snapCount].hash = (uint64_t)h;
-      snapHashInsert(dc, dc->snapCount);
-      dc->snapCount++;
-    }
+  CsStore *st = csOpen(DEPS_CACHE_FILE);
+  if (!st) {
+    dc->snapIncomplete = true; /* belum ada / rusak — wajib direkam */
+    return;
   }
-  fclose(fp);
+  DepSnapCtx ctx = {dc, cmdsCacheProjAddr(), wantEdges};
+  csForEach(st, depSnapVisit, &ctx);
+  csClose(st);
+  /* Hash table edges dibangun SEKALI setelah semua entri dimuat. */
   depEdgesHashBuild(dc);
 }
 
@@ -382,32 +403,100 @@ void depsRecordUpdate(DepCache *dc, const char *src) {
   subtreeRecord(dc, root);
 }
 
+/* ":edge:<src>\x01<kid1>\x01..." — src diulang di payload supaya path bisa
+   dipulihkan saat load (kunci entri hanya hash). */
+static char *edgePayloadMake(const char *src, char *const *kids, int nkids) {
+  size_t len = strlen(DEPS_EDGE_PREFIX) + strlen(src);
+  for (int k = 0; k < nkids; k++) len += 1 + strlen(kids[k]);
+  char *buf = malloc(len + 1);
+  if (!buf) return NULL;
+  char *w = buf;
+  memcpy(w, DEPS_EDGE_PREFIX, strlen(DEPS_EDGE_PREFIX));
+  w += strlen(DEPS_EDGE_PREFIX);
+  size_t sl = strlen(src);
+  memcpy(w, src, sl);
+  w += sl;
+  for (int k = 0; k < nkids; k++) {
+    *w++ = '\x01';
+    size_t kl = strlen(kids[k]);
+    memcpy(w, kids[k], kl);
+    w += kl;
+  }
+  *w = '\0';
+  return buf;
+}
+
+typedef struct {
+  uint64_t *v;
+  size_t n, cap;
+  uint64_t proj;
+} DepKeyCtx;
+
+/* Kumpulkan kunci entri lama milik proyek ini — csDelete saat iterasi akan
+   menginvalasi forEach, jadi kunci dikumpulkan dulu. */
+static bool depKeysCollect(const CsEntry *e, CsOp op, void *ctxp) {
+  (void)op;
+  DepKeyCtx *ctx = ctxp;
+  if (e->proj != ctx->proj) return true;
+  if (ctx->n == ctx->cap) {
+    size_t nc = ctx->cap ? ctx->cap * 2 : 256;
+    uint64_t *nv = realloc(ctx->v, nc * sizeof(uint64_t));
+    if (!nv) return false; /* gagal: batal simpan — file lama tetap utuh */
+    ctx->v = nv;
+    ctx->cap = nc;
+  }
+  ctx->v[ctx->n++] = e->file;
+  return true;
+}
+
 void depsSave(DepCache *dc) {
   if (!dc || (!dc->snapDirty && !dc->edgeDirty)) return;
 
-  char snapPath[256];
-  cmdsStatePath(snapPath, sizeof(snapPath), "deps.cache");
-  cmdsStateMkdirFor(snapPath);
-  char tmp[MAX_PATH + 8];
-  snprintf(tmp, sizeof(tmp), "%s.tmp", snapPath);
-  FILE *fp = fopen(tmp, "w");
-  if (!fp) return;
-
-  for (int i = 0; i < dc->snapCount; i++)
-    fprintf(fp, "%s %016llx %016llx\n", dc->snap[i].path, (unsigned long long)dc->snap[i].mtime,
-            (unsigned long long)dc->snap[i].hash);
-  depEdgesSave(fp, dc);
-
-  bool ok = fclose(fp) == 0;
-  if (ok) {
-    fsRemoveFile(snapPath);
-    ok = rename(tmp, snapPath) == 0;
+  mkdirs(WS_CACHES_DIR);
+  CsStore *st = csOpen(DEPS_CACHE_FILE);
+  if (!st) {
+    /* File rusak: buang lalu tulis ulang bersih (self-healing — tanpa ini
+       csOpen gagal terus-menerus dan cache tidak pernah terbentuk). */
+    remove(DEPS_CACHE_FILE);
+    st = csOpen(DEPS_CACHE_FILE);
   }
-  if (!ok) fsRemoveFile(tmp);
-  else {
+  if (!st) return;
+  uint64_t proj = cmdsCacheProjAddr();
+
+  DepKeyCtx keys = {NULL, 0, 0, proj};
+  bool collected = csForEach(st, depKeysCollect, &keys);
+  if (collected)
+    for (size_t i = 0; i < keys.n; i++) csDelete(st, proj, keys.v[i]);
+  free(keys.v);
+  if (!collected) {
+    csClose(st);
+    return;
+  }
+
+  /* Baris snapshot: payload = path; size = 0 -> validasi mtime-saja
+     (persis shortcut cache lama, tanpa stat ukuran tambahan). */
+  for (int i = 0; i < dc->snapCount; i++) {
+    CsEntry e = {proj, csHash(dc->snap[i].path), dc->snap[i].hash,
+                 (long long)dc->snap[i].mtime, 0, dc->snap[i].path};
+    csPut(st, &e);
+  }
+  /* Edges terpakai: payload ":edge:...", size = nkids (expect). Entry tak
+     terpakai gugur otomatis (cache edges ter-pangkas tiap tulis). */
+  for (int i = 0; i < dc->edgeCount; i++) {
+    if (!dc->edges[i].used) continue;
+    char *pay = edgePayloadMake(dc->edges[i].src, dc->edges[i].kids, dc->edges[i].nkids);
+    if (!pay) continue;
+    CsEntry e = {proj, depsEdgeAddr(dc->edges[i].src), 0, (long long)dc->edges[i].dm,
+                 dc->edges[i].nkids, pay};
+    csPut(st, &e);
+    free(pay);
+  }
+
+  if (csCommit(st)) {
     dc->snapDirty = false;
     dc->edgeDirty = false;
   }
+  csClose(st);
 }
 
 int64_t depsNewestHeaderMTime(DepCache *dc, const char *src) {

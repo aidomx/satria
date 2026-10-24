@@ -79,15 +79,23 @@ int cmdsPackOnlyProject(const Config *c);
 int cmdsBuildPassRun(int jobs, Config c, const char *buildfilePath, bool libOnly);
 
 /* Koleksi source .c/.cpp dari Config — entri file langsung, folder discan
-   rekursif (walk cache .satria/ws.src bila mode workspace aktif); hasil
+   rekursif (walk cache .satria/sources.cache bila mode workspace aktif); hasil
    terurut (urutan link reprodusibel). */
 void cmdsCollectSources(const Config *c, List *out);
+
+/* Cek tabrakan path object antar-sumber (dua sumber -> object yang sama).
+   Mencetak pasangan yang bentrok ke stderr; false = ada tabrakan. */
+bool cmdsCheckObjectCollisions(const Config *c, const List *srcs);
 
 /* Jalankan logika bersih dari Config yang sudah tersusun — TANPA loadConfig
    dan TANPA chdir (cmdClean memakainya setelah loadConfig; wsRunProject
    memakainya dengan Config hasil wsBuildConfig). Path state mengikuti
    cmdsStateSetWsProject. Return 0 = sukses. */
 int cmdsCleanRun(const Config *c);
+/* Sama dengan cmdsCleanRun tanpa pesan "Nothing to clean": *anyOut = ada entri terhapus. */
+int cmdsCleanRunEx(const Config *c, bool *anyOut);
+/* Kosongkan isi folder (folder tetap ada); true bila semua entri terhapus. */
+bool cmdsEmptyDir(const char *dir, int *removed);
 
 /* ==================== cmds_state.c ==================== */
 
@@ -126,10 +134,71 @@ void cmdsFingerprintSave(const CmdsBuildFingerprint *fp, bool libOnly);
 void cmdsFingerprintInvalidate(void);
 
 /* Fast no-op: true bila state build terakhir masih persis sama — summary
-   diulang dari cache dan build dilewati sepenuhnya. libOnly memilih file
-   state fase library (.satria/build.lib.state); fase binary memakai
+   diulang dari cache dan build dilewati sepenuhnya. libOnly memilih cache
+   fase library (.satria/caches/lib.cache); fase binary memakai
    .satria/build.state. */
 bool cmdsFastStateValid(const char *buildfilePath, bool libOnly);
+
+/* ==== .satria/opts.cache (router; design/startup.md §3/§4) ====
+   Indeks file caches (deps/lib/embed) yang memuat entri tiap proyek. No-op
+   membaca router LEBIH DULU (optsRouterValidate): cache yang dirutekan
+   hilang/kosong -> validasi dibatalkan tanpa memuat build.state.
+   optsRouterRecord dipanggil setelah state tersimpan (SET sukses) dan
+   mengganti penuh set entri proyek. Clean mempertahankan opts.cache;
+   pengosongan isi caches membuat router gagal sehingga run berikutnya
+   rebuild dan merekam ulang router. */
+bool optsRouterRecord(const Config *c, bool libOnly);
+bool optsProjMetaStamp(uint64_t proj, uint64_t content); /* metadata grup P (§4) */
+/* Buang sisa state lama (file tulisan versi lama yang sudah digantikan
+   blob/store) — sekali per run + saat clean (design/startup.md audit). */
+void cmdsLegacyStateSweep(void);
+bool optsRouterValidate(void);
+
+/* ==== caches/lib.cache (fast-state fase library; design/startup.md §3/§4) ====
+   File terpusat `.satria/caches/lib.cache` (cache_store) menggantikan
+   .satria/build.lib.state (single) dan .satria/workspace/<proyek>.ws.lib.state:
+   satu entri meta (payload token k=v; lib=<path> diulang untuk daftar
+   library workspace) + satu entri per input (payload "<kind> [<content16hex>]
+   <path>" — F membawa content16hex sebagai bukti sentuh (design §4),
+   kompatibel mundur tanpanya; kind F file / D direktori / M hilang / L
+   verdict ld). Fase binary masih memakai format lama — migrasinya lewat
+   fingerprint.cache (opt-in). */
+#define WS_CACHES_DIR ".satria/caches"
+#define LIB_CACHE_FILE ".satria/caches/lib.cache"
+
+typedef struct {
+  char kind; /* 'F' file, 'D' direktori, 'M' hilang, 'L' verdict ld */
+  char path[WS_PATH_LEN];
+  long long mtime; /* ns; diabaikan untuk M dan L */
+  long long size;  /* hanya F */
+  unsigned long long content; /* FNV-1a isi (hanya F); 0 = tanpa bukti (entri lama) */
+} LibStampRec;
+
+typedef struct {
+  char cwd[WS_PATH_LEN];
+  char buildfile[WS_PATH_LEN];
+  long long bfm, bfs;
+  char target[WS_PATH_LEN * 2]; /* "" = tanpa target ("-" di file) */
+  long long tm, ts;
+  int skipped, compiled;
+  bool libRequested, libStaticUp, libSharedUp;
+  char libStaticPath[WS_PATH_LEN * 2];
+  char libSharedPath[WS_PATH_LEN * 2];
+  long long libStaticSize, libSharedSize;
+  char **libs; /* opsional (workspace): daftar path library */
+  int nlibs;
+} LibCacheMeta;
+
+/* Alamat proyek untuk cache terpusat: nama proyek (workspace — cmdsState
+   sudah menyetelnya per pass) atau cwd (single / sandbox profile). Dipakai
+   caches/lib.cache dan caches/deps.cache. */
+uint64_t cmdsCacheProjAddr(void);
+/* Simpan meta+stamp fase library (timpa entri proyek ini, atomik). */
+bool libCacheSave(const LibCacheMeta *m, const LibStampRec *stamps, int n);
+/* Muat entri proyek ini; false bila tidak ada/rusak. Pemanggil wajib
+   libCacheMetaFree(m) dan free(stamps). */
+bool libCacheLoad(LibCacheMeta *m, LibStampRec **stamps, int *n);
+void libCacheMetaFree(LibCacheMeta *m);
 
 /* Jalur fast-state workspace (cmds_wsstate.c). Aktif hanya saat workspace
    memanggil cmdBuildEx; single project tidak pernah mengaktifkannya. */
@@ -140,18 +209,29 @@ bool cmdsStatCached(const char *path, int64_t *mtimeNs, long long *size);
 void cmdsStatMemoSetCwd(void);
 void cmdsStatMemoForget(const char *path);
 int64_t cmdsMTimeDecide(const char *path);
-/* Parser & validasi satu baris format state F/D/X (format bersama ws.state,
-   ws.lib.state dan workspace.state — lihat header cmds_wsstate.c):
-     F <mtime_ns> <size> <path> | D <mtime_ns> 0 <path> | X 0 0 <path>
-   path harus menampung WS_PATH_LEN karakter (lebar WS_SCAN). */
-bool cmdsParseStateEntry(const char *line, char *kind, long long *mt, long long *sz, char *path);
+/* Parser & validasi satu baris format state F/D/X (format bersama ws.state dan
+   workspace.state lama — lihat header cmds_wsstate.c):
+     F <mtime_ns> <size> [<content16hex>] <path> | D <mtime_ns> 0 <path> | X 0 0 <path>
+   Baris F baru membawa content16hex (FNV-1a isi, bukti sentuh design §4);
+   baris lama tanpa kolom itu tetap sah (content = 0). path dan content
+   harus menampung WS_PATH_LEN karakter (lebar WS_SCAN). */
+bool cmdsParseStateEntry(const char *line, char *kind, long long *mt, long long *sz,
+                         unsigned long long *content, char *path);
 /* true bila baris F/D/X masih cocok stamp disk saat ini (F: mtime+size,
-   D: mtime, X: path tidak ada); false bila parse gagal atau stamp beda. */
+   D: mtime, X: path tidak ada); false bila parse gagal atau stamp beda.
+   F dengan content: stamp beda tapi hash isi sama (sentuh) tetap dianggap
+   segar tanpa rebuild — jalur incremental lama menyusul perilaku cache on. */
 bool cmdsStateEntryFresh(const char *line);
+/* FNV-1a 64 atas isi file (padanan fastStateHash untuk cmds_wsstate.c);
+   0 = tak terbaca. */
+uint64_t cmdsStateFileHash(const char *path);
 void cmdsStatMemoForgetTree(const char *dir);
 void cmdsStatMemoForgetOutputs(const char *buildDir, const List *items);
-void wsWalkDirCached(const char *dir, const char *ext, List *out);
-void wsWalkDirStamps(const char *dir, const char *ext, List *out);
+void cmdsSingleSourcesCacheBegin(void);
+void cmdsSingleSourcesCacheEnd(void);
+void stateWalkDirCached(const char *dir, const char *ext, List *out);
+void stateWalkDirStamps(const char *dir, const char *ext, List *out);
+void wsAddSourceDirs(List *items);
 bool wsModeActive(void);
 void wsFastStateSave(struct DepCache *dc, const Config *c, const List *srcs, const char *target,
                      const char *buildfilePath, bool libOnly);

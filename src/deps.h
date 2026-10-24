@@ -62,7 +62,7 @@ void depsClosureVisitMany(DepCache *dc, const char *const *srcs, int count,
 /*
  * Verifikasi konten (anti recompile tanpa perubahan isi, mis. setelah
  * `touch`): `true` bila snapshot hash source + seluruh dependensinya dari
- * build sukses terakhir (persist di .satria/deps.cache) sama dengan isi file
+ * build sukses terakhir (persist di .satria/caches/deps.cache) sama dengan isi file
  * saat ini. Snapshot dibaca sekali lazily; jika file tak dikenal snapshot,
  * dianggap berubah (return false — perilaku aman).
  */
@@ -71,18 +71,18 @@ bool depsContentUpToDate(DepCache *dc, const char *src);
 /*
  * Rekam hash konten source + seluruh dependensinya sebagai snapshot
  * "terkompilasi". Dipanggil setelah build sukses; ditulis ke disk oleh
- * depsSave() (format teks: <path> <hash> per baris).
+ * depsSave() (cache_store: entri per alamat proyek, payload = path).
  */
 void depsRecordUpdate(DepCache *dc, const char *src);
 
 /*
- * true bila snapshot belum menutupi seluruh state (deps.cache tidak ada,
+ * true bila snapshot belum menutupi seluruh state (caches/deps.cache tidak ada,
  * ada file belum direkam, atau cache edges meleset). Bila false dan tidak
  * ada yang dikompilasi, pass rekam setelah build sukses boleh dilewati.
  */
 bool depsSnapshotIncomplete(const DepCache *dc);
 
-/* Tulis snapshot ke .satria/deps.cache (atomik; diam bila gagal). */
+/* Tulis snapshot ke .satria/caches/deps.cache (atomik; diam bila gagal). */
 void depsSave(DepCache *dc);
 
 

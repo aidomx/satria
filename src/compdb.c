@@ -113,11 +113,10 @@ static void saveCompdbCache(uint64_t fingerprint) {
   if (!fp) return;
   fprintf(fp, "%016llx\n", (unsigned long long)fingerprint);
   fclose(fp);
-  /* Rename is intentionally done through the shell-independent stdio/OS
-     fallback already used by satria's portability layer only where available.
-     If the atomic replacement is unavailable, the old cache is harmless. */
-  remove(".satria/compile_commands.cache");
-  rename(".satria/compile_commands.cache.tmp", ".satria/compile_commands.cache");
+  /* Penggantian atomik lewat lapisan portabilitas (fsRenameReplace: Windows
+     MoveFileEx REPLACE_EXISTING; POSIX rename). Bila gagal, cache lama tetap
+     ada dan tidak berbahaya. */
+  fsRenameReplace(".satria/compile_commands.cache.tmp", ".satria/compile_commands.cache");
 }
 
 /* ============ restore dari blob (optimasi jalur restore) ============
@@ -164,8 +163,7 @@ static bool compdbRestoreFromBlob(uint64_t fingerprint) {
   if (!compdbCacheFingerprint(fingerprint)) return false;
   if (!compdbCopyFile(".satria/compile_commands.blob", ".satria/compile_commands.json.tmp"))
     return false;
-  remove("compile_commands.json");
-  if (rename(".satria/compile_commands.json.tmp", "compile_commands.json") != 0) {
+  if (!fsRenameReplace(".satria/compile_commands.json.tmp", "compile_commands.json")) {
     fsRemoveFile(".satria/compile_commands.json.tmp");
     return false;
   }
@@ -186,10 +184,7 @@ static void saveCompdbBlob(const char *buf, size_t len) {
     fsRemoveFile(".satria/compile_commands.blob.tmp");
     return;
   }
-#ifdef _WIN32
-  fsRemoveFile(".satria/compile_commands.blob");
-#endif
-  if (rename(".satria/compile_commands.blob.tmp", ".satria/compile_commands.blob") != 0)
+  if (!fsRenameReplace(".satria/compile_commands.blob.tmp", ".satria/compile_commands.blob"))
     fsRemoveFile(".satria/compile_commands.blob.tmp");
 }
 

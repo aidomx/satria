@@ -138,6 +138,22 @@ bool fsRemoveFile(const char *path) {
   return DeleteFileA(tmp) != 0;
 }
 
+/* Ganti `to` dengan `from`: MoveFileEx REPLACE_EXISTING|WRITE_THROUGH —
+   atomik pada filesystem yang mendukung. Bila `to` ditahan handle pihak
+   ketiga (antivirus/indexer, ERROR_ACCESS_DENIED), fallback salin + hapus
+   (rekomendasi design/startup.md §4). */
+bool fsRenameReplace(const char *from, const char *to) {
+  char f[MAX_PATH * 2], t[MAX_PATH * 2];
+  toBackslash(f, sizeof(f), from);
+  toBackslash(t, sizeof(t), to);
+  if (MoveFileExA(f, t, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) return true;
+  if (CopyFileA(f, t, FALSE)) {
+    DeleteFileA(f);
+    return true;
+  }
+  return false;
+}
+
 bool fsSetMode(const char *path, unsigned mode) {
   char tmp[MAX_PATH * 2];
   toBackslash(tmp, sizeof(tmp), path);
@@ -319,6 +335,12 @@ void fsMakeDir(const char *path) {
 
 bool fsRemoveFile(const char *path) {
   return unlink(path) == 0;
+}
+
+/* POSIX: rename() sudah atomic dan mengganti tujuan — pembungkus seragam
+   dengan jalur Windows (MoveFileEx) di port_fs.c bagian _WIN32. */
+bool fsRenameReplace(const char *from, const char *to) {
+  return rename(from, to) == 0;
 }
 
 bool fsSetMode(const char *path, unsigned mode) {

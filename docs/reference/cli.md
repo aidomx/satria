@@ -188,4 +188,4 @@ and safe to remove.
 
 ## Ninja conversion
 
-The v0.2.0 tree also contains Ninja Buildfile conversion support. The exact conversion flags are implementation-specific; `satria -h` is authoritative for the installed binary.
+The tree also contains Ninja Buildfile conversion support. The exact conversion flags are implementation-specific; `satria -h` is authoritative for the installed binary.

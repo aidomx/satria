@@ -205,10 +205,7 @@ void cacheWriteLD(const char *ldPath, bool gnu) {
   }
   /* POSIX rename atomik; Windows MSVCRT rename menolak menimpa file yang
      sudah ada — hapus dulu (pola yang sama dipakai cfgCacheSave). */
-#ifdef _WIN32
-  fsRemoveFile(LD_CACHE_FILE);
-#endif
-  if (rename(tmp, LD_CACHE_FILE) != 0) fsRemoveFile(tmp);
+  if (!fsRenameReplace(tmp, LD_CACHE_FILE)) fsRemoveFile(tmp);
 }
 
 /* Update the persistent verdict for the currently resolved ld. */

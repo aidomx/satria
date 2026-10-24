@@ -211,6 +211,31 @@ char *definesFlags(const Config *c) {
   return s;
 }
 
+/* Path sumber relatif root proyek: "bade/manager/main.c" -> "manager/main.c". */
+static const char *projectRelPath(const Config *c, const char *src) {
+  size_t pl = strlen(c->projRoot);
+  if (pl == 0) return src;
+  if (strncmp(src, c->projRoot, pl) == 0 && src[pl] == '/') return src + pl + 1;
+  return src;
+}
+
+/* Root sumber dalam mode workspace diawali root proyek (mis. "bade/manager"
+   untuk root proyek "bade"). Object harus memakai path relatif terhadap root
+   proyek: build/bade/manager/main.o, bukan build/bade/bade/manager/main.o. */
+static const char *projectRelRoot(const Config *c, const char *root) {
+  const char *r = root;
+  size_t pl = strlen(c->projRoot);
+  if (pl > 0) {
+    if (strcmp(root, c->projRoot) == 0) r = ".";
+    else if (strncmp(root, c->projRoot, pl) == 0 && root[pl] == '/') r = root + pl + 1;
+  }
+  /* Root "src" adalah root sumber utama: object-nya diratakan ke build/<proyek>/
+     (bade/src/bade.c -> build/bade/bade.o), sedangkan root lain, mis. "manager",
+     tetap memakai subfolder (build/bade/manager/main.o). */
+  if (strcmp(r, "src") == 0) return ".";
+  return r;
+}
+
 bool objectPathFor(const Config *c, const char *src, char *out, size_t n) {
   for (int i = 0; i < c->sources.count; i++) {
     const char *root = c->sources.items[i];
@@ -242,8 +267,9 @@ bool objectPathFor(const Config *c, const char *src, char *out, size_t n) {
        configured. This prevents collisions such as src/install.c and
        manager/install.c both becoming build/install.o. A single-root build
        keeps the historical flat layout for compatibility. */
-    if (c->sources.count > 1 && strcmp(root, ".") != 0)
-      snprintf(out, n, "%s/%s/%s.o", c->outBuildDir, root, rel);
+    const char *oroot = projectRelRoot(c, root);
+    if (c->sources.count > 1 && strcmp(oroot, ".") != 0)
+      snprintf(out, n, "%s/%s/%s.o", c->outBuildDir, oroot, rel);
     else
       snprintf(out, n, "%s/%s.o", c->outBuildDir, rel);
     return true;
@@ -270,13 +296,17 @@ bool excludedSource(const Config *c, const char *src) {
   if (!c || c->excludes.count == 0 || !src) return false;
   const char *base = strrchr(src, '/');
   base = base ? base + 1 : src;
+  /* exclude di Buildfile relatif root PROYEK (design/workspace.md), sedangkan
+     src di workspace relatif root workspace: cocokkan keduanya. */
+  const char *rel = projectRelPath(c, src);
   for (int i = 0; i < c->excludes.count; i++) {
     const char *e = c->excludes.items[i];
     if (!e || !*e) continue;
-    if (strcmp(src, e) == 0 || strcmp(base, e) == 0) return true;
+    if (strcmp(src, e) == 0 || strcmp(rel, e) == 0 || strcmp(base, e) == 0) return true;
     size_t el = strlen(e);
     /* Entri berakhiran '/' = prefix direktori: semua src di bawahnya. */
-    if (el > 0 && e[el - 1] == '/' && strncmp(src, e, el) == 0) return true;
+    if (el > 0 && e[el - 1] == '/' && (strncmp(src, e, el) == 0 || strncmp(rel, e, el) == 0))
+      return true;
   }
   return false;
 }

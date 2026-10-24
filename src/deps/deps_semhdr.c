@@ -1,5 +1,5 @@
 /*
- * deps_semhdr — pemeriksaan semantik perubahan header (opt-in: SATRIA_HDR_SEM=1).
+ * deps_semhdr — pemeriksaan semantik perubahan header pada workspace.
  *
  * Konservatif: header yang berubah hanya dimaafkan bila SEMUA perbedaan barisnya
  * adalah prototype fungsi (tanpa struct/enum/typedef/macro/static/inline), dan
@@ -17,12 +17,16 @@
 
 #include "deps_internal.h"
 #include "../cmds/cmds_internal.h"
+#include "../cache/state_blob.h"
 
 #define SEM_MAX_NAMES 64
 
 bool depsSemEnabled(void) {
   const char *e = getenv("SATRIA_HDR_SEM");
-  return e && strcmp(e, "1") == 0;
+  /* Eksplisit 1 mengaktifkan di semua mode; eksplisit 0 menonaktifkan.
+     Default hanya workspace: single-project tetap memakai invalidasi lama. */
+  if (e) return strcmp(e, "1") == 0;
+  return wsModeActive();
 }
 
 static bool isHeaderPath(const char *p) {
@@ -30,15 +34,14 @@ static bool isHeaderPath(const char *p) {
   return n >= 2 && strcmp(p + n - 2, ".h") == 0;
 }
 
-static void copyPathFor(const char *path, char *out, size_t n) {
+/* Nama relatif salinan header (stabil per path sumber). */
+static void copyRelFor(const char *path, char *out, size_t n) {
   uint64_t h = 1469598103934665603ULL;
   for (const char *q = path; *q; q++) {
     h ^= (unsigned char)*q;
     h *= 1099511628211ULL;
   }
-  char rel[64];
-  snprintf(rel, sizeof(rel), "hdr/%016llx.txt", (unsigned long long)h);
-  cmdsStatePath(out, n, rel);
+  snprintf(out, n, "hdr/%016llx.txt", (unsigned long long)h);
 }
 
 static char *readWhole(const char *path, size_t *outLen) {
@@ -66,20 +69,88 @@ static char *readWhole(const char *path, size_t *outLen) {
   return buf;
 }
 
-/* Simpan isi header saat snapshot direkam (dipanggil dari subtreeRecord). */
-void depsSemRecordNode(DepCache *dc, int idx) {
-  if (!depsSemEnabled() || !isHeaderPath(dc->nodes[idx].path)) return;
-  char cp[MAX_PATH + 64];
-  copyPathFor(dc->nodes[idx].path, cp, sizeof(cp));
-  cmdsStateMkdirFor(cp);
-  char *buf = readWhole(dc->nodes[idx].path, NULL);
-  if (!buf) return;
-  FILE *f = fopen(cp, "wb");
-  if (f) {
-    fputs(buf, f);
-    fclose(f);
+/* Salinan header: mode workspace -> record caches/state.cache; single -> file
+   .satria/hdr/<hash>.txt (jalur lama, tak berubah). */
+static char *semCopyRead(const char *rel, size_t *outLen) {
+  const char *wsp = cmdsStateWsProject();
+  if (wsp) {
+    char *b = NULL;
+    size_t n = 0;
+    if (!stateBlobGet(wsp, rel, &b, &n)) return NULL;
+    if (outLen) *outLen = n;
+    return b;
   }
+  char cp[MAX_PATH + 64];
+  cmdsStatePath(cp, sizeof(cp), rel);
+  return readWhole(cp, outLen);
+}
+
+static bool semCopyWrite(const char *rel, const char *data, size_t n) {
+  const char *wsp = cmdsStateWsProject();
+  if (wsp) return stateBlobPut(wsp, rel, data, n);
+  char cp[MAX_PATH + 64];
+  cmdsStatePath(cp, sizeof(cp), rel);
+  cmdsStateMkdirFor(cp);
+  FILE *f = fopen(cp, "wb");
+  if (!f) return false;
+  bool ok = fwrite(data, 1, n, f) == n;
+  if (fclose(f) != 0) ok = false;
+  return ok;
+}
+
+/* Isi header immutable selama satu build. Simpan satu salinan per DepNode;
+   pemanggil yang perlu memodifikasi buffer tetap meminta salinan terpisah. */
+static const char *semEnsureNodeText(DepCache *dc, int idx, size_t *outLen) {
+  if (idx < 0 || idx >= dc->count) return NULL;
+  DepNode *node = &dc->nodes[idx];
+  if (!isHeaderPath(node->path)) return NULL;
+  if (!node->semTextLoaded || node->semTextMtime != node->mtime) {
+    size_t len = 0;
+    char *buf = readWhole(node->path, &len);
+    if (!buf) return NULL;
+    free(node->semText);
+    node->semText = buf;
+    node->semTextLen = len;
+    node->semTextMtime = node->mtime;
+    node->semTextLoaded = true;
+  }
+  if (outLen) *outLen = node->semTextLen;
+  return node->semText;
+}
+
+static char *semReadNode(DepCache *dc, int idx, size_t *outLen) {
+  if (idx < 0 || idx >= dc->count) return NULL;
+  if (isHeaderPath(dc->nodes[idx].path)) {
+    size_t len = 0;
+    const char *text = semEnsureNodeText(dc, idx, &len);
+    if (!text) return NULL;
+    char *copy = malloc(len + 1);
+    if (!copy) return NULL;
+    memcpy(copy, text, len + 1);
+    if (outLen) *outLen = len;
+    return copy;
+  }
+  return readWhole(dc->nodes[idx].path, outLen);
+}
+
+/* Simpan isi header saat snapshot direkam (dipanggil dari subtreeRecord).
+   Node yang sama dapat muncul di subtree banyak TU; cukup rekam sekali selama
+   mtime-nya tidak berubah. */
+void depsSemRecordNode(DepCache *dc, int idx) {
+  if (!depsSemEnabled() || idx < 0 || idx >= dc->count ||
+      !isHeaderPath(dc->nodes[idx].path)) return;
+  DepNode *node = &dc->nodes[idx];
+  if (node->semRecorded && node->semRecordedMtime == node->mtime) return;
+  char rel[64];
+  copyRelFor(node->path, rel, sizeof(rel));
+  size_t blen = 0;
+  char *buf = semReadNode(dc, idx, &blen);
+  if (!buf) return;
+  bool saved = semCopyWrite(rel, buf, blen);
   free(buf);
+  if (!saved) return;
+  node->semRecorded = true;
+  node->semRecordedMtime = node->mtime;
 }
 
 /* Identifier boundary: kata utuh (bukan bagian dari identifier yang lebih panjang). */
@@ -95,6 +166,26 @@ static bool hasWord(const char *s, const char *w) {
     bool rb = !isIdentCh(p[wl]);
     if (lb && rb) return true;
   }
+  return false;
+}
+
+static bool hasWordSpan(const char *s, size_t n, const char *w) {
+  size_t wl = strlen(w);
+  if (!wl || wl > n) return false;
+  for (size_t i = 0; i + wl <= n; i++) {
+    if (memcmp(s + i, w, wl) != 0) continue;
+    bool lb = i == 0 || !isIdentCh(s[i - 1]);
+    bool rb = i + wl == n || !isIdentCh(s[i + wl]);
+    if (lb && rb) return true;
+  }
+  return false;
+}
+
+static bool lineInSetSpan(const char *s, size_t n, char **set, int count) {
+  while (n && (s[0] == ' ' || s[0] == '\t' || s[0] == '\r')) { s++; n--; }
+  while (n && (s[n - 1] == ' ' || s[n - 1] == '\t' || s[n - 1] == '\r')) n--;
+  for (int i = 0; i < count; i++)
+    if (strlen(set[i]) == n && memcmp(set[i], s, n) == 0) return true;
   return false;
 }
 
@@ -188,16 +279,31 @@ static bool collectNames(char **chg, int nchg, char names[][128], int *nnames) {
 /* true bila `name` dipakai (kata utuh) di node `idx` — baris perubahan header
    sendiri dilewati (itu deklarasi yang memang baru). */
 static bool nodeUsesName(DepCache *dc, int idx, const char *name, char **chg, int nchg) {
+  if (isHeaderPath(dc->nodes[idx].path)) {
+    size_t n = 0;
+    const char *buf = semEnsureNodeText(dc, idx, &n);
+    if (!buf) return true; /* tak terbaca: konservatif */
+    size_t pos = 0;
+    while (pos < n) {
+      size_t end = pos;
+      while (end < n && buf[end] != '\n') end++;
+      size_t a = pos, len = end - pos;
+      while (len && (buf[a] == ' ' || buf[a] == '\t' || buf[a] == '\r')) { a++; len--; }
+      while (len && (buf[a + len - 1] == ' ' || buf[a + len - 1] == '\t' || buf[a + len - 1] == '\r')) len--;
+      if (!lineInSetSpan(buf + a, len, chg, nchg) && hasWordSpan(buf + a, len, name)) return true;
+      pos = end < n ? end + 1 : n;
+    }
+    return false;
+  }
+
   size_t n = 0;
   char *buf = readWhole(dc->nodes[idx].path, &n);
   if (!buf) return true; /* tak terbaca: konservatif */
   char **lines = NULL;
   int nl = splitLines(buf, &lines);
   bool used = nl < 0;
-  for (int i = 0; i < nl && !used; i++) {
-    if (inSet(chg, nchg, lines[i]) && isHeaderPath(dc->nodes[idx].path)) continue;
+  for (int i = 0; i < nl && !used; i++)
     if (hasWord(lines[i], name)) used = true;
-  }
   free(lines);
   free(buf);
   return used;
@@ -209,11 +315,11 @@ bool depsSemAcceptNode(DepCache *dc, int root, int idx) {
   if (!depsSemEnabled() || root < 0 || idx < 0 || root == idx) return false;
   if (!isHeaderPath(dc->nodes[idx].path) || dc->nodes[idx].mtime < 0) return false;
 
-  char cp[MAX_PATH + 64];
-  copyPathFor(dc->nodes[idx].path, cp, sizeof(cp));
-  char *oldb = readWhole(cp, NULL);
+  char rel[64];
+  copyRelFor(dc->nodes[idx].path, rel, sizeof(rel));
+  char *oldb = semCopyRead(rel, NULL);
   if (!oldb) return false;
-  char *newb = readWhole(dc->nodes[idx].path, NULL);
+  char *newb = semReadNode(dc, idx, NULL);
   if (!newb) {
     free(oldb);
     return false;

@@ -80,7 +80,7 @@ return mx - mn > 0.5
 }
 
 # ---------------------------- rules (header) -------------------------------
-# Legend/Metrics/Correctness dicetak SEBELUM execution stream (design/
+# Legend/Metrics/Build Expect dicetak SEBELUM execution stream (design/
 # bench_ws_output.md) supaya arti metrik & harapan kerja terbaca dulu,
 # bukan setelah angka-angka.
 rules_header() {
@@ -98,15 +98,30 @@ rules_header() {
   printf '  %-5s : %s\n' "bin" "binary berubah"
   printf '  %-5s : %s\n' "arc" "arsip .rp berubah"
   echo
-  echo "Correctness (Validation Rules) :"
-  printf '  %-10s: %s\n' "cold" "obj penuh, arc 1, lib 4, bin 2 · noop: semua nol"
-  printf '  %-10s: %s\n' "leaf/bade" "cc 1, bin 2 — dependensi compile & relink siklus via shim"
-  printf '  %-10s: %s\n' "mod" "cc 0, bin 2 — arsip berubah, kompilasi tidak perlu ulang"
-  printf '  %-10s: %s\n' "touch" "satria 0 (content-hash); cmake: cek rebuild sesuai dependency"
-  printf '  %-10s: %s\n' "hedit" "kedua tool obj cc 6 (edit konten header pusat), lib 4, bin 2"
-  printf '  %-10s: %s\n' "sel" "cakupan disamakan (SEL_TARGETS) — obj cc 2, lib 4, bin 2"
-  printf '  %-10s: %s\n' "dep" "cakupan disamakan — obj cc 1, lib 4, bin 2"
-  printf '  %-10s: %s\n' "rel" "artefak tar + sha256 dicek sha256sum -c (satria-only)"
+  echo "Build Expect (aturan validasi per backend) :"
+  echo "  cmake + ninja :"
+  printf '    %-10s: %s\n' "cold" "obj penuh, arc 1, lib 4, bin 2; cc termasuk probe CMake"
+  printf '    %-10s: %s\n' "noop" "obj/arc/lib/bin/cc semua 0"
+  printf '    %-10s: %s\n' "leaf/bade" "obj 1, cc 1, lib 2, bin 2 — compile + relink siklus via shim"
+  printf '    %-10s: %s\n' "mod" "obj 1, cc 0, lib 2, bin 2 — arsip berubah tanpa kompilasi"
+  printf '    %-10s: %s\n' "touch" "header pusat hanya berubah mtime: rebuild dependency (obj/cc 6, lib 4, bin 2)"
+  printf '    %-10s: %s\n' "hedit" "obj/cc 6, lib 4, bin 2 — konten header pusat berubah"
+  printf '    %-10s: %s\n' "sel" "obj/cc 2, lib 4, bin 2 — target kedua proyek"
+  printf '    %-10s: %s\n' "dep" "obj 2, cc 1, lib 4, bin 2 — target kedua proyek"
+  printf '    %-10s: %s\n' "libtouch" "header internal mtime: obj/cc 2"
+  printf '    %-10s: %s\n' "libhdr" "obj/cc 2, lib 4, bin 2 — konten header internal berubah"
+  echo "  satria :"
+  printf '    %-10s: %s\n' "cold" "obj penuh, arc 1, lib 4, bin 2"
+  printf '    %-10s: %s\n' "noop" "obj/arc/lib/bin/cc semua 0"
+  printf '    %-10s: %s\n' "leaf/bade" "obj 1, cc 1, lib 2, bin 0 — perubahan source, tanpa relink binary"
+  printf '    %-10s: %s\n' "mod" "obj 1, cc 0, lib 0, bin 1 — arsip/embed berubah, relink bade saja"
+  printf '    %-10s: %s\n' "touch" "obj/arc/lib/bin/cc semua 0 — content-hash"
+  printf '    %-10s: %s\n' "hedit" "obj/cc 6, lib 4, bin 2 — konten header pusat berubah"
+  printf '    %-10s: %s\n' "sel" "obj/cc 1, lib 2, bin 0 — hanya core (mutasi hanya komentar tidak memicu relink)"
+  printf '    %-10s: %s\n' "dep" "obj 1, cc 0, lib 0, bin 1 — bade + embed saja"
+  printf '    %-10s: %s\n' "libtouch" "obj/arc/lib/bin/cc semua 0 — content-hash"
+  printf '    %-10s: %s\n' "libhdr" "obj/cc 2, lib 4, bin 2 — konten header internal berubah"
+  printf '    %-10s: %s\n' "rel" "tar + SHA-256 diverifikasi dengan sha256sum -c (satria-only)"
 }
 
 # ---------------------------- [Detailed Validation Log] --------------------

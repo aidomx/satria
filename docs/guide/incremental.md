@@ -30,6 +30,21 @@ potentially become a no-op instead of recompiling every source that includes `fo
 
 Typical output can distinguish a touched-but-unchanged dependency from a genuinely changed one.
 
+## Semantic header awareness
+
+In workspace mode, a changed header does not automatically recompile every
+translation unit that includes it. satria compares the header against the copy
+saved at the last compile: if every differing line is only a function
+prototype — and the function names do not appear anywhere in the unit's
+dependency subtree — the change is semantically unused for that unit and the
+unit is skipped. Any struct/enum/typedef/macro/static/inline difference falls
+back to normal invalidation. Override with `SATRIA_HDR_SEM=1` (force on in all
+modes) or `SATRIA_HDR_SEM=0` (off); the default is workspace-only.
+
+Header search paths are configurable per workspace and per project
+(`headers = ...`), and `headers.internal = ...` tracks shared headers as build
+inputs without passing them with `-I`.
+
 ## Why this matters
 
 The objective is not to claim that satria is always faster than Ninja. The objective is predictable incremental behavior with low overhead across environments.

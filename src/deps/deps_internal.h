@@ -20,7 +20,10 @@
 
 #define DEPS_MAX_NODES 8192
 #define DOTD_MAX_LINE 16384
-#define DEPS_SNAPSHOT_FILE ".satria/deps.cache"
+/* Cache terpusat (design/startup.md §3): semua proyek berbagi SATU file
+   per jenis cache (WS_CACHES_DIR di cmds_internal.h); baris dikelompokkan
+   per alamat proyek (cache_store). */
+#define DEPS_CACHE_FILE ".satria/caches/deps.cache"
 
 typedef struct {
   char *path;    /* path ternormalisasi relatif root */
@@ -32,6 +35,15 @@ typedef struct {
   bool parsed;
   bool dloaded; /* edges dari file .d compiler: flat & lengkap — header anak
                    tidak perlu dibuka/dipindai saat verifikasi */
+  /* Memo semantic-header selama satu proses build. Header yang sama dapat
+     dikunjungi dari banyak TU; simpan isi saat ini dan hindari readWhole()
+     berulang. Kunci validitas adalah mtime node yang sudah diperiksa. */
+  char *semText;
+  size_t semTextLen;
+  int64_t semTextMtime;
+  bool semTextLoaded;
+  bool semRecorded;
+  int64_t semRecordedMtime;
 } DepNode;
 
 struct DepCache {
@@ -67,9 +79,9 @@ struct DepCache {
   int *sbucket;
   int sbcap;
 
-  /* Cache edges dari run sebelumnya (bagian "!e" deps.cache): bila mtime
-     file .d masih sama, edges langsung dipakai tanpa membuka file .d —
-     satu stat menggantikan open+read+fstat per source per run. */
+  /* Cache edges dari run sebelumnya (entri ":edge:" di caches/deps.cache):
+     bila mtime file .d masih sama, edges langsung dipakai tanpa membuka
+     file .d — satu stat menggantikan open+read+fstat per source per run. */
   struct {
     char *src;
     int64_t dm;
@@ -120,7 +132,7 @@ char *depReadWhole(const char *path, size_t *outLen);
 /* Pastikan node sudah punya edges (dari .d bila layak, else pemindai). */
 void depParseNodeIfNeeded(DepCache *dc, int idx);
 
-/* Pemeriksaan semantik header (deps_semhdr.c, opt-in SATRIA_HDR_SEM=1). */
+/* Pemeriksaan semantik header (default workspace; SATRIA_HDR_SEM=0 menonaktifkan). */
 bool depsSemEnabled(void);
 void depsSemRecordNode(DepCache *dc, int idx);
 bool depsSemAcceptNode(DepCache *dc, int root, int idx);
@@ -134,15 +146,12 @@ int64_t depNewestUnder(DepCache *dc, int idx);
 bool depIsObjectPath(const char *p);
 
 /* Bangun tabel hash edges dari seluruh entri yang ada. Dipanggil sekali
-   setelah deps.cache selesai dimuat. */
+   setelah caches/deps.cache selesai dimuat. */
 void depEdgesHashBuild(DepCache *dc);
-
-/* Tulis section cache edges (!e/!k) ke file snapshot yang sedang dibuka. */
-void depEdgesSave(FILE *fp, const DepCache *dc);
 
 /* ==================== deps_snapshot.c ==================== */
 
-/* Muat .satria/deps.cache sekali per run: snapshot hash + section edges. */
+/* Muat .satria/caches/deps.cache sekali per run: snapshot hash + edges. */
 void depSnapshotLoad(DepCache *dc);
 
 #endif /* SATRIA_V0_1_0_DEPS_INTERNAL_H */

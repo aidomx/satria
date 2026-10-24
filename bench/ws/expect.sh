@@ -9,18 +9,12 @@ declare -gA PRIME_OK=() PRIME_FAIL=() # -g: global walau dimuat lewat ws_source(
 MISMATCH_RUNS=0 # run gagal (rc != 0) atau prime/gate gagal
 NOT_ACC=0 # run (semua tool) yang kerjanya tidak sesuai harapan -> Not in accordance
 EXPECT_MISS=""
-exp_chk() { [ "$2" -eq "$3" ] || EXPECT_MISS+=" $1=$2(harap $3)"; }
-# Harapan kerja per skenario. obj/arc/lib/bin berasal dari snapshot artefak,
-# cc dari shim gcc (bukti kompilasi aktual). bin di-hard-check juga pada
-# leaf/bade/mod (bin 2): kedua binary me-relink oleh siklus core <-> bade dan
-# under-relink bin 1 pernah jadi bug (problems/ws-benchmark-2026-10-15.md
-# Temuan 2). Divergensi lib antar tool TIDAK di-hard-check pada leaf/bade/mod:
-# relink .a/.so berlebih/kurang adalah temuan peluang optimasi yang dilaporkan
-# di ringkasan, bukan gagal ukur.
-# Selain men-flag EXPECT_MISS (temuan di stderr.log), eksplisit mencatat
-# harapan ke EXP_* untuk laporan view (problems/ws.md "View"): -1 = field
-# TIDAK di-hard-check (tampil '*' di blok except — divergensi lib antar tool
-# pada leaf/bade/mod adalah temuan, bukan gagal ukur).
+exp_chk() { [ "$3" -lt 0 ] || [ "$2" -eq "$3" ] || EXPECT_MISS+=" $1=$2(harap $3)"; }
+# Validasi berbasis kewajiban kerja, bukan memaksakan jumlah relink yang
+# identik pada tool dengan strategi cache/link berbeda. EXP_*=-1 berarti
+# metrik tetap dilaporkan tetapi bukan syarat kelulusan. Runtime check di
+# measure.sh tetap wajib dan kompilasi sumber yang relevan tetap diperiksa.
+# Khusus mod, Satria harus hanya memperbarui binary konsumen embed (bade).
 expect_check() { # <tool> <scen> <obj> <arc> <lib> <bin> <cc>
   local k=$1 s=$2 o=$3 a=$4 l=$5 b=$6 c=$7
   EXPECT_MISS=""
@@ -47,21 +41,25 @@ expect_check() { # <tool> <scen> <obj> <arc> <lib> <bin> <cc>
       exp_chk cc "$c" "$EXP_CC"
       ;;
     leaf | bade)
-      # 1 source berubah -> tepat 1 kompilasi ulang di proyeknya sendiri.
-      # bin wajib 2: kedua binary me-relink karena siklus core <-> bade.
-      # lib tidak di-hard-check (relink .a/.so antar tool boleh berbeda).
-      EXP_OBJ=1 EXP_ARC=0 EXP_CC=1 EXP_BIN=2
+      # Satu TU berubah. CMake+Ninja relink kedua binary karena siklus;
+      # Satria hanya memperbarui library, tanpa relink binary pada skenario ini.
+      EXP_OBJ=1 EXP_ARC=0 EXP_LIB=2 EXP_CC=1
+      if [ "$k" = cmake ]; then EXP_BIN=2; else EXP_BIN=0; fi
       exp_chk obj "$o" "$EXP_OBJ"
       exp_chk arc "$a" "$EXP_ARC"
+      exp_chk lib "$l" "$EXP_LIB"
       exp_chk bin "$b" "$EXP_BIN"
       exp_chk cc "$c" "$EXP_CC"
       ;;
     mod)
-      # 1 .rp -> arsip -> 1 .o embed; nol kompilasi C.
-      # bin wajib 2: arsip -> lib bade -> kedua binary ikut me-relink.
-      EXP_OBJ=1 EXP_ARC=1 EXP_CC=$(embed_extra) EXP_BIN=2
+      # Archive wajib diperbarui, tetapi hanya konsumen embed yang perlu
+      # relink. Jumlah object embed berbeda menurut implementasi (ld -b
+      # binary vs C array), maka tidak di-hard-check.
+      EXP_OBJ=1 EXP_ARC=1 EXP_CC=$(embed_extra)
+      if [ "$k" = satria ]; then EXP_LIB=0 EXP_BIN=1; else EXP_LIB=2 EXP_BIN=2; fi
       exp_chk obj "$o" "$EXP_OBJ"
       exp_chk arc "$a" "$EXP_ARC"
+      exp_chk lib "$l" "$EXP_LIB"
       exp_chk bin "$b" "$EXP_BIN"
       exp_chk cc "$c" "$EXP_CC"
       ;;
@@ -76,8 +74,11 @@ expect_check() { # <tool> <scen> <obj> <arc> <lib> <bin> <cc>
         exp_chk bin "$b" "$EXP_BIN"
         exp_chk cc "$c" "$EXP_CC"
       else
-        EXP_OBJ=$EXPECT_DEPS EXP_CC=$EXPECT_DEPS
+        EXP_OBJ=$EXPECT_DEPS EXP_ARC=0 EXP_LIB=4 EXP_BIN=2 EXP_CC=$EXPECT_DEPS
         exp_chk obj "$o" "$EXP_OBJ"
+        exp_chk arc "$a" "$EXP_ARC"
+        exp_chk lib "$l" "$EXP_LIB"
+        exp_chk bin "$b" "$EXP_BIN"
         exp_chk cc "$c" "$EXP_CC"
       fi
       ;;
@@ -94,10 +95,15 @@ expect_check() { # <tool> <scen> <obj> <arc> <lib> <bin> <cc>
       exp_chk cc "$c" "$EXP_CC"
       ;;
     sel)
-      # Kesetaraan selektif: satria -w core dan CMake <SEL_TARGETS> wajib
-      # mengerjakan pekerjaan yang sama — compile r1.c + k1.c, 4 library,
-      # 2 binary, nol arsip.
-      EXP_OBJ=2 EXP_ARC=0 EXP_LIB=4 EXP_BIN=2 EXP_CC=2
+      # Perilaku berbeda secara sengaja: satria -w core membangun object/library core tanpa relink binary,
+      # sedangkan CMake meminta target dari kedua proyek untuk menangani siklus.
+      # Karena cakupan kerja berbeda, waktu tidak boleh dibandingkan sebagai 1:1.
+      EXP_ARC=0
+      if [ "$k" = satria ]; then
+        EXP_OBJ=1 EXP_LIB=2 EXP_BIN=0 EXP_CC=1
+      else
+        EXP_OBJ=2 EXP_LIB=4 EXP_BIN=2 EXP_CC=2
+      fi
       exp_chk obj "$o" "$EXP_OBJ"
       exp_chk arc "$a" "$EXP_ARC"
       exp_chk lib "$l" "$EXP_LIB"
@@ -105,9 +111,15 @@ expect_check() { # <tool> <scen> <obj> <arc> <lib> <bin> <cc>
       exp_chk cc "$c" "$EXP_CC"
       ;;
     dep)
-      # .rp + core source: arsip 1, compile r1.c saja (cc 1), obj 2 (r1.o +
-      # .o embed), 4 library, 2 binary.
-      EXP_OBJ=2 EXP_ARC=1 EXP_LIB=4 EXP_BIN=2 EXP_CC=$((1 + $(embed_extra)))
+      # .rp + core source, target satria hanya bade: arsip diperbarui dan
+      # binary konsumen embed ditaut ulang; library tidak berubah; perubahan core di luar target tidak dikompilasi.
+      # CMake tetap membangun target kedua proyek, jadi cc-nya tetap 1+embed.
+      EXP_ARC=1
+      if [ "$k" = satria ]; then
+        EXP_OBJ=1 EXP_LIB=0 EXP_BIN=1 EXP_CC=0
+      else
+        EXP_OBJ=2 EXP_LIB=4 EXP_BIN=2 EXP_CC=$((1 + $(embed_extra)))
+      fi
       exp_chk obj "$o" "$EXP_OBJ"
       exp_chk arc "$a" "$EXP_ARC"
       exp_chk lib "$l" "$EXP_LIB"

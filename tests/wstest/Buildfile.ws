@@ -8,22 +8,21 @@ projects = rupamod, rupa, ruka
 
 compiler = gcc, clang
 flags = Wall, Wextra, MMD, MP
-headers = include, build, I.
+headers = rupaapi, I.
+headers.each = I.
 std = gnu11
 
-# B. rupamod — proyek kemasan (archive)
+# A. rupamod — proyek kemasan (archive)
 mod.output.binary = false
 mod.archive.src = .
-mod.archive.pattern = .rp
 mod.archive.name = rupa_modules
-mod.archive.with.tar = true
-mod.archive.with.ext = gz
-mod.archive.dir = dist
+mod.archive.with = tar
+mod.archive.exclude = build, dist, LICENSE, README.md, .git, self_archive
+mod.archive.dir = modules
 
-# A. rupa
+# B. rupa
 rupa.sources = src
 rupa.exclude = main.c
-rupa.headers = ../ruka/include
 
 rupa.output as rupaout
 rupa.library as rupalib
@@ -48,9 +47,10 @@ ruka.embedded.modules as rukamod
 
 ruka.depends_on = rupamod
 
-rukamod.file = ../rupamod/dist/rupa_modules.tar.gz
+rukamod.file = modules/rupa_modules.tar
 rukamod.variable = MODULES
-ruka.headers = ../rupa/include
+rukamod.extract = /tmp/rupa-system
+rukamod.pattern = .rp
 
-rukalib.linux = rupa
-rupalib.linux = ruka
+rukalib.cdeps = rupa
+rupalib.cdeps = ruka

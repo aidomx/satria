@@ -64,8 +64,7 @@ bool packBuildTar(const Config *c, const PackArtifact *a) {
   }
 
   mkparent(a->path);
-  fsRemoveFile(a->path);
-  if (rename(a->tmp, a->path) != 0) {
+  if (!fsRenameReplace(a->tmp, a->path)) {
     fsRemoveFile(a->tmp);
     fprintf(stderr, "satria: pack: tidak bisa menempatkan %s\n", a->path);
     return false;

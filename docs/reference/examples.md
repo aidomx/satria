@@ -58,4 +58,4 @@ app.depends_on = core
 app.output.binaryName = app
 ```
 
-The exact alias/field combinations should be checked against the installed satria version when using a configuration that goes beyond the documented v0.2.0 examples.
+The exact alias/field combinations should be checked against the installed satria version when using a configuration that goes beyond the documented examples.

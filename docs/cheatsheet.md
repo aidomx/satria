@@ -1,6 +1,6 @@
-# satria v0.2.2 — Cheatsheet
+# satria v0.2.4 — Cheatsheet
 
-Referensi cepat untuk penggunaan sehari-hari. Berdasarkan dokumentasi `satria-v0.2.2`; source dipakai untuk memeriksa detail implementasi yang relevan.
+Referensi cepat untuk penggunaan sehari-hari. Berdasarkan dokumentasi `satria-v0.2.4`; source dipakai untuk memeriksa detail implementasi yang relevan.
 
 ---
 
@@ -246,7 +246,7 @@ output.libDir = lib
 output.libraryShared = true
 ```
 
-> `lib.cdeps` / `*.cdeps` adalah rencana desain berikutnya, **bukan field resmi v0.2.2**.
+> `lib.cdeps` / `*.cdeps` kini field resmi: dependensi lintas-proyek mode workspace (mis. `badelib.cdeps = core`), diselesaikan lewat graph `cdeps`.
 
 ---
 
@@ -726,22 +726,38 @@ release  = unit distribusi
 
 # 26. Catatan versi
 
-Dokumentasi yang tersedia memiliki beberapa halaman dengan baseline v0.2.0,
-sementara release ini adalah v0.2.2. Untuk fitur yang jelas ditambahkan
-setelah baseline tersebut—terutama workspace release dan `init -p`—gunakan
-dokumentasi v0.2.2 dan perilaku binary sebagai acuan.
+Sebagian halaman dokumentasi masih berbaseline v0.2.0/v0.2.2, sementara
+release ini adalah v0.2.4. Untuk fitur yang ditambahkan setelah baseline
+tersebut—workspace release, `init -p`, no-op cache (aktif default;
+`SATRIA_CACHE_NOOP=0` menonaktifkan), validasi header semantik
+(`SATRIA_HDR_SEM`), `headers` berskop workspace/proyek, dan dependensi
+lintas-proyek `cdeps`—gunakan perilaku binary dan dokumen `design/` sebagai
+acuan.
 
-Beberapa ide yang sedang berkembang **jangan dianggap sebagai konfigurasi
-resmi v0.2.2**, misalnya:
+Ide yang masih dikembangkan **bukan konfigurasi resmi**; periksa `satria -h`
+dan `design/` sebelum memakai syntax baru.
 
-```text
-lib.cdeps
-```
-
-Jika konfigurasi lama masih diterima oleh satria, kompatibilitas lama tetap
+Jika konfigurasi lama masih diterima satria, kompatibilitas lama tetap
 boleh digunakan; cheatsheet ini tidak mengubahnya menjadi syntax baru.
 
 ---
 
-**Version:** satria v0.2.2
+# 27. Environment variables
+
+```text
+SATRIA_CACHE_NOOP   no-op cache gate (default aktif; =0 menonaktifkan)
+SATRIA_CACHE_TRACE  jejak keputusan cache (fast path / gate no-op)
+SATRIA_HDR_SEM      validasi header semantik (default: workspace; 1=selalu, 0=nonaktif)
+SATRIA_PROFILE      cetak penanda fase (ms) ke stderr
+SATRIA_STATUS       cetak status gate/cold build
+SATRIA_WS_PAR       =0 menjalankan anak workspace serial (default: penjadwal siap-dep)
+SATRIA_NO_COLOR     matikan warna (juga NO_COLOR)
+SATRIA_HOME         lokasi state global (default ~/.satria)
+SATRIA_CMD          path cmd.txt untuk bantuan CLI
+SATRIA_NO_LD        paksa jalur embed fallback tanpa ld (testing)
+```
+
+---
+
+**Version:** satria v0.2.4
 **Purpose:** quick reference, bukan spesifikasi lengkap Buildfile.

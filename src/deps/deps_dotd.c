@@ -8,9 +8,9 @@
  * (mtime >= source) dipakai sebagai sumber edges node source: flat tapi
  * lengkap, karena compiler yang meresolusi rekursi itu sendiri.
  *
- * Cache edges ("!e"/"!k" di .satria/deps.cache): run sebelumnya menyimpan
- * edges dari file .d yang dipakai. Run berikutnya memvalidasi satu stat
- * mtime .d: sama -> edges dipasang langsung, file .d tidak dibuka.
+ * Cache edges (entri ":edge:" di .satria/caches/deps.cache): run sebelumnya
+ * menyimpan edges dari file .d yang dipakai. Run berikutnya memvalidasi satu
+ * stat mtime .d: sama -> edges dipasang langsung, file .d tidak dibuka.
  * Berbeda/hilang -> entry diabaikan, edges dibangun ulang dari .d (atau
  * scanner) seperti biasa, lalu direkam ulang saat build sukses.
  */
@@ -159,7 +159,7 @@ void depEdgesHashBuild(DepCache *dc) {
   }
 }
 
-/* Section !e/!k dimuat oleh depSnapshotLoad dalam pass yang sama (satu buka
+/* Entri edges dimuat oleh depSnapshotLoad dalam pass yang sama (satu buka
    file per run). Fungsi ini hanya memastikan load sudah terjadi. */
 static void edgesLoad(DepCache *dc) {
   if (dc->edgesLoaded) return;
@@ -237,19 +237,9 @@ static void edgesRecord(DepCache *dc, int idx, int64_t dm) {
   dc->edgeDirty = true;
 }
 
-/* Entry yang tak terpakai (source hilang dari build) tidak ikut disimpan —
-   cache edges ter-pangkas otomatis tiap kali ditulis. */
-void depEdgesSave(FILE *fp, const DepCache *dc) {
-  for (int i = 0; i < dc->edgeCount; i++) {
-    /* Source tanpa header project (nkids == 0) sah disimpan: jumlah kids ikut
-       ditulis agar cache terpotong tidak salah dibaca sebagai "tanpa header". */
-    if (!dc->edges[i].used) continue;
-    fprintf(fp, "!e %s %016llx %d\n", dc->edges[i].src, (unsigned long long)dc->edges[i].dm,
-            dc->edges[i].nkids);
-    for (int k = 0; k < dc->edges[i].nkids; k++)
-      fprintf(fp, "!k %s\n", dc->edges[i].kids[k]);
-  }
-}
+/* Penulisan edges kini lewat depsSave (deps_snapshot.c): payload
+   ":edge:<src>\x01<kids>" di caches/deps.cache. Entry yang tak terpakai
+   tidak ikut disimpan — cache edges ter-pangkas otomatis tiap tulis. */
 
 bool depsLoadDotD(DepCache *dc, const char *src) {
   if (!dc || !src) return false;

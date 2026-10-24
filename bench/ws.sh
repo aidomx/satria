@@ -19,8 +19,8 @@
 # ke work.log — bukti pekerjaan aktual, bukan sekadar timestamp artefak.
 #   touch : touch include/a.h tanpa ubah konten (perilaku tiap tool diaudit)
 #   hedit : ubah ISI library/a.h -> semua tool wajib rebuild dependen header
-#   sel   : edit core+bade, cakupan -w core (target keluaran disamakan antar tool)
-#   dep   : edit .rp+core, cakupan -w bade (target keluaran disamakan antar tool)
+#   sel   : edit core+bade, satria hanya membangun target -w core; CMake tetap dua proyek
+#   dep   : edit .rp+core, satria hanya membangun target -w bade; CMake tetap dua proyek
 #   libtouch: touch library/ext.h (header internal via headers.internal), konten sama
 #   libhdr: edit ISI library/ext.h (header internal, diakses include relatif dari r2/k2)
 #   rel   : release terpisah (tar + sha256, satria-only) sesuai docs/guide/releases.md

@@ -1,5 +1,6 @@
-#include <ruka.h>
 #include <stdio.h>
+
+extern void ruka_hello();
 
 int main(void) {
   ruka_hello();

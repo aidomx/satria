@@ -1,6 +1,6 @@
 # Workspace
 
-Dokumen ini mencatat aturan, desain, dan target implementasi workspace `satria` v0.2.3+. Workspace adalah jalur build tersendiri; perubahan di sini tidak mengubah perilaku maupun performa single-project.
+Dokumen ini mencatat aturan, desain, dan target implementasi workspace `satria` v0.2.4+. Workspace adalah jalur build tersendiri; perubahan di sini tidak mengubah perilaku maupun performa single-project.
 
 ---
 
@@ -34,15 +34,18 @@ workspace/
  ├── library/                     # Shared headers (nama bebas, tidak harus 'include')
  │   └── ext.h
  ├── .satria/                       # State & cache terpusat
- │   ├── workspace.state          # State global (untuk no-op check)
- │   ├── workspace/               # State per-proyek (prefiks nama proyek)
- │   │   ├── rupa.ws.state            # fase binary
- │   │   ├── rupa.ws.lib.state        # fase library
- │   │   ├── rupa.build.fingerprint
- │   │   ├── rupa.build.state
- │   │   ├── rupa.deps.cache
- │   │   └── rupa.src                 # snapshot daftar source terakhir
- │   └── workspace_log            # Indeks no-op & CompDB (lihat seksi No-op)
+ │   ├── startup.state             # Config cache (parse Buildfile.ws)
+ │   ├── sources.cache             # Peta path -> hash isi + stamp (fast path no-op)
+ │   ├── opts.cache                # Route/opsi + stamp grup per proyek
+ │   ├── artifact.cache            # Validasi artefak release/embed
+ │   ├── report.blob               # Laporan terkondensasi (diputar saat no-op)
+ │   ├── ld.cache                  # Cache verdict linker
+ │   └── caches/
+ │       ├── fingerprint.cache     # Fingerprint per proyek + fast state + metadata grup P
+ │       ├── state.cache           # Blob per proyek (ws.state, snapshot src, hdr/*)
+ │       ├── deps.cache            # Dependensi .d per proyek
+ │       ├── lib.cache             # Stamp fase library per proyek
+ │       └── embed.cache           # Cache arsip embedded
  ├── build/                       # Objek (.o) dan dependency files (.d)
  │   ├── rupa/
  │   └── bade/
@@ -216,10 +219,10 @@ satria -w release -- name=rupamod target=deb
 
 ### State & Cache
 
-1. **Global State:** `workspace.state` dan `compile_commands.json` selalu di root workspace.
-2. **Per-Project State:** file state spesifik proyek (`ws.state`, `ws.lib.state`, `build.fingerprint`, `build.state`, `deps.cache`, snapshot source) dipindah dari `<project>/.satria/` ke `<root>/.satria/workspace/<nama_proyek>.<nama_file>` — misal `rupa.ws.state`, `rupa.build.fingerprint`, `rupa.deps.cache`.
-3. **Implementasi C:** fungsi penentu path state harus menerima argumen `root_dir` dan `project_name`, lalu menyusun path ke `<root>/.satria/workspace/` alih-alih `project_dir/.satria/`.
-4. **No-Op Check:** `src/bootstrap.c` membaca `.satria/workspace.state` (bukan `.satria/build.state`) untuk mode workspace. Jika fingerprint workspace tidak berubah dan tidak ada flag `--force`, langsung exit.
+1. **Global State:** seluruh cache berada di root workspace — `caches/fingerprint.cache` (fingerprint per proyek, snapshot fast state, metadata grup P), `caches/state.cache` (blob per proyek: `ws.state`, snapshot `src`, salinan header `hdr/*`), `caches/lib.cache`, `caches/deps.cache`, `sources.cache`, `opts.cache`, `artifact.cache`, `startup.state`, dan `compile_commands.json`.
+2. **Per-Project State:** tidak ada lagi file per proyek (`rupa.ws.state`, `rupa.build.fingerprint`, ...) — semuanya menjadi record/entri berprefix nama proyek di file cache terpusat di atas. Sisa format lama (`workspace.state`, `workspace_log`, `.satria/workspace/*`) di-sweep otomatis saat run.
+3. **Implementasi C:** baca/tulis state lewat API cache (`stateBlob*`, `csOpen`/`csCommit`, ...) dengan path root workspace; tidak ada penulisan state ke direktori anggota dan tidak ada chdir.
+4. **No-Op Check:** gerbang no-op (`wsCacheNoopValid`, design/startup.md §4) menilai `sources.cache` (fast path metadata P — N stat tanpa membuka `fingerprint.cache`), lalu `caches/fingerprint.cache` + `artifact.cache`; pesan no-op diseragamkan (`> Cache valid: ...`) dan laporan tersimpan diputar dari `.satria/report.blob`.
 
 ---
 
@@ -230,8 +233,8 @@ satria -w release -- name=rupamod target=deb
 3. **Hitung dependency closure** untuk target selektif dan rencana pekerjaan dari indeks yang sama, tanpa discovery ulang per proyek.
 4. **Periksa incremental state**, source/header dependencies, command/fingerprint, dan output.
 5. **Compile secara paralel** ke `build/<project>/...` serta hasilkan dependency files (path `.d` dibuat relatif root — aman karena CWD tidak berubah).
-6. **Kerjakan library, archive/embed, dan linking** sesuai dependensi nyata, termasuk dependensi siklik yang didukung. Binary di `bin/<name>` (file), library di `lib/`, arsip member ke `archive.dir` (mis. `modules/`), release ke `dist/`.
-7. **Perbarui `workspace.state`**, `.satria/workspace_log`, dan CompDB bila memang berubah.
+6. **Kerjakan library, archive/embed, dan linking** sesuai dependensi nyata, termasuk dependensi siklik yang didukung. Binary di `bin/<name>` (file), library di `lib/`, arsip member ke `archive.dir` (mis. `modules/`), release ke `dist/`. Fase library memakai **penjadwal siap-dep** (anak fork diluncurkan segera setelah `depends_on` selesai; jalur serial `-j1`/`SATRIA_WS_PAR=0` bertingkat dependensi), fase binary menyusul setelah seluruh library tersedia.
+7. **Perbarui cache state** (`caches/*`, `sources.cache`, `opts.cache`) dan CompDB bila memang berubah — tulis atomik sekali di akhir run sukses.
 
 ### Pemisahan Jalur Build
 
@@ -245,13 +248,13 @@ satria -w release -- name=rupamod target=deb
 
 ## No-op dan CompDB
 
-- **`.satria/workspace_log` — indeks no-op & CompDB.** Format: berkas teks, satu blok per proyek, berisi:
+- **Indeks no-op & CompDB** kini berupa entri per proyek di `caches/state.cache` (leaf `compdb-index-v1`; berkas `workspace_log` lama hanya objek sweep). Isi per proyek:
   1. nama proyek,
   2. hash konfigurasinya dari `Buildfile.ws` (baris yang memengaruhinya),
-  3. fingerprint daftar source terakhir (dari snapshot `<nama>.src`),
+  3. fingerprint daftar source terakhir (dari snapshot `src`),
   4. hash isi `compile_commands.json` terakhir.
 
-  File ini hanya dipakai untuk dua keputusan: **(a) no-op cepat** — proyek dengan (2)+(3) identik dilewati tanpa re-scan source-nya; **(b) skip-write CompDB** — `compile_commands.json` hanya ditulis ulang bila hash-nya berbeda dari (4). `workspace_log` **tidak** menyimpan mtime/size/artefak — domain itu milik `workspace.state` (global) dan `<nama>.build.state` per proyek; jangan menduplikasinya.
+  Indeks ini hanya dipakai untuk dua keputusan: **(a) no-op cepat** — proyek dengan (2)+(3) identik dilewati tanpa re-scan source-nya; **(b) skip-write CompDB** — `compile_commands.json` hanya ditulis ulang bila hash-nya berbeda dari (4). Indeks **tidak** menyimpan mtime/size/artefak — domain itu milik `caches/fingerprint.cache` (fingerprint + fast state) dan `artifact.cache`; jangan menduplikasinya.
 - `compile_commands.json` **hanya ada di root workspace** dan selalu merepresentasikan seluruh workspace, sekalipun build terakhir selektif.
 - `satria -g compdb` dari root workspace bersifat **query-only**: tidak menjalankan build atau mengubah build state.
 - Jangan tulis ulang CompDB yang identik. Perubahan daftar source atau command harus terdeteksi meski `Buildfile.ws` tidak berubah.
