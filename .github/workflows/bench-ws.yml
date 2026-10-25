@@ -90,7 +90,7 @@ jobs:
       - name: Bootstrap satria
         run: |
           ./install.sh --dev
-          test -x build/bin/satria
+          test -x bin/satria
 
       - name: Capture runner environment
         if: ${{ inputs.artifacts }}
@@ -105,7 +105,7 @@ jobs:
             gcc --version | head -1
             cmake --version
             ninja --version
-            build/bin/satria version || true
+            bin/satria version || true
           } | tee benchmark-results/runner.txt
 
       # The first measured run must not also be the first ever invocation of
@@ -116,7 +116,7 @@ jobs:
         if: ${{ inputs.warmup }}
         run: |
           bash bench/ws.sh \
-            -b "$PWD/build/bin/satria" \
+            -b "$PWD/bin/satria" \
             -n "$BENCH_SOURCES" \
             -H "$BENCH_HEADERS" \
             -m "$BENCH_MODULES" \
@@ -133,7 +133,7 @@ jobs:
           mkdir -p benchmark-results
 
           bash bench/ws.sh \
-            -b "$PWD/build/bin/satria" \
+            -b "$PWD/bin/satria" \
             -n "$BENCH_SOURCES" \
             -H "$BENCH_HEADERS" \
             -m "$BENCH_MODULES" \
