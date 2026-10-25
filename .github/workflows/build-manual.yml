@@ -52,7 +52,8 @@ jobs:
       # oleh linker), jadi self-host build tidak boleh dijalankan dari binary
       # yang menjadi target link. Di Windows pakai salinan bootstrap
       # (bin/satria-bootstrap.exe); platform lain tetap ./bin/satria.
-      SELF_BIN: ${{ runner.os == 'Windows' && './bin/satria-bootstrap.exe' || './bin/satria' }}
+      # (matrix.os, bukan runner.os: konteks runner tidak tersedia di env job.)
+      SELF_BIN: ${{ startsWith(matrix.os, 'windows') && './bin/satria-bootstrap.exe' || './bin/satria' }}
 
     steps:
       - uses: actions/checkout@v4
