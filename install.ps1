@@ -76,6 +76,22 @@ function Write-CompileProgress {
     Write-Host -NoNewline "`r> ${bar}${rest} ${percent}%"
 }
 
+function Invoke-NativeCapture([string]$Exe, [string[]]$CmdArgs) {
+    # stderr compiler/linker digabung ke output. ErrorActionPreference dilonggarkan
+    # hanya selama pemanggilan, agar warning (stderr) tidak dianggap error terminasi
+    # oleh $ErrorActionPreference = "Stop". Output hanya ditampilkan bila gagal.
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        $out  = & $Exe @CmdArgs 2>&1
+        $code = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $prev
+    }
+    return [pscustomobject]@{ Code = $code; Output = $out }
+}
+
 function Install-Binary([string]$Binary) {
     $InstallDir  = Join-Path $env:LOCALAPPDATA "satria"
     $InstallPath = Join-Path $InstallDir "satria.exe"
@@ -206,20 +222,22 @@ if ($Dev) {
                     "/c", $Source.FullName,
                     "/Fo$Obj"
                 )
-                & cl @ClArgs *> $null
+                $cr = Invoke-NativeCapture "cl" $ClArgs
             } else {
                 $CcArgs = @(
                     "-std=gnu11", "-O2", "-Wall", "-Wextra",
-                    "-DSATRIA_VERSION_EEmbedDEDD=`"$Version`"",
+                    "-DSATRIA_VERSION_EMBEDDED=`"$Version`"",
                     "-I$IncludeDir",
                     "-I$SrcInner",
                     "-c", $Source.FullName,
                     "-o", $Obj
                 )
-                & $Compiler @CcArgs *> $null
+                $cr = Invoke-NativeCapture $Compiler $CcArgs
             }
 
-            if ($LASTEXITCODE -ne 0) {
+            if ($cr.Code -ne 0) {
+                Write-Host ""
+                $cr.Output | ForEach-Object { Write-Host "$_" }
                 throw "gagal mengompilasi $($Source.Name)"
             }
 
@@ -241,13 +259,14 @@ if ($Dev) {
         $global:LASTEXITCODE = 0
         if ($Compiler -eq "cl") {
             $LinkArgs = @($Objects) + @("/nologo", "/SUBSYSTEM:CONSOLE", "/OUT:$Output", "shell32.lib")
-            & link @LinkArgs *> $null
+            $lr = Invoke-NativeCapture "link" $LinkArgs
         } else {
             $LinkArgs = @($Objects) + @("-o", $Output, "-lshell32")
-            & $Compiler @LinkArgs *> $null
+            $lr = Invoke-NativeCapture $Compiler $LinkArgs
         }
 
-        if ($LASTEXITCODE -ne 0) {
+        if ($lr.Code -ne 0) {
+            $lr.Output | ForEach-Object { Write-Host "$_" }
             throw "gagal melakukan linking satria"
         }
 
