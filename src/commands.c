@@ -1362,6 +1362,15 @@ int cmdsBuildPassRun(int jobs, Config c, const char *buildfilePath, bool libOnly
        dari `target` luar — MSVC /W4 memperingatkan shadowing, C4456.) */
     char linkTarget[MAX_PATH * 2];
     snprintf(linkTarget, sizeof(linkTarget), "%s/%s", c.outBinaryDir, c.outBinaryName);
+    /* link.exe TIDAK menambahkan .exe pada /OUT yang tanpa ekstensi (beda dari
+       MinGW gcc yang menambahkannya sendiri). Tanpa ekstensi, binary self-host
+       berakhir sebagai file terpisah dari target inkremental bin/<name>.exe —
+       ringkasan membaca .exe basi dan run berikutnya menautkan ulang. */
+    {
+      size_t ltLen = strlen(linkTarget);
+      if (ltLen < 4 || strcmp(linkTarget + ltLen - 4, ".exe") != 0)
+        strcat(linkTarget, ".exe");
+    }
     strcat(cmd, " /link /nologo /INCREMENTAL:NO /OUT:");
     strcat(cmd, linkTarget);
     for (int i = 0; i < c.libraries.count; i++) {

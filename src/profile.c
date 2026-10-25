@@ -638,6 +638,12 @@ static int buildSandboxed(ProfCtx *p, const char *passKind) {
   /* Link — pola cmdBuildEx (GNU/Clang; MSVC cabang sendiri). */
   char target[MAX_PATH * 2];
   snprintf(target, sizeof(target), "%s/%s", c.outBinaryDir, c.outBinaryName);
+  if (compilerIsMSVC(&c)) {
+    /* link.exe tidak menambahkan .exe sendiri pada /OUT tanpa ekstensi —
+       samakan dengan target inkremental bin/<name>.exe (lihat commands.c). */
+    size_t tLen = strlen(target);
+    if (tLen < 4 || strcmp(target + tLen - 4, ".exe") != 0) strcat(target, ".exe");
+  }
   size_t n = strlen(c.cc) + 1; /* compiler + NUL */
   for (int i = 0; i < srcs.count; i++) {
     if (!objectPathFor(&c, srcs.items[i], obj, sizeof(obj))) continue;
