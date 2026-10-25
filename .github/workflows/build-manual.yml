@@ -1,0 +1,94 @@
+# satria lintas platform: Linux (gcc/clang), macOS (clang), dan Windows (MSVC + MinGW).
+# Seluruh kode satria memakai lapisan portabilitas (src/port/port_*.c),
+# jadi tidak ada lagi asumsi POSIX-only.
+#
+# Build TANPA cmake: bootstrap dengan install.sh --dev / install.ps1 --dev
+# (compiler C langsung), lalu satria membangun dirinya sendiri dari Buildfile.
+name: Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        type: string
+        description: "Version tag (mis. v0.2.4). Kosongkan untuk pakai default dari .satria-version"
+        required: false
+        default: ""
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # ---- Linux x86_64 ----
+          - os: ubuntu-latest
+            cc: gcc
+          - os: ubuntu-latest
+            cc: clang
+
+          # ---- Linux arm64 ----
+          - os: ubuntu-24.04-arm
+            cc: gcc
+          - os: ubuntu-24.04-arm
+            cc: clang
+
+          # ---- macOS arm64 (Apple Silicon) ----
+          - os: macos-latest
+            cc: clang
+
+          # ---- Windows x86_64: MSVC ----
+          - os: windows-latest
+            cc: cl
+
+          # ---- Windows x86_64: MinGW ----
+          - os: windows-latest
+            cc: gcc
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Setup Node.js 24 untuk environment
+      - name: Setup Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      # cl.exe tidak ada di PATH bash default runner — impor env vcvars
+      # (PATH/INCLUDE/LIB) agar install.ps1 bisa memanggil cl langsung.
+      - name: Setup MSVC environment
+        uses: ilammy/msvc-dev-cmd@v1
+        if: matrix.cc == 'cl'
+
+      - name: Bootstrap build (install.sh --dev)
+        if: runner.os != 'Windows'
+        shell: bash
+        env:
+          CC: ${{ matrix.cc }}
+          SATRIA_VERSION: ${{ inputs.version }}
+        run: ./install.sh --dev
+
+      - name: Bootstrap build (install.ps1 --dev)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          CC: ${{ matrix.cc }}
+          SATRIA_VERSION: ${{ inputs.version }}
+        run: ./install.ps1 --dev
+
+      - name: Smoke test
+        shell: bash
+        run: ./bin/satria version
+
+      # satria membangun dirinya sendiri dari Buildfile — di Windows/MSVC ini
+      # menguji jalur tanpa file .d (pemindai #include), translasi flag, dan
+      # link MSVC; di MinGW/Linux/macOS menguji jalur .d (-MMD) end-to-end.
+      - name: Self-host build (Buildfile)
+        shell: bash
+        run: ./bin/satria -j4
+
+      - name: Self-host incremental (semua up-to-date)
+        shell: bash
+        run: ./bin/satria

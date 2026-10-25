@@ -73,15 +73,15 @@ jobs:
 
       - name: Smoke test
         shell: bash
-        run: ./build/bin/satria version
+        run: ./bin/satria version
 
       # satria membangun dirinya sendiri dari Buildfile — di Windows/MSVC ini
       # menguji jalur tanpa file .d (pemindai #include), translasi flag, dan
       # link MSVC; di MinGW/Lin/macOS menguji jalur .d (-MMD) end-to-end.
       - name: Self-host build (Buildfile)
         shell: bash
-        run: ./build/bin/satria -j4
+        run: ./bin/satria -j4
 
       - name: Self-host incremental (semua up-to-date)
         shell: bash
-        run: ./build/bin/satria
+        run: ./bin/satria
