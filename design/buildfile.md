@@ -27,10 +27,11 @@ sources/headers/output tetap relatif terhadap lokasi Buildfile.
   (dinamis `.so/.dylib/.dll` + `-fPIC` otomatis), `o.libDir`.
 - **lain**: `clean as c` + `c.build/c.compdb`, `foreground` (kendali Ctrl+C),
   `progress.bar`, `progress.error`.
-- **embedded**: `embedded.<nama>.src/pattern/extract/variable/file`,
+- **embedded**: `embedded.<nama>.src/pattern/extract/variable/key/type/file`,
   `embedded.<nama>.archive.dir/name/with.tar/with.ext`. Hasil:
-  `build/embedded.h` + object arsip; dua jalur: `ld -r -b binary` (GNU ld)
-  vs fallback C array (MSVC/tanpa ld). Freshness arsip otomatis.
+  `build/embedded.c` + `build/embedded.h` — codegen tunggal (array byte +
+  tabel `getEmbed()`; jalur `ld -r -b binary` sudah dihapus — design/
+  embedded.md). Freshness arsip otomatis, regenerasi content-based.
 - **versi**: `.satria-version` → `build/version.h` (SATRIA_VERSION_EMBEDDED);
   mengubah isi memicu kompilasi ulang; `satria version` selalu benar karena
   versi ter-embed saat build.

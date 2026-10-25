@@ -19,6 +19,7 @@
 #include <windows.h>
 #else
 #include <errno.h>
+#include <fcntl.h> /* open/O_* — redirect output child ke file tangkapan */
 #include <signal.h>
 #include <spawn.h>
 #include <sys/types.h>
@@ -153,8 +154,26 @@ static bool procBuildShellCommand(const char *cmd, char *command, size_t n) {
   return written >= 0 && (size_t)written < n;
 }
 
-/* Buat proses lewat cmd.exe di process group terpisah (dilacak registry). */
-static bool procCreate(const char *cmd, PROCESS_INFORMATION *pi) {
+/* File sementara untuk tangkapan output child (dir TEMP user). */
+bool procCaptureTemp(char *pathOut, size_t n) {
+  if (!pathOut || n < MAX_PATH) return false;
+  char dir[MAX_PATH + 1];
+  DWORD len = GetTempPathA((DWORD)sizeof(dir), dir);
+  if (len == 0 || len >= sizeof(dir)) return false;
+  char file[MAX_PATH];
+  if (GetTempFileNameA(dir, "sat", 0, file) == 0) return false;
+  pathNormalizeSlash(file);
+  if (strlen(file) + 1 > n) {
+    DeleteFileA(file);
+    return false;
+  }
+  strcpy(pathOut, file);
+  return true;
+}
+
+/* Buat proses lewat cmd.exe di process group terpisah (dilacak registry).
+   capPath != NULL: stdout+stderr child diarahkan ke file tangkapan. */
+static bool procCreate(const char *cmd, PROCESS_INFORMATION *pi, const char *capPath) {
   STARTUPINFOA si;
   char command[MAX_PATH * 4];
   if (!procBuildShellCommand(cmd, command, sizeof(command))) return false;
@@ -163,10 +182,30 @@ static bool procCreate(const char *cmd, PROCESS_INFORMATION *pi) {
   memset(pi, 0, sizeof(*pi));
   si.cb = sizeof(si);
 
+  HANDLE hCap = NULL;
+  if (capPath) {
+    /* Handle inheritable agar lolos bInheritHandles; parent menutupnya
+       setelah CreateProcess (child memegang salinan). */
+    SECURITY_ATTRIBUTES sa;
+    sa.nLength = sizeof(sa);
+    sa.lpSecurityDescriptor = NULL;
+    sa.bInheritHandle = TRUE;
+    hCap = CreateFileA(capPath, GENERIC_WRITE, FILE_SHARE_READ, &sa, CREATE_ALWAYS,
+                       FILE_ATTRIBUTE_NORMAL, NULL);
+    if (hCap == INVALID_HANDLE_VALUE) return false;
+    si.dwFlags = STARTF_USESTDHANDLES;
+    si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+    si.hStdOutput = hCap;
+    si.hStdError = hCap;
+  }
+
   procEnsureHandler();
   if (!CreateProcessA(NULL, command, NULL, NULL, TRUE, CREATE_NEW_PROCESS_GROUP, NULL, NULL,
-                      &si, pi))
+                      &si, pi)) {
+    if (hCap) CloseHandle(hCap);
     return false;
+  }
+  if (hCap) CloseHandle(hCap);
   procRegisterPid(pi->dwProcessId);
   return true;
 }
@@ -175,7 +214,7 @@ bool procRun(const char *cmd) {
   if (!cmd || !*cmd) return false;
 
   PROCESS_INFORMATION pi;
-  if (!procCreate(cmd, &pi)) return false;
+  if (!procCreate(cmd, &pi, NULL)) return false;
 
   DWORD wait = WaitForSingleObject(pi.hProcess, INFINITE);
   DWORD exitCode = 1;
@@ -190,8 +229,30 @@ bool procRun(const char *cmd) {
 bool procStart(const char *cmd, ProcHandle *out) {
   if (!cmd || !*cmd || !out) return false;
 
+  out->capPath[0] = '\0';
   PROCESS_INFORMATION pi;
-  if (!procCreate(cmd, &pi)) return false;
+  if (!procCreate(cmd, &pi, NULL)) return false;
+  CloseHandle(pi.hThread);
+
+  out->pid = pi.dwProcessId;
+  out->hProcess = (void *)pi.hProcess;
+  out->finished = false;
+  out->ok = false;
+  out->interrupted = false;
+  return true;
+}
+
+bool procStartCapture(const char *cmd, ProcHandle *out) {
+  if (!cmd || !*cmd || !out) return false;
+
+  out->capPath[0] = '\0';
+  if (!procCaptureTemp(out->capPath, sizeof(out->capPath))) return procStart(cmd, out);
+
+  PROCESS_INFORMATION pi;
+  if (!procCreate(cmd, &pi, out->capPath)) {
+    out->capPath[0] = '\0';
+    return false;
+  }
   CloseHandle(pi.hThread);
 
   out->pid = pi.dwProcessId;
@@ -258,6 +319,13 @@ void procStopAll(ProcHandle *handles, int count) {
     handles[i].finished = true;
     handles[i].ok = exitCode == 0;
     handles[i].interrupted = true;
+  }
+  /* File tangkapan job yang berhenti tanpa sempat dicetak dibuang di sini. */
+  for (int i = 0; i < count; i++) {
+    if (handles[i].capPath[0]) {
+      remove(handles[i].capPath);
+      handles[i].capPath[0] = '\0';
+    }
   }
 }
 
@@ -429,6 +497,25 @@ bool procSetForeground(bool foreground) {
 
 bool procInterrupted(void) { return g_wantInterrupt != 0; }
 
+/* File sementara untuk tangkapan output child (TMPDIR, fallback /tmp). */
+bool procCaptureTemp(char *pathOut, size_t n) {
+  if (!pathOut || n < 32) return false;
+  const char *tmp = getenv("TMPDIR");
+  if (!tmp || !*tmp) tmp = "/tmp";
+  char tmpl[MAX_PATH + 32];
+  if (snprintf(tmpl, sizeof(tmpl), "%s/satria-cap-XXXXXX", tmp) >= (int)sizeof(tmpl))
+    return false;
+  int fd = mkstemp(tmpl);
+  if (fd < 0) return false;
+  close(fd);
+  if (strlen(tmpl) + 1 > n) {
+    remove(tmpl);
+    return false;
+  }
+  strcpy(pathOut, tmpl);
+  return true;
+}
+
 /*
  * Jalankan command langsung (tanpa `/bin/sh -c`) bila command "polos": hanya
  * kata dipisah spasi, tanpa quote/variabel/glob/redirect/pipe — persis bentuk
@@ -452,8 +539,24 @@ static bool cmdIsPlain(const char *cmd) {
   return true;
 }
 
-static pid_t spawnDirect(const char *cmd, bool ownGroup) {
+static pid_t spawnDirect(const char *cmd, bool ownGroup, const char *capPath) {
   if (!cmdIsPlain(cmd)) return -1;
+
+  /* Tangkapan output child: fd 2 -> file, lalu fd 1 -> dup fd 2 (satu open
+     file description -> offset bersama, aman bila keduanya menulis).
+     Gagal menyiapkan file actions -> return -1 supaya pemanggil jatuh ke
+     jalur fork+sh yang meredirect sendiri. */
+  posix_spawn_file_actions_t fa;
+  bool useFa = false;
+  if (capPath && posix_spawn_file_actions_init(&fa) == 0) {
+    if (posix_spawn_file_actions_addopen(&fa, 2, capPath, O_WRONLY | O_CREAT | O_TRUNC,
+                                         0644) == 0 &&
+        posix_spawn_file_actions_adddup2(&fa, 2, 1) == 0)
+      useFa = true;
+    else
+      posix_spawn_file_actions_destroy(&fa);
+  }
+  if (capPath && !useFa) return -1;
 
   size_t len = strlen(cmd);
   char *buf = malloc(len + 1);
@@ -495,48 +598,68 @@ static pid_t spawnDirect(const char *cmd, bool ownGroup) {
       posix_spawnattr_setflags(&at, flags);
       pid_t np;
       const char *full = strchr(argv[0], '/') ? NULL : resolveSpawnExe(argv[0]);
-      int rc = full ? posix_spawn(&np, full, NULL, &at, argv, environ)
-                    : posix_spawnp(&np, argv[0], NULL, &at, argv, environ);
+      posix_spawn_file_actions_t *fap = useFa ? &fa : NULL;
+      int rc = full ? posix_spawn(&np, full, fap, &at, argv, environ)
+                    : posix_spawnp(&np, argv[0], fap, &at, argv, environ);
       if (rc == 0) pid = np;
       posix_spawnattr_destroy(&at);
     }
   }
+  if (useFa) posix_spawn_file_actions_destroy(&fa);
   free(argv);
   free(buf);
   return pid;
 }
 
-bool procStart(const char *cmd, ProcHandle *out) {
+static bool procStartImpl(const char *cmd, ProcHandle *out, bool capture) {
   if (!cmd || !*cmd || !out) return false;
 
+  out->capPath[0] = '\0';
+  if (capture && !procCaptureTemp(out->capPath, sizeof(out->capPath))) capture = false;
+  const char *cap = capture ? out->capPath : NULL;
+
   /* Job paralel selalu di process group sendiri. */
-  pid_t pid = spawnDirect(cmd, true);
-  if (pid >= 0) goto started;
+  pid_t pid = spawnDirect(cmd, true, cap);
+  if (pid < 0) {
+    pid = fork();
+    if (pid < 0) {
+      if (capture) {
+        remove(out->capPath);
+        out->capPath[0] = '\0';
+      }
+      return false;
+    }
 
-  pid = fork();
-  if (pid < 0) return false;
+    if (pid == 0) {
+      struct sigaction sa;
+      memset(&sa, 0, sizeof(sa));
+      sa.sa_handler = SIG_DFL;
+      sigemptyset(&sa.sa_mask);
+      sigaction(SIGINT, &sa, NULL);
+      sigaction(SIGQUIT, &sa, NULL);
+      sigaction(SIGHUP, &sa, NULL);
+      sigaction(SIGTERM, &sa, NULL);
 
-  if (pid == 0) {
-    struct sigaction sa;
-    memset(&sa, 0, sizeof(sa));
-    sa.sa_handler = SIG_DFL;
-    sigemptyset(&sa.sa_mask);
-    sigaction(SIGINT, &sa, NULL);
-    sigaction(SIGQUIT, &sa, NULL);
-    sigaction(SIGHUP, &sa, NULL);
-    sigaction(SIGTERM, &sa, NULL);
+      setpgid(0, 0); /* grup sendiri: forward sinyal dari satria terarah */
 
-    setpgid(0, 0); /* grup sendiri: forward sinyal dari satria terarah */
+      if (cap) { /* jalur shell: redirect output child ke file tangkapan */
+        int cf = open(cap, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        if (cf >= 0) {
+          dup2(cf, 2);
+          dup2(cf, 1);
+          if (cf > 2) close(cf);
+        }
+      }
 
-    execl("/bin/sh", "sh", "-c", cmd, (char *)NULL);
-    _exit(127);
+      execl("/bin/sh", "sh", "-c", cmd, (char *)NULL);
+      _exit(127);
+    }
+
+    /* Race setpgid: anak bisa exec lebih dulu; lakukan juga dari parent
+       (EACCES setelah exec diabaikan secara diam). */
+    setpgid(pid, pid);
   }
 
-  /* Race setpgid: anak bisa exec lebih dulu; lakukan juga dari parent
-     (EACCES setelah exec diabaikan secara diam). */
-  setpgid(pid, pid);
-
-started:
   out->pid = pid;
   out->finished = false;
   out->ok = false;
@@ -545,6 +668,10 @@ started:
   if (g_jobCount < JOB_MAX) g_jobs[g_jobCount++] = pid;
   return true;
 }
+
+bool procStart(const char *cmd, ProcHandle *out) { return procStartImpl(cmd, out, false); }
+
+bool procStartCapture(const char *cmd, ProcHandle *out) { return procStartImpl(cmd, out, true); }
 
 int procWaitAny(ProcHandle *handles, int count, ProcHandle **finished) {
   if (finished) *finished = NULL;
@@ -606,6 +733,13 @@ void procStopAll(ProcHandle *handles, int count) {
     handles[i].ok = false;
     handles[i].interrupted = true;
   }
+  /* File tangkapan job yang berhenti tanpa sempat dicetak dibuang di sini. */
+  for (int i = 0; i < count; i++) {
+    if (handles[i].capPath[0]) {
+      remove(handles[i].capPath);
+      handles[i].capPath[0] = '\0';
+    }
+  }
   g_jobCount = 0;
 }
 
@@ -618,7 +752,7 @@ bool procRun(const char *cmd) {
   if (!cmd || !*cmd) return false;
 
   bool separateGroup = !g_foregroundMode;
-  pid_t pid = spawnDirect(cmd, separateGroup);
+  pid_t pid = spawnDirect(cmd, separateGroup, NULL);
   if (pid < 0) pid = fork();
   if (pid < 0) return false;
 
@@ -709,3 +843,44 @@ double monotonicSeconds(void) {
 }
 
 #endif /* !_WIN32 */
+
+/*
+ * Ambil isi tangkapan child (stdout+stderr) sebagai buffer malloc, hapus file
+ * sementara, dan kosongkan capPath. NULL bila tidak ada tangkapan / kosong —
+ * pemanggil cukup free() bila tidak NULL. Dipakai compile loop agar output
+ * compiler dicetak parent UTUH setelah baris progress (urutan terjaga,
+ * anti-interleaving) dan bisa disalin ke build.log.
+ */
+char *procCaptureTake(ProcHandle *h, size_t *outLen) {
+  if (outLen) *outLen = 0;
+  if (!h || !h->capPath[0]) return NULL;
+  FILE *f = fopen(h->capPath, "rb");
+  char *buf = NULL;
+  size_t len = 0, cap = 0;
+  if (f) {
+    char tmp[4096];
+    size_t n;
+    while ((n = fread(tmp, 1, sizeof(tmp), f)) > 0) {
+      if (len + n + 1 > cap) {
+        size_t ncap = cap ? cap * 2 : 8192;
+        while (ncap < len + n + 1) ncap *= 2;
+        char *nb = realloc(buf, ncap);
+        if (!nb) break;
+        buf = nb;
+        cap = ncap;
+      }
+      memcpy(buf + len, tmp, n);
+      len += n;
+    }
+    fclose(f);
+  }
+  remove(h->capPath);
+  h->capPath[0] = '\0';
+  if (!buf || len == 0) {
+    free(buf);
+    return NULL;
+  }
+  buf[len] = '\0';
+  if (outLen) *outLen = len;
+  return buf;
+}

@@ -7,18 +7,13 @@
 
 #include "cache/cache_store.h"
 #include "compile.h"
-#include "embed_ld_cache.h"
 #include "portability.h"
 #include "util.h"
 
-/* Deteksi GNU ld untuk jalur embed; verdict di-cache per proses
-   (g_ldAvailable) DAN lintas-run (.satria/ld.cache via embed_ld_cache),
-   sehingga probe `ld --version` (fork sh + exec ld, 3-5 ms) hanya jalan
-   pada RUN PERTAMA atau setelah ld berganti di PATH — run berikutnya
-   cukup satu stat ke binary ld yang direkam.
-   SATRIA_NO_LD=1 memaksa jalur fallback (C array) — berguna untuk testing
-   dan lingkungan yang ld-nya rusak; env ini JANGAN dicache. */
-static int g_ldAvailable = -1;
+/* Deteksi GNU ld HANYA untuk `satria profile embed=` (benchmark tool
+   tar+ld — embedProbeGnuLd). Jalur build TIDAK lagi memakai ld: codegen
+   embedded.c adalah satu-satunya mekanisme embed (design/embedded.md),
+   jadi tidak ada probe maupun verdict ld.cache yang dipakai build. */
 
 /* Cek apakah 'ld' yang ada di PATH adalah GNU ld (bukan LLD/LLD-compatible).
  * GNU ld mendukung '-r -b binary', LLD tidak. */
@@ -43,32 +38,6 @@ static bool isGnuLd(void) {
   }
   pcloseRB(fp);
   return gnu;
-}
-
-static bool ldAvailable(void) {
-  if (g_ldAvailable >= 0) return g_ldAvailable == 1;
-  /* Env override TIDAK boleh menyentuh cache: SATRIA_NO_LD diputus di sini
-     sebelum resolve/load, jadi testing fallback tidak ikut tersimpan
-     sebagai verdict "tanpa ld" (Uji 2 verify-fpic.sh harus tetap jalan). */
-  char ldPath[MAX_PATH];
-  if (!getenv("SATRIA_NO_LD")) {
-    bool resolved = ldCacheResolve("ld", ldPath, sizeof(ldPath));
-    bool cached = false;
-    if (resolved && cacheCheckLD(ldPath, &cached)) {
-      /* Cache valid: path + mtime ns + size binary ld tidak berubah. */
-      g_ldAvailable = cached ? 1 : 0;
-      return g_ldAvailable == 1;
-    }
-    bool gnu = isGnuLd(); /* probe fisik, sekali per perubahan ld */
-    if (resolved) cacheUpdateLD(ldPath, gnu);
-    g_ldAvailable = gnu ? 1 : 0;
-    return g_ldAvailable == 1;
-  }
-  /* Tidak ada SATRIA_NO_LD dan ld tidak ditemukan di PATH (murah, stat-only):
-     tidak direkam — bisa berubah kapan saja lewat PATH, dan procRun ld
-     pasti gagal juga. */
-  g_ldAvailable = 0;
-  return false;
 }
 
 /* Probe tanpa cache untuk jalur non-mutating — lihat embed.h. */
@@ -555,30 +524,215 @@ static void embedSymBase(const char *archivePath, char *out, size_t n) {
   out[k] = '\0';
 }
 
+/* ==================== codegen (design/embedded.md) ====================
+   Satu-satunya mekanisme embed: arsip dibaca menjadi array byte di
+   <outBuildDir>/embedded.c (dikompilasi sebagai source biasa) dan
+   <outBuildDir>/embedded.h (struct Embedded + API getEmbed + macro kompat
+   EMBED_<VAR>_*). Keduanya diregenerasi berbasis KONTEN: tulis .tmp,
+   bandingkan dengan file lama, identik -> buang temp (mtime tetap),
+   beda -> rename atomik — touch tanpa perubahan isi tidak pernah memicu
+   compile ulang (touch-proof; design/embedded.md §Regenerasi). */
+
+/* Tulis string sebagai literal C di file hasil generate (escape
+   quote/backslash/karakter kontrol). */
+static void embCStr(FILE *out, const char *s) {
+  fputc('"', out);
+  for (const unsigned char *p = (const unsigned char *)(s ? s : ""); *p; p++) {
+    if (*p == '"' || *p == '\\')
+      fprintf(out, "\\%c", *p);
+    else if (*p == '\n')
+      fputs("\\n", out);
+    else if (*p == '\t')
+      fputs("\\t", out);
+    else if (*p < 0x20 || *p == 0x7f)
+      fprintf(out, "\\%03o", *p);
+    else
+      fputc(*p, out);
+  }
+  fputc('"', out);
+}
+
+/* Bandingkan dua file byte-per-byte (streaming 4KB); false bila salah satu
+   tidak terbaca — dianggap BERBEDA supaya file digenerate ditulis ulang. */
+static bool embFilesIdentical(const char *a, const char *b) {
+  FILE *fa = fopen(a, "rb");
+  if (!fa) return false;
+  FILE *fb = fopen(b, "rb");
+  if (!fb) {
+    fclose(fa);
+    return false;
+  }
+  bool same = true;
+  unsigned char ba[4096], bb[4096];
+  for (;;) {
+    size_t na = fread(ba, 1, sizeof(ba), fa);
+    size_t nb = fread(bb, 1, sizeof(bb), fb);
+    if (na != nb || (na > 0 && memcmp(ba, bb, na) != 0)) {
+      same = false;
+      break;
+    }
+    if (na == 0) break;
+  }
+  fclose(fa);
+  fclose(fb);
+  return same;
+}
+
 /*
- * Terbitkan build/embedded.h. Isi menyesuaikan jalur embed yang aktif:
- *
- *   GNU ld  : simbol nyata _binary_<path>_start/_end (alamat), LEN = diff.
- *   Fallback: simbol _binary_<path>_start[] + _binary_<path>_len (unsigned
- *             long), END = (start + len) — semantik "one past the end"
- *             sama dengan ld.
- *
- * Konsumen cukup memakai macro EMBED_<N>_SYMBOL / _END / _LEN; deklarasi
- * extern simbol ikut diterbitkan di header sehingga tidak perlu ditulis
- * manual. File hanya ditulis ulang saat isinya berubah; *changed memberi
- * tahu pemanggil bahwa source yang mereferensikan simbol perlu dikompilasi
- * ulang.
+ * emitEmbeddedSource — tulis <outBuildDir>/embedded.c: array byte per entri
+ * (dengan simbol kompat EMBED_<VAR>_SYMBOL yang lama), tabel `Embedded`, dan
+ * definisi getEmbed()/getEmbedAt(). Arsip yang tidak terbaca = kegagalan
+ * jelas (tanpa swallow). Regenerasi content-based: tulis <path>.tmp,
+ * bandingkan dengan file lama; identik -> buang temp (mtime tetap), beda ->
+ * rename atomik (fsRenameReplace).
+ */
+bool emitEmbeddedSource(const Config *c, bool *changed) {
+  if (changed) *changed = false;
+  char path[MAX_PATH + 32], tmp[MAX_PATH + 40];
+  snprintf(path, sizeof(path), "%s/embedded.c", c->outBuildDir);
+  snprintf(tmp, sizeof(tmp), "%s.tmp", path);
+  mkparent(path);
+  FILE *out = fopen(tmp, "wb");
+  if (!out) {
+    fprintf(stderr, "satria: cannot write %s\n", tmp);
+    return false;
+  }
+  fprintf(out, "/* Auto-generated by satria from Buildfile: embedded. Do not edit. */\n");
+  fprintf(out, "/* Codegen: array byte + tabel getEmbed() (design/embedded.md). */\n");
+  fprintf(out, "#include \"embedded.h\"\n\n#include <string.h>\n\n");
+
+  /* Metadata entri aktif untuk tabel (diulis setelah semua array). */
+  struct {
+    char key[EMBED_NAME_LEN];
+    char type[32];
+    char name[EMBED_NAME_LEN];
+    const char *extract;
+    size_t size;
+    char sym[512];
+  } meta[MAX_EMBEDDED];
+  int n = 0;
+
+  for (int i = 0; i < c->embCount && n < MAX_EMBEDDED; i++) {
+    const EmbeddedEntry *e = &c->emb[i];
+    if (!e->enable) continue;
+    FILE *in = fopen(e->archivePath, "rb");
+    if (!in) {
+      fprintf(stderr, "satria: %s: embedded file '%s' tidak terbaca\n", e->name,
+              e->archivePath);
+      fclose(out);
+      remove(tmp);
+      return false;
+    }
+    embedSymBase(e->archivePath, meta[n].sym, sizeof(meta[n].sym));
+
+    fprintf(out, "const unsigned char %s_start[] = {", meta[n].sym);
+    unsigned char buf[4096];
+    size_t r;
+    long long total = 0;
+    int perLine = 0;
+    while ((r = fread(buf, 1, sizeof(buf), in)) > 0) {
+      for (size_t k = 0; k < r; k++) {
+        if (perLine == 0) fprintf(out, "\n");
+        fprintf(out, "0x%02x,", buf[k]);
+        if (++perLine == 16) perLine = 0;
+        total++;
+      }
+    }
+    fclose(in);
+    fprintf(out, "\n};\n");
+    /* Simbol kompat lama: END dummy (semantik one-past-the-end) + LEN. */
+    fprintf(out, "const unsigned char %s_end[1] = { 0 };\n", meta[n].sym);
+    fprintf(out, "const unsigned long %s_len = %lld;\n\n", meta[n].sym, total);
+
+    snprintf(meta[n].key, sizeof(meta[n].key), "%s", e->key[0] ? e->key : e->name);
+    snprintf(meta[n].type, sizeof(meta[n].type), "%s",
+             e->type[0] ? e->type
+                         : ((e->usePrebuilt || e->src[0]) ? "archive" : "asset"));
+    const char *slash = strrchr(e->archivePath, '/');
+    snprintf(meta[n].name, sizeof(meta[n].name), "%s", slash ? slash + 1 : e->archivePath);
+    meta[n].extract = e->extract;
+    meta[n].size = (size_t)total;
+    n++;
+  }
+
+  if (n > 0) {
+    fprintf(out, "static const Embedded embed_table[] = {\n");
+    for (int i = 0; i < n; i++) {
+      fputs("  { ", out);
+      embCStr(out, meta[i].key);
+      fputs(", ", out);
+      embCStr(out, meta[i].type);
+      fputs(", ", out);
+      embCStr(out, meta[i].name);
+      fputs(", ", out);
+      embCStr(out, meta[i].extract);
+      fprintf(out, ", %llu, (const uint8_t *)%s_start },\n", (unsigned long long)meta[i].size,
+              meta[i].sym);
+    }
+    fprintf(out, "};\n\n");
+    fprintf(out,
+            "const Embedded *getEmbed(const char *key) {\n"
+            "  size_t i;\n"
+            "  if (!key) return NULL;\n"
+            "  for (i = 0; i < sizeof(embed_table) / sizeof(embed_table[0]); i++)\n"
+            "    if (strcmp(embed_table[i].key, key) == 0) return &embed_table[i];\n"
+            "  return NULL;\n"
+            "}\n\n"
+            "const Embedded *getEmbedAt(size_t index) {\n"
+            "  if (index >= sizeof(embed_table) / sizeof(embed_table[0])) return NULL;\n"
+            "  return &embed_table[index];\n"
+            "}\n");
+  } else {
+    /* Tanpa entri aktif: API tetap ada dan selalu NULL. */
+    fprintf(out,
+            "const Embedded *getEmbed(const char *key) { (void)key; return NULL; }\n"
+            "const Embedded *getEmbedAt(size_t index) { (void)index; return NULL; }\n");
+  }
+  fclose(out);
+
+  if (embFilesIdentical(tmp, path)) {
+    remove(tmp); /* identik: buang temp, mtime file lama tidak berubah */
+    return true;
+  }
+  if (!fsRenameReplace(tmp, path)) {
+    remove(tmp);
+    fprintf(stderr, "satria: cannot write %s\n", path);
+    return false;
+  }
+  if (changed) *changed = true;
+  return true;
+}
+
+/*
+ * Terbitkan build/embedded.h: struct Embedded + API getEmbed (desain baru)
+ * PLUS macro kompat lama EMBED_<N>_ARCHIVE_NAME/_EXTRACT_DIR/_SYMBOL/
+ * _SYMBOL_END/_SYMBOL_LEN dengan deklarasi extern-nya (fase 1 migrasi,
+ * design/embedded.md §Migrasi) — simbolnya menunjuk array hasil codegen di
+ * embedded.c, jadi konsumen lama tanpa getEmbed tetap terbangun. Konten
+ * dibandingkan dulu: file hanya ditulis ulang saat berubah; *changed memberi
+ * tahu pemanggil bahwa konsumen perlu dikompilasi ulang.
  */
 bool emitEmbeddedHeader(const Config *c, bool *changed) {
   static char body[16384];
   size_t used = 0;
-  bool useLd = ldAvailable();
 
   used += (size_t)snprintf(body + used, sizeof(body) - used,
                            "/* Auto-generated by satria from Buildfile: embedded. Do not edit. */\n"
-                           "/* Embed path: %s */\n"
-                           "#ifndef RUPA_EMBEDDED_H\n#define RUPA_EMBEDDED_H\n\n",
-                           useLd ? "ld -r -b binary" : "c-array fallback");
+                           "#ifndef RUPA_EMBEDDED_H\n#define RUPA_EMBEDDED_H\n\n"
+                           "#include <stddef.h>\n#include <stdint.h>\n\n"
+                           "/* Satu struct datar untuk semua tipe aset (design/embedded.md).\n"
+                           "   Akses: getEmbed(\"<key>\") — NULL bila key tidak dikenal. */\n"
+                           "typedef struct {\n"
+                           "  const char *key;      /* kunci akses */\n"
+                           "  const char *type;     /* \"archive\" | \"asset\" | label lain */\n"
+                           "  const char *name;     /* nama file sumber */\n"
+                           "  const char *extract;  /* tujuan ekstraksi, \"\" bila kosong */\n"
+                           "  size_t size;          /* jumlah byte data */\n"
+                           "  const uint8_t *data;  /* isi file (array di embedded.c) */\n"
+                           "} Embedded;\n\n"
+                           "const Embedded *getEmbed(const char *key);\n"
+                           "const Embedded *getEmbedAt(size_t index); /* NULL di akhir iterasi */\n\n"
+                           "/* --- kompat makro lama EMBED_<VAR>_* (design/embedded.md §Migrasi) --- */\n");
 
   for (int i = 0; i < c->embCount; i++) {
     const EmbeddedEntry *e = &c->emb[i];
@@ -619,41 +773,24 @@ bool emitEmbeddedHeader(const Config *c, bool *changed) {
     used += (size_t)strlen(line);
     strcat(body, line);
 
-    if (useLd) {
-      /* GNU ld: end adalah alamat nyata satu-byte-setelah-blok */
-      snprintf(line, sizeof(line), "#define EMBED_%s_SYMBOL_END %s_end\n", prefix, sym);
-      used += (size_t)strlen(line);
-      strcat(body, line);
+    /* Satu jalur codegen (ld -r -b binary sudah dihapus): END adalah array
+       dummy one-past-the-end, LEN datang dari simbol _len — semantik sama
+       dengan fallback C-array lama. */
+    snprintf(line, sizeof(line), "#define EMBED_%s_SYMBOL_END %s_end\n", prefix, sym);
+    used += (size_t)strlen(line);
+    strcat(body, line);
 
-      snprintf(line, sizeof(line), "#define EMBED_%s_SYMBOL_LEN (%s_end - %s_start)\n", prefix, sym,
-               sym);
-      used += (size_t)strlen(line);
-      strcat(body, line);
+    snprintf(line, sizeof(line), "#define EMBED_%s_SYMBOL_LEN %s_len\n", prefix, sym);
+    used += (size_t)strlen(line);
+    strcat(body, line);
 
-      snprintf(line, sizeof(line),
-               "extern const unsigned char %s_start[];\n"
-               "extern const unsigned char %s_end[];\n\n",
-               sym, sym);
-      used += (size_t)strlen(line);
-      strcat(body, line);
-    } else {
-      /* fallback C array: END adalah array dummy, LEN dari simbol _len */
-      snprintf(line, sizeof(line), "#define EMBED_%s_SYMBOL_END %s_end\n", prefix, sym);
-      used += (size_t)strlen(line);
-      strcat(body, line);
-
-      snprintf(line, sizeof(line), "#define EMBED_%s_SYMBOL_LEN %s_len\n", prefix, sym);
-      used += (size_t)strlen(line);
-      strcat(body, line);
-
-      snprintf(line, sizeof(line),
-               "extern const unsigned char %s_start[];\n"
-               "extern const unsigned char %s_end[];\n"
-               "extern const unsigned long %s_len;\n\n",
-               sym, sym, sym);
-      used += (size_t)strlen(line);
-      strcat(body, line);
-    }
+    snprintf(line, sizeof(line),
+             "extern const unsigned char %s_start[];\n"
+             "extern const unsigned char %s_end[];\n"
+             "extern const unsigned long %s_len;\n\n",
+             sym, sym, sym);
+    used += (size_t)strlen(line);
+    strcat(body, line);
   }
 
   used += (size_t)snprintf(body + used, sizeof(body) - used, "#endif /* RUPA_EMBEDDED_H */\n");
@@ -682,82 +819,11 @@ bool emitEmbeddedHeader(const Config *c, bool *changed) {
   return true;
 }
 
-/*
- * embedResourceCompile — fallback embed untuk platform tanpa
- * `ld -r -b binary` (MSVC, atau MinGW tanpa GNU ld). Arsip dibaca lalu
- * ditulis ulang sebagai file C berisi array byte:
- *
- *   const unsigned char <sym>_start[] = { 0x.., ... };
- *   const unsigned long <sym>_len = <n>;
- *
- * <sym> = "_binary_" + path arsip ternormalisasi — sama dengan emitEmbeddedHeader
- * sehingga macro EMBED_<n>_* di build/embedded.h valid di kedua jalur.
- * File C itu dikompilasi toolchain aktif (object-nya di-link ke binary) —
- * tidak butuh ld sama sekali.
- */
-bool embedResourceCompile(const EmbeddedEntry *e, const Config *c) {
-  FILE *in = fopen(e->archivePath, "rb");
-  if (!in) return false;
-
-  char cfile[MAX_PATH + 96];
-  snprintf(cfile, sizeof(cfile), "%s.embed.c", e->objectPath);
-  mkparent(cfile);
-
-  FILE *out = fopen(cfile, "w");
-  if (!out) {
-    fclose(in);
-    return false;
-  }
-
-  char sym[512];
-  embedSymBase(e->archivePath, sym, sizeof(sym));
-
-  fprintf(out, "/* Auto-generated by satria (embed fallback). Do not edit. */\n\n");
-  fprintf(out, "const unsigned char %s_start[] = {", sym);
-
-  unsigned char buf[4096];
-  size_t n;
-  long long total = 0;
-  int perLine = 0;
-  while ((n = fread(buf, 1, sizeof(buf), in)) > 0) {
-    for (size_t i = 0; i < n; i++) {
-      if (perLine == 0) fprintf(out, "\n");
-      fprintf(out, "0x%02x,", buf[i]);
-      if (++perLine == 20) perLine = 0;
-      total++;
-    }
-  }
-  fclose(in);
-
-  fprintf(out, "\n};\n");
-
-  // TAMBAHKAN INI: Dummy _end array (1 byte)
-  fprintf(out, "const unsigned char %s_end[1] = { 0 };\n", sym);
-
-  fprintf(out, "const unsigned long %s_len = %lld;\n", sym, total);
-  fclose(out);
-
-  char *inc = includeFlags(c);
-  /* Objek embed ikut dikemas ke library: bila varian shared diminta, kompilasi
-     dengan -fPIC (GNU/Clang) — sama seperti object source di
-     compileLibraryOne/cmdsRunParallelJobs. Tanpa ini link .so gagal dengan
-     "recompile with -fPIC" di lingkungan tanpa GNU ld (jalur fallback ini).
-     MSVC tidak butuh flag PIC. */
-#ifndef _WIN32
-  char *wf = NULL;
-  if (c->libShared && compilerIsMSVC(c) == false)
-    wf = picWarningFlags(c);
-  else
-    wf = warningFlags(c);
-#else
-  char *wf = warningFlags(c);
-#endif
-  bool ok = compileOne(c, inc, wf, cfile, e->objectPath);
-  free(inc);
-  free(wf);
-  if (!ok) fprintf(stderr, "satria: %s: failed to compile embed resource\n", e->name);
-  return ok;
-}
+/* ==================== pembangunan arsip (fase sebelum codegen) ====================
+   Object per-entrilama (ld -r -b binary / <name>.embed.c) sudah DIHAPUS:
+   konversi arsip -> object kini lewat codegen embedded.c (source biasa).
+   Tugas fase ini hanya memastikan arsip tiap entri ada & segar sebelum
+   emitEmbeddedSource membacanya. */
 
 static bool buildEmbeddedArchiveEntryEx(const EmbeddedEntry *e, bool *rebuilt) {
   if (rebuilt) *rebuilt = false;
@@ -856,34 +922,6 @@ static bool buildEmbeddedArchiveEntryEx(const EmbeddedEntry *e, bool *rebuilt) {
   return true;
 }
 
-static bool buildEmbeddedArchiveEntry(const EmbeddedEntry *e) {
-  return buildEmbeddedArchiveEntryEx(e, NULL);
-}
-
-static bool buildEmbeddedEntry(const Config *c, const EmbeddedEntry *e) {
-  if (!buildEmbeddedArchiveEntry(e)) return false;
-
-  if (e->usePrebuilt) {
-    printf("%s Embedded: %s (file: %s)\n", repPrefix(), e->name, e->archivePath);
-  } else if (ldAvailable() || fsFileExists(e->archivePath)) {
-    printf("%s Embedded: %s (archive: %s)\n", repPrefix(), e->name, e->archivePath);
-  }
-
-  if (!fsNewerThan(e->archivePath, e->objectPath)) return true;
-
-  if (ldAvailable()) {
-    char *cmd = malloc(strlen(e->archivePath) + strlen(e->objectPath) + 64);
-    if (!cmd) return false;
-    sprintf(cmd, "ld -r -z noexecstack -b binary -o %s %s", e->objectPath, e->archivePath);
-    bool ok = runCmd(cmd);
-    free(cmd);
-    if (!ok) fprintf(stderr, "satria: %s: failed to embed %s\n", e->name, e->archivePath);
-    return ok;
-  }
-
-  return embedResourceCompile(e, c);
-}
-
 bool buildEmbeddedArchivesEx(const Config *c, bool *anyRebuilt) {
   bool any = false;
   for (int i = 0; i < c->embCount; i++) {
@@ -898,14 +936,6 @@ bool buildEmbeddedArchivesEx(const Config *c, bool *anyRebuilt) {
 
 bool buildEmbeddedArchives(const Config *c) {
   return buildEmbeddedArchivesEx(c, NULL);
-}
-
-bool buildEmbedded(const Config *c) {
-  for (int i = 0; i < c->embCount; i++) {
-    if (!c->emb[i].enable) continue;
-    if (!buildEmbeddedEntry(c, &c->emb[i])) return false;
-  }
-  return true;
 }
 
 /* ==================== finalisasi entri ==================== */

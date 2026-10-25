@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ============================================================================
-# run-errorlog.sh — jalankan build workspace tests/rupaws, simpan output
+# run-errorlog.sh — jalankan build workspace tests/miniws, simpan output
 # LENGKAP (stdout + stderr) ke error.log tanpa terpotong.
 #
 # error.log lama hanya berisi stdout (baris status [N/M] OK) — diagnostik
@@ -8,14 +8,14 @@
 # Script ini menyimpan keduanya, plus exit code per langkah.
 #
 # Pemakaian:
-#   ./run-errorlog.sh                  # build semua proyek (rbot -w)
+#   ./run-errorlog.sh                  # build semua proyek (satria -w)
 #   ./run-errorlog.sh -j2              # batasi paralel (hemat memori/CPU)
 #   ./run-errorlog.sh -j1              # serial — urutan error paling terbaca
-#   ./run-errorlog.sh --clean          # rbot -w clean dulu, lalu build penuh
+#   ./run-errorlog.sh --clean          # satria -w clean dulu, lalu build penuh
 #   ./run-errorlog.sh --only rupa      # hanya proyek itu (+ dependency-nya)
-#   RBOT=/path/ke/rbot ./run-errorlog.sh
+#   SATRIA=/path/ke/satria ./run-errorlog.sh
 #
-# Hasil di tests/rupaws/:
+# Hasil di tests/miniws/:
 #   error.log         — gabungan stdout+stderr + exit code per langkah
 #   error.stdout.log  — stdout mentah (urutan asli)
 #   error.stderr.log  — stderr mentah (diagnostik compiler)
@@ -24,7 +24,7 @@
 set -u
 cd "$(dirname "$0")"
 
-RBOT=${RBOT:-../../bin/rbot}
+SATRIA=${SATRIA:-../../bin/satria}
 JOBS=""
 CLEAN=0
 ONLY=""
@@ -40,12 +40,12 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-[ -x "$RBOT" ] || {
-  echo "rbot tidak ditemukan/dieksekusi: $RBOT" >&2
-  echo "build dulu di root repo (rbot -jN) atau set RBOT=/path/rbot" >&2
+[ -x "$SATRIA" ] || {
+  echo "satria tidak ditemukan/dieksekusi: $SATRIA" >&2
+  echo "build dulu di root repo (satria -jN) atau set SATRIA=/path/satria" >&2
   exit 1
 }
-RBOT=$(cd "$(dirname "$RBOT")" && pwd)/$(basename "$RBOT") # absolutkan
+SATRIA=$(cd "$(dirname "$SATRIA")" && pwd)/$(basename "$SATRIA") # absolutkan
 
 OUT=error.log
 SO=error.stdout.log
@@ -54,14 +54,14 @@ NCPU=$(nproc 2>/dev/null || echo 4)
 
 # stdbuf (bila ada) memaksa line-buffering agar stdout & stderr tidak
 # saling menimpa urutan; di Termux stdbuf ada di coreutils.
-run() { # run <label> <arg rbot...>
+run() { # run <label> <arg satria...>
   local label=$1; shift
   echo "==================================================================="
-  echo ">>> $label : rbot $*"
+  echo ">>> $label : satria $*"
   if command -v stdbuf >/dev/null 2>&1; then
-    stdbuf -oL -eL "$RBOT" "$@" >"$SO" 2>"$SE"
+    stdbuf -oL -eL "$SATRIA" "$@" >"$SO" 2>"$SE"
   else
-    "$RBOT" "$@" >"$SO" 2>"$SE"
+    "$SATRIA" "$@" >"$SO" 2>"$SE"
   fi
   local rc=$?
   echo "--- stdout ($label) ---"
@@ -74,8 +74,8 @@ run() { # run <label> <arg rbot...>
 }
 
 {
-  echo "=== rbot error capture — $(date '+%Y-%m-%d %H:%M:%S') ==="
-  echo "rbot : $RBOT ($("$RBOT" version 2>&1 | head -1))"
+  echo "=== satria error capture — $(date '+%Y-%m-%d %H:%M:%S') ==="
+  echo "satria : $SATRIA ($("$SATRIA" version 2>&1 | head -1))"
   echo "cpu  : $NCPU"
   echo "args : ${JOBS:+-j$JOBS }${CLEAN:+--clean }${ONLY:+-w $ONLY}"
 } >"$OUT"

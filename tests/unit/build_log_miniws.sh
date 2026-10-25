@@ -8,6 +8,10 @@ W=$(mktemp -d /tmp/satria-buildlog-test-XXXXXX)
 trap 'rm -rf "$W"' EXIT HUP INT TERM
 cp -R "$SRC/." "$W/"
 cd "$W"
+# State fixture dibagikan antar-test (satu run in-place dengan log aktif
+# meninggalkan .satria/build.log di repo) — buang dulu supaya asersi
+# "cold build tanpa log" di bawah deterministik.
+rm -rf .satria
 # Tata letak miniws: source proyek core berada di core/src.
 ENG=core/src/core.c
 

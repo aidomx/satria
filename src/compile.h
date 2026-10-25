@@ -5,6 +5,7 @@
 #include <stddef.h>
 
 #include "config.h"
+#include "portability.h" /* ProcHandle — tangkapan output compiler */
 
 /*
  * Keluarga toolchain (design/flags.md: suffix Buildfile .gcc/.clang/.cl;
@@ -55,8 +56,14 @@ bool objectPathFor(const Config *c, const char *src, char *out, size_t n);
 /* src/x/y.c -> build/y.d — file dependensi (-MMD) milik object-nya. */
 bool dotDPathFor(const Config *c, const char *src, char *out, size_t n);
 
+/*
+ * cap (opsional; NULL = tanpa tangkapan): bila diisi, seluruh output
+ * compiler (stdout+stderr) diarahkan ke file sementara di cap->capPath.
+ * Pemanggil mencetaknya UTUH setelah baris progress lewat
+ * procCaptureTake + cmdsEmitCapture — urutan terjaga, anti-interleaving.
+ */
 bool compileOne(const Config *c, const char *inc, const char *wf, const char *src,
-                const char *obj);
+                const char *obj, ProcHandle *cap);
 
 /* "src/main.c" tercantum di Buildfile: exclude -> dilepas dari build. */
 bool excludedSource(const Config *c, const char *src);
@@ -70,6 +77,6 @@ char *targetFlags(const Config *c);
 /* Kompilasi satu source untuk library: identik compileOne, plus -fPIC
    bila library shared diminta (GNU/Clang; MSVC tidak butuh flag). */
 bool compileLibraryOne(const Config *c, const char *inc, const char *wf, const char *src,
-                       const char *obj);
+                       const char *obj, ProcHandle *cap);
 
 #endif /* SATRIA_V0_1_0_COMPILE_H */

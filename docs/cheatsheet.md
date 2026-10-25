@@ -456,7 +456,7 @@ rukamod.pattern = .rp
 
 Archive dapat menjadi input build project lain.
 
-Generated embedded header menyediakan informasi/simbol untuk archive, extraction directory, symbol, end symbol, dan symbol length melalui macro `EMBED_*`.
+Generated embedded output (`embedded.c` + `embedded.h`) menyediakan API `getEmbed("key")` / `getEmbedAt(i)` dengan struct datar `Embedded` (key, type, name, extract, size, data); macro lama `EMBED_*` (archive, extraction directory, symbol, end symbol, symbol length) tetap tersedia untuk kompatibilitas.
 
 ---
 
@@ -754,7 +754,6 @@ SATRIA_WS_PAR       =0 menjalankan anak workspace serial (default: penjadwal sia
 SATRIA_NO_COLOR     matikan warna (juga NO_COLOR)
 SATRIA_HOME         lokasi state global (default ~/.satria)
 SATRIA_CMD          path cmd.txt untuk bantuan CLI
-SATRIA_NO_LD        paksa jalur embed fallback tanpa ld (testing)
 ```
 
 ---

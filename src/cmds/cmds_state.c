@@ -1207,7 +1207,13 @@ void cmdsFastStateSave(const Config *c, const List *srcs, const char *target,
   includeDirs(c, &incDirs);
   for (int i = 0; i < incDirs.count; i++) {
     const char *d = incDirs.items[i];
-    if (d && *d && strcmp(d, ".") != 0) fastCollectTree(d, &paths);
+    /* Output-dir ada di include path (configFinalize: generated `embedded.h`
+       / `version.h` bisa di-#include tanpa headers.each), tapi tetap OUTPUT:
+       jangan distamp sebagai input (object di dalamnya sudah sengaja tidak
+       distamp — lihat catatan di bawah). Header generated yang memang jadi
+       input dicegat closure .d lewat fastCollectDepPath. */
+    if (d && *d && strcmp(d, ".") != 0 && strcmp(d, c->outBuildDir) != 0)
+      fastCollectTree(d, &paths);
   }
   listFree(&incDirs);
   /* headers.internal: folder header dipantau sebagai input jalur cepat, tapi
@@ -1248,11 +1254,21 @@ void cmdsFastStateSave(const Config *c, const List *srcs, const char *target,
        output akhir (binary/library). Stat per-objek membuat no-op ~2x lebih
        banyak panggilan filesystem tanpa menambah kebenaran output. */
   }
-  bool hasEmbedded = false;
+  /* Embedded: arsip tetap input proyek. File hasil codegen (embedded.c /
+     embedded.h di outBuildDir) ikut distamp — source generated ini berada
+     di luar root sumber (fastCollectTree tidak menemukannya); sentuh tanpa
+     perubahan isi aman lewat hash konten (regenerasi content-based,
+     design/embedded.md). Object embed kini object source biasa dan TIDAK
+     distamp, seperti semua object. */
+  if (c->embCount > 0) {
+    char embPath[MAX_PATH + 40];
+    snprintf(embPath, sizeof(embPath), "%s/embedded.c", c->outBuildDir);
+    fastStampAdd(&paths, embPath);
+    snprintf(embPath, sizeof(embPath), "%s/embedded.h", c->outBuildDir);
+    fastStampAdd(&paths, embPath);
+  }
   for (int i = 0; i < c->embCount; i++) {
     if (!c->emb[i].enable) continue;
-    hasEmbedded = true;
-    fastStampAdd(&paths, c->emb[i].objectPath);
     /* embedded.<n>.file adalah input eksternal proyek ini. Tanpa dicatat
        di fast-state, perubahan archive dapat terlewat sebelum cmdBuild()
        sempat menjalankan fase embed/link normal. Arsip yang DIHASILKAN
@@ -1261,11 +1277,10 @@ void cmdsFastStateSave(const Config *c, const List *srcs, const char *target,
        perubahan archive tidak membatalkan fast path. */
     if (c->emb[i].archivePath[0]) fastStampAdd(&paths, c->emb[i].archivePath);
   }
-  /* Embedded bergantung pada verdict ld lintas-run. Tandai cache dengan
-     kind khusus agar fastState memvalidasi ld.cache -> ld, bukan sekadar
-     mtime file cache. Bila cache tidak valid/hilang, fast path gugur dan
-     build normal akan mem-probe lalu memperbarui cache. */
-  if (hasEmbedded) fastStampAdd(&paths, ldCacheFile());
+  /* Verdict ld TIDAK lagi dicatat: codegen adalah satu-satunya jalur embed
+     (design/embedded.md) — build tidak lagi peduli ld ada/tidak. Stamp 'L'
+     lama pada state lama tetap divalidasi di cmdsFastStateValid dan hilang
+     secara alami pada save berikutnya. */
   /* Library masuk stamp seperti file biasa ('F'): berubah -> fast path
      batal dan jalur normal meng-rebuild varian yang perlu (per-varian). */
   if (staticLib[0]) fastStampAdd(&paths, staticLib);
@@ -1300,9 +1315,7 @@ void cmdsFastStateSave(const Config *c, const List *srcs, const char *target,
       mt = -1;
       sz = 0;
     }
-    stamps[count].kind = strcmp(path, ldCacheFile()) == 0 && hasEmbedded
-                             ? 'L'
-                             : (mt < 0 ? 'M' : (fsDirExists(path) ? 'D' : 'F'));
+    stamps[count].kind = mt < 0 ? 'M' : (fsDirExists(path) ? 'D' : 'F');
     snprintf(stamps[count].path, sizeof(stamps[count].path), "%s", path);
     stamps[count].mtime = mt;
     stamps[count].size = stamps[count].kind == 'F' ? sz : 0;

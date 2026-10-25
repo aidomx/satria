@@ -411,7 +411,7 @@ EOF
   # Pesan akhir sesuai konteks
   if [ "${SRC_DIR}" = "${SCRIPT_DIR}" ]; then
     # Local source tree
-    echo "> Satria is installed, for show help run : bin/satria"
+    echo "> Satria is installed, for show help run : bin/satria help"
   else
     # Downloaded source — coba install ke system path, fallback ke ./bin/satria
     if install_binary "${SRC_DIR}/bin/satria"; then

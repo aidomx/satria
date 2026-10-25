@@ -3,118 +3,158 @@
 Dokumen ini merinci desain fitur *embedding* di Satria. Tujuannya adalah menyederhanakan cara developer menyisipkan file eksternal (arsip, gambar, teks, dll.) ke dalam binary, serta menjamin portabilitas lintas platform (termasuk MSVC di Windows) dan kemudahan penggunaan.
 
 ## Masalah Sebelumnya
-Implementasi lama mengandalkan trik linker spesifik (seperti `ld -r -b binary` di GNU) yang rumit, tidak portabel (gagal di MSVC), dan menyulitkan developer untuk mengakses data yang di-embed di dalam kode C karena struktur datanya tidak terdefinisi dengan jelas.
+
+Implementasi lama memiliki dua jalur, dan keduanya mengekspos permukaan API yang rumit ke kode konsumen:
+
+- **Jalur utama: trik linker** `ld -r -b binary` (GNU ld) — tidak portabel (gagal di MSVC) dan mengekspos simbol mentah (`_binary_data_tar_start` / `_end`) yang harus diakses lewat `extern` + pointer arithmetic.
+- **Jalur fallback C-array sudah ada** (MSVC / tanpa ld / `SATRIA_NO_LD=1`), tetapi konsumen tetap berurusan dengan makro per-enumerasi di `build/embedded.h` (`EMBED_<VAR>_SYMBOL`, `_SYMBOL_END`, `_ARCHIVE_NAME`, `_EXTRACT_DIR`, ...).
+
+Akibatnya kode konsumen diisi plumbing sebelum logika bisnis — lihat pemakaian nyata di repo `tests/miniws/bade/src/embed_use.c` (contoh konsumen dengan makro `EMBED_*`): `#if __has_include("build/embedded.h")`, `extern` weak-symbol untuk dunia make/CMake alternatif (bahkan `tests/miniws/CMakeLists.txt` menulis `embedded.h` tiruan), dan ukuran dihitung dari selisih pointer. Salah satu penamaan makro = link error, dan `.variable` harus dijaga sinkron manual dengan nama simbol.
 
 ## Solusi Desain: Code Generation & Single API
-Alih-alih memaksa linker memproses file biner mentah, Satria akan **menghasilkan file C standar** (`build/embedded.c` dan `build/embedded.h`) yang berisi data tersebut sebagai array `static const`. File ini kemudian dikompilasi secara normal bersama source code proyek. 
 
-Satria mengekspos satu fungsi tunggal (`getEmbed`) untuk mengakses semua data, sehingga fitur ini tidak terkunci hanya untuk arsip, tetapi bisa digunakan untuk aset apa pun.
+Alih-alih memaksa linker memproses file biner mentah, Satria **hanya** menghasilkan file C standar — `embedded.c` dan `embedded.h` di output-dir proyek — yang berisi data sebagai array `static const uint8_t`. File `.c` dikompilasi sebagai source biasa bersama source proyek; **jalur `ld -r -b binary` dihapus**. Inilah inti rancangan ini: bukan sekadar fallback baru (itu sudah ada), melainkan *codegen sebagai satu-satunya mekanisme* **dan** satu API tunggal untuk semua tipe aset.
+
+Satria mengekspos satu fungsi (`getEmbed`) untuk mengakses semua data, sehingga fitur ini tidak terkunci hanya untuk arsip, tetapi bisa digunakan untuk aset apa pun.
 
 ## API & Pengalaman Pengguna (User Experience)
 
-Penggunaan fitur embedded di kode C menjadi sangat bersih dan intuitif:
-
 ```c
-// Satria otomatis menambahkan 'build' ke include path, 
-// jadi cukup include seperti header biasa.
-#include "build/embedded.h"
+/* Satria menambah output-dir proyek ke include path; ejaan include
+   dipatok di bagian Pipeline di bawah (kompatibel dengan ejaan lama). */
+#include "embedded.h"
 
-void test() {
-    // Ambil data berdasarkan 'key' yang didefinisikan di Buildfile
-    const Embedded *e = getEmbed("rupa");
-    
-    // Akses aman menggunakan pengecekan pointer/flag
-    if (e && e->archive) {
-        printf("Archive name: %s\n", e->archive->name);
-        printf("Archive size: %zu bytes\n", e->archive->size);
-    }
+void test(void) {
+    /* key didefinisikan di Buildfile (default: nama entri) */
+    const Embedded *e = getEmbed("modules");
 
-    // Contoh jika meng-embed aset lain (gambar, teks, dll.)
-    if (e && e->asset) {
-        printf("Image name: %s\n", e->asset->name);
+    /* Akses aman: NULL bila key tidak dikenal / tipe tidak diisi. */
+    if (e && e->data) {
+        printf("Archive : %s\n", e->name);          /* "rupa_modules.tar" */
+        printf("Size    : %zu bytes\n", e->size);
+        printf("Extract : %s\n", e->extract);        /* field dari .extract */
+        fwrite(e->data, 1, e->size, stdout);
     }
 }
 ```
 
-## Definisi Struct (`build/embedded.h`)
+## Definisi Struct (`embedded.h`)
 
-Untuk mencegah *undefined behavior* dan akses memori ilegal, Satria menghasilkan header dengan pola *Type Flag* (pointer null-check atau boolean) untuk menandai data apa yang tersedia.
+Satu struct datar untuk semua tipe — tanpa flag `has_*` terpisah dan tanpa duplikasi struct per tipe. Satu-satunya pemeriksaan adalah null-check terhadap pointer hasil `getEmbed()`:
 
 ```c
 #pragma once
 #include <stddef.h>
 #include <stdint.h>
-#include <stdbool.h>
-
-// Struktur dasar untuk data mentah
-typedef struct {
-    const char* name;
-    size_t size;
-    const uint8_t* data;
-} EmbedArchive;
 
 typedef struct {
-    const char* name;
-    size_t size;
-    const uint8_t* data;
-} EmbedAsset;
-
-// Struct utama yang dikembalikan oleh getEmbed
-typedef struct {
-    const char* key;          // Nama kunci (misal: "rupa")
-    
-    bool has_archive;
-    const EmbedArchive* archive;
-    
-    bool has_asset;
-    const EmbedAsset* asset;
-    
-    // Bisa ditambah tipe data lain di masa depan (text, json, dll.)
+    const char *key;      /* kunci: "modules" (default = nama entri)      */
+    const char *type;     /* "archive" | "asset" | label lain (opsional)  */
+    const char *name;     /* nama file sumber: "rupa_modules.tar"         */
+    const char *extract;  /* field .extract, "" bila tidak diset          */
+    size_t size;          /* jumlah byte data                             */
+    const uint8_t *data;  /* isi file (static const, di .c yang digenerate)*/
 } Embedded;
 
-// Fungsi tunggal untuk mengambil data berdasarkan key
-const Embedded* getEmbed(const char* key);
+/* NULL bila key tidak dikenal. Iterasi tersedia via getEmbedAt(i). */
+const Embedded *getEmbed(const char *key);
 ```
+
+Menambah tipe baru di masa depan (json, teks, font, ...) = menambah nilai `type`, **bukan** menambah struct + pasangan flag baru — klaim "fleksibel" dipenuhi oleh struktur datanya sendiri.
 
 ## Pipeline Build di Satria
 
-Satria menangani embedded dalam 4 langkah otomatis yang terintegrasi dengan pipeline build yang sudah ada:
+Satria menangani embedded dalam 4 langkah yang terintegrasi dengan pipeline yang sudah ada:
 
-1. **Fase Parse & Generate:** 
-   Saat membaca `Buildfile`, jika ada blok `embedded`, Satria membaca file sumber (misal: `data.tar`) dan menulis `build/embedded.c` yang berisi array byte `static const uint8_t` dan implementasi fungsi `getEmbed()`.
-   *Catatan: Langkah ini hanya dijalankan jika file sumber lebih baru dari `build/embedded.c`.*
+1. **Fase Parse & Generate:** saat membaca `Buildfile` dan entri embedded aktif, satria men-generate `embedded.c` (array byte + tabel `getEmbed()`) dan `embedded.h`. **Regenerasi berbasis konten, bukan mtime** — lihat seksi *Regenerasi Content-Based* di bawah.
+2. **Fase Kompilasi:** `embedded.c` diterbitkan **sebelum kompilasi dimulai** (sama seperti penerbitan `embedded.h`/`version.h` hari ini di `commands.c`) lalu diperlakukan persis seperti source biasa: masuk daftar source, ikut fingerprint, menghasilkan object dengan compiler yang sama (GCC/Clang/MSVC).
+3. **Fase Linking:** object hasil codegen di-link bersama object lain. Pada fase library, object ini ikut dikemas ke `lib*.a` — kasus *"object harus tetap reachable oleh linker"* yang tercatat di `docs/guide/embedded-and-archives.md` **selesai dengan sendirinya** karena object adalah bagian normal dari build.
+4. **Fase Akses:** developer memanggil `getEmbed("key")`.
 
-2. **Fase Kompilasi:**
-   `build/embedded.c` diperlakukan sama persis seperti `src/main.c`. Satria mengompilasinya menjadi `build/embedded.o` menggunakan compiler yang sama (GCC/Clang/MSVC). Ini menjamin 100% portabilitas.
+### Path & include (dipatok)
 
-3. **Fase Linking:**
-   `build/embedded.o` di-link bersama object file lainnya menjadi binary final.
+- File digenerate berada di `outBuildDir` proyek seperti sekarang (`embed.c`): mode single → `build/`, mode workspace → output-dir proyek (root-centric, lihat `design/workspace.md`).
+- Ejaan include **satu** untuk kedua mode, dan output-dir selalu masuk include path. Ejaan lama `#include "build/embedded.h"` (dipakai `wstest/ruka/src/main.c` dan pola `__has_include` di konsumen luar repo) **tetap resolve selama masa transisi** — pastikan saat implementasi diverifikasi terhadap konsumen nyata, jangan ditebak.
 
-4. **Fase Akses:**
-   Developer menggunakan `getEmbed("key")` di kode mereka.
+## Regenerasi Content-Based
+
+Aturan ini wajib agar tidak melanggar filosofi touch-proof satria (lihat `design/startup.md`; bug serupa pernah terjadi dan diperbaiki di commit `9331330` — "archive always appears as new"):
+
+1. Generate ke `embedded.c.tmp` (dan `embedded.h.tmp`).
+2. Bandingkan byte dengan file yang sudah ada.
+3. **Identik → buang file temp, jangan sentuh file lama** (mtime tetap).
+4. Berbeda → rename atomik (`fsRenameReplace`), seperti pola `reportBlob`/`wsCacheSave`.
+
+Akibatnya `touch data.tar` (isi sama) tidak memicu compile ulang maupun relink, dan run berikutnya tetap no-op. Perubahan isi file sumber tetap terekam lewat stamp/fingerprint seperti input biasa.
 
 ## Konfigurasi Buildfile
 
-Contoh penulisan di `Buildfile` atau `Buildfile.ws`:
+Contoh penulisan (mode workspace — `embedded.*.file` relatif **root workspace**, tanpa `../`):
 
 ```text
-# Definisi embedded untuk proyek 'bade'
+# Definisi embedded untuk proyek 'bade'; key default = nama entri "modules"
 bade.embedded.modules as bademod
 
-# File sumber yang akan di-embed
-bademod.file = ../modules/rupa_modules.tar
+# File sumber yang akan di-embed (relatif root workspace)
+bademod.file = modules/rupa_modules.tar
 
-# Key unik yang akan digunakan di fungsi getEmbed("rupa")
-bademod.key = rupa
-
-# Tipe data (menentukan field mana di struct Embedded yang akan diisi)
-bademod.type = archive
+# Ekstraksi tujuan, diekspos sebagai field .extract di struct
+bademod.extract = /tmp/rupa-system
 ```
+
+### Tabel field
+
+| Field | Wajib | Default | Keterangan |
+|---|---|---|---|
+| `<proyek>.embedded.<nama> as <alias>` | ya | — | deklarasi entri; `<nama>` jadi key default |
+| `<alias>.file` | ya\* | — | arsip jadi, lewati tahap tar (relatif root workspace di mode ws) |
+| `<alias>.src` | ya\* | — | alternatif: sumber yang diarsipkan (konten proyek) |
+| `<alias>.key` | tidak | nama entri `<nama>` | kunci `getEmbed("<key>")`; cukup satu nama untuk entri & akses |
+| `<alias>.type` | tidak | disimpulkan: `archive` bila `.file`/aturan arsip ada, selain itu `asset` | label `type` di struct |
+| `<alias>.extract` | tidak | `""` | diekspos sebagai field `extract` (dibutuhkan `embed_use.c`) |
+| `<alias>.variable` | tidak | UPPERCASE nama entri | prefix makro kompat `EMBED_<VAR>_*` (lihat Migrasi) |
+| `<alias>.pattern`, `<alias>.exclude`, `archive.*` | — | — | aturan penyaringan/arsip tetap seperti implementasi sekarang |
+
+\* salah satu dari `.file` atau `.src`.
+
+Tiga nama untuk satu entri (alias, nama entri, key) pada rancangan sebelumnya diganti default: **key = nama entri**, `.key` hanya override bila memang perlu.
+
+## Integrasi Incremental & State (checklist implementasi)
+
+- `embedded.c` diterbitkan **sebelum** fase compile agar daftar source/fingerprint mengikutinya (preseden: penerbitan `embedded.h` + `version.h` di `commands.c`).
+- Header mengikuti state dependensi seperti header lain (closure `.d`, blob `hdr/*` di `caches/state.cache`) sehingga perubahan key/type me-recompile konsumen, sedangkan regenerasi identik tidak.
+- Gate no-op: stamp `embedded.*.file`/`.src` tetap input proyek (sudah dicatat hari ini di fast-state, `cmds_state.c`) — file embed berubah isi → no-op batal; sentuh-saja → tetap no-op (aturan content-based di atas).
+- Mode workspace: resolusi path mengikuti aturan kunci ws (`ws_config.c`): `.file/.dir` relatif root workspace, `.src` konten proyek.
 
 ## Keuntungan Desain Ini
 
-1. **Portabilitas Mutlak:** Tidak ada ketergantungan pada fitur linker eksotis. MSVC, GCC, dan Clang semua bisa mengompilasi array `uint8_t` standar.
-2. **Kemudahan Penggunaan (DX):** Developer tidak perlu berurusan dengan simbol linker aneh (seperti `_binary_data_tar_start`). Cukup panggil `getEmbed()`.
-3. **Fleksibel:** Tidak terkunci hanya untuk archive. Bisa digunakan untuk gambar, konfigurasi JSON, atau teks dengan menambahkan field baru di struct `Embedded` dan tipe di `Buildfile`.
-4. **Aman (Safe):** Penggunaan pointer `const EmbedArchive*` (yang akan di-set `NULL` jika tidak ada) mencegah developer mengakses data yang tidak diinisialisasi.
-5. **Debugging Mudah:** Developer bisa membuka `build/embedded.c` untuk melihat persis bagaimana Satria menyimpan data. Tidak ada *black box*.
+1. **Portabilitas Mutlak:** tidak ada ketergantungan pada fitur linker eksotis. MSVC, GCC, dan Clang mengompilasi array `uint8_t` standar.
+2. **Kemudahan Penggunaan (DX):** tanpa simbol linker aneh, tanpa hutan makro — cukup `getEmbed("key")` dengan null-check.
+3. **Fleksibel:** tidak terkunci untuk archive; aset lain cukup menambah nilai `type`.
+4. **Aman (Safe):** pointer `const` + NULL-check mencegah akses data yang tidak tersedia; ukuran eksplisit (`size`) menggantikan pointer arithmetic.
+5. **Debugging Mudah:** developer bisa membuka `embedded.c` hasil generate — tidak ada *black box*.
+6. **Integrasi lebih rapi:** object generated jadi source biasa → kasus static-library *"harus tetap reachable"* selesai natural; konsumen kehilangan seluruh blok `__has_include`/weak-symbol.
+
+## Catatan Skala & Portabilitas
+
+- Array besar (ratusan KB s.d. beberapa MB) aman di GCC/Clang; **MSVC perlu diverifikasi** pada batas ukuran initializer — uji dengan arsip berukuran representatif (bukan hanya fixture KB).
+- Bila dibutuhkan kelak: strategi chunking (pecahan array per ~64KB) atau fast path `#embed` (C23) dengan fallback ke array generated. Tidak masuk scope v1, tetapi format `Embedded` (pointer + size) sudah mengakomodasi keduanya tanpa mengubah API.
+
+## Migrasi & Kompatibilitas
+
+Konsumen nyata yang harus tetap hijau: `tests/miniws/bade/src/embed_use.c`, `tests/wstest/ruka/src/main.c`, fixture `tests/miniws`, `bench/ws/gen.sh` + `bench/workspace*.sh` (menulis `.file/.variable/.extract/.pattern`), `tests/miniws/verify-fpic.sh`, `tests/miniws/CMakeLists.txt` (embedded.h tiruan), dan penghasil `embedded.*` di `src/nc/nc_convert.c` (konverter Makefile).
+
+Strategi:
+
+1. **Fase 1 — kompat:** codegen baru (`getEmbed` + struct datar) digenerasi **bersama** makro lama `EMBED_<VAR>_ARCHIVE_NAME/_EXTRACT_DIR/_SYMBOL/_SYMBOL_END` (termasuk `.variable` yang lama tetap diterima). Ejaan include lama tetap resolve. Jalur `ld -r -b binary` dimatikan, tetapi simbol-simbol makro lama kini menunjuk array hasil codegen sehingga konsumen lama tanpa `getEmbed` tetap jalan — termasuk fallback `__has_include` pada konsumen lama.
+2. **Fase 2 — migrasi konsumen:** `embed_use.c` (dan konsumen lain) pindah ke `getEmbed()`; komentar sisa rebranding ikut diperbaiki.
+3. **Fase 3 — pensiun makro:** makro lama diberi catatan deprecated di `embedded.h`, dihapus setelah satu siklus rilis.
+4. Konfigurasi lama (`variable`, key tanpa `.key`, `pattern`, `extract`) tidak berubah artinya — tidak ada migrasi Buildfile pengguna.
+
+## Definition of Done
+
+- `sh scripts/unit.sh` — seluruh suite (177 pemeriksaan) hijau, termasuk skenario embed/no-op.
+- `bench/ws.sh` 12/12 *in accordance* (skenario `rel` dan `mod` menyentuh embed).
+- `touch` file embed (isi sama) tetap no-op; ubah isi → konsumen direcompile + relink.
+- `embed_use.c` tetap terbangun dan berjalan (fase 1), lalu dimigrasi ke `getEmbed()` (fase 2).
+- Build MSVC/GCC/Clang dengan arsip berukuran representatif menghasilkan binary yang berfungsi.

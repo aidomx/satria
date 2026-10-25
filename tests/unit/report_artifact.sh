@@ -5,14 +5,12 @@
 #   - release aktif: no-op KINI berlaku (gerbang dibuka; validasi via artifact.cache)
 #   - artefak/input release berubah -> batal no-op + dibangun ulang; sentuh -> PATCH
 #   - single-project: kedua file ikut terbentuk, no-op tetap informatif
-# Pemakaian: sh tests/unit/report_artifact.sh <satria> [miniws] [rupaws]
+# Pemakaian: sh tests/unit/report_artifact.sh <satria> [miniws]
 abspath() { (cd "$(dirname "$1")" 2>/dev/null && printf '%s/%s\n' "$(pwd)" "$(basename "$1")"); }
 [ -n "$1" ] && [ -x "$1" ] || { echo "satria tidak ditemukan: ${1:-<kosong>}"; exit 2; }
 SAT=$(abspath "$1")
 MWS=$(abspath "${2:-$(dirname "$0")/../miniws}")
-RPW=$(abspath "${3:-$(dirname "$0")/../rupaws}")
 [ -d "$MWS" ] || { echo "fixture tidak ditemukan: $MWS"; exit 2; }
-[ -d "$RPW" ] || { echo "fixture tidak ditemukan: $RPW"; exit 2; }
 export NO_COLOR=1
 
 pass=0; fail=0
@@ -42,41 +40,53 @@ nline=$(grep -n "Nothing to build" n.txt | head -1 | cut -d: -f1)
 [ -n "$sline" ] && [ -n "$nline" ] && [ "$nline" -lt "$sline" ]
 check "miniws: urutan output = STATUS dulu, ringkasan sesudah" $?
 
-# ===================== workspace rupaws: release + artifact =====================
+# ===================== workspace miniws + release: release + artifact =====================
+# Salinan miniws ditambahi konfigurasi release (fixture asli tidak diubah).
 R=$(mktemp -d /tmp/rpt_rel_XXXX)
-cp -r "$RPW/." "$R/" || exit 2
+cp -r "$MWS/." "$R/" || exit 2
 cd "$R" || exit 2
-"$SAT" -w > rc0.txt 2>&1; check "rupaws: cold build (release)" $?
+rm -rf build bin lib modules dist .satria
+printf 'perintah-test\n' > core/src/cmd.txt
+cat >> Buildfile.ws <<'REL'
+release.name = rupa
+release.version = 0.2.4
+release.files = core/src/cmd.txt
+release.output = dist/{name}-v{version}.tar.gz
+release.format = tar
+release.compress = gzip
+release.checksum = sha256
+REL
+"$SAT" -w > rc0.txt 2>&1; check "release: cold build (release)" $?
 grep -c "dist/rupa-v" .satria/artifact.cache > /tmp/rpt_cnt.$$
-[ "$(cat /tmp/rpt_cnt.$$)" -gt 0 ]; check "rupaws: artefak dist tercatat di artifact.cache" $?
+[ "$(cat /tmp/rpt_cnt.$$)" -gt 0 ]; check "release: artefak dist tercatat di artifact.cache" $?
 grep -q "cmd.txt" .satria/artifact.cache
-check "rupaws: input release (cmd.txt) tercatat di artifact.cache" $?
+check "release: input release (cmd.txt) tercatat di artifact.cache" $?
 grep -q "rupa_modules.tar" .satria/artifact.cache
-check "rupaws: arsip proyek kemasan tercatat di artifact.cache" $?
+check "release: arsip proyek kemasan tercatat di artifact.cache" $?
 "$SAT" -w > rc1.txt 2>&1
-hit_ws rc1.txt; check "rupaws: no-op HIT saat release aktif (gerbang terbuka)" $?
+hit_ws rc1.txt; check "release: no-op HIT saat release aktif (gerbang terbuka)" $?
 
 # artefak dihapus -> batal no-op + dibangun ulang + hit lagi
 rm -f dist/*.tar.gz
 "$SAT" -w > rc2.txt 2>&1
-! hit_ws rc2.txt; check "rupaws: artefak hilang membatalkan no-op" $?
-ls dist/*.tar.gz >/dev/null 2>&1; check "rupaws: artefak dibangun ulang" $?
+! hit_ws rc2.txt; check "release: artefak hilang membatalkan no-op" $?
+ls dist/*.tar.gz >/dev/null 2>&1; check "release: artefak dibangun ulang" $?
 "$SAT" -w > rc3.txt 2>&1
-hit_ws rc3.txt; check "rupaws: no-op pulih setelah artefak terbangun" $?
+hit_ws rc3.txt; check "release: no-op pulih setelah artefak terbangun" $?
 
 # input release (di luar fingerprint) berubah isi -> batal no-op + release ulang
-echo "perubahan-test" >> core/src/prompt/cmd.txt
+echo "perubahan-test" >> core/src/cmd.txt
 "$SAT" -w > rc4.txt 2>&1
-! hit_ws rc4.txt; check "rupaws: edit input release membatalkan no-op" $?
-grep -q "Package" rc4.txt; check "rupaws: fase release berjalan ulang" $?
+! hit_ws rc4.txt; check "release: edit input release membatalkan no-op" $?
+grep -q "Package" rc4.txt; check "release: fase release berjalan ulang" $?
 "$SAT" -w > rc5.txt 2>&1
-hit_ws rc5.txt; check "rupaws: no-op pulih setelah input sinkron" $?
+hit_ws rc5.txt; check "release: no-op pulih setelah input sinkron" $?
 
 # sentuh artefak (stempel beda, isi sama) -> PATCH, no-op tetap diambil
 sleep 1.1
 touch dist/*.tar.gz
 "$SAT" -w > rc6.txt 2>&1
-hit_ws rc6.txt; check "rupaws: sentuh artefak tetap no-op (PATCH hash)" $?
+hit_ws rc6.txt; check "release: sentuh artefak tetap no-op (PATCH hash)" $?
 rm -f /tmp/rpt_cnt.$$
 
 # ===================== single-project =====================

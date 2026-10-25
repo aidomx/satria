@@ -1,18 +1,17 @@
 /*
  * embed_ld_cache — cache persisten hasil deteksi GNU ld (.satria/ld.cache).
  *
- * ldAvailable() (embed.c) hanya meng-cache hasilnya per proses, jadi
- * setiap run yang membangun proyek ber-`embedded` men-spawn sh + ld lagi
- * untuk `ld --version` (3–5 ms per run; lihat problem_note.txt P1).
- * Cache ini merekam verdict probe lintas-run: run berikutnya cukup
- * SATU stat ke binary ld hasil resolusi PATH (path + mtime ns + size)
- * untuk memvalidasi — tanpa spawn.
+ * Jalur build TIDAK lagi memakai ld (codegen embedded.c adalah satu-satunya
+ * mekanisme embed, design/embedded.md) — modul ini bertahan untuk dua
+ * konsumen: validasi stamp 'L' LEGACY di cmdsFastStateValid (state lama
+ * tetap divalidasi lalu drop pada save berikutnya) dan probe fisik
+ * `satria profile embed=` (benchmark tool tar+ld).
+ * Cache merekam verdict probe lintas-run: cukup SATU stat ke binary ld
+ * hasil resolusi PATH (path + mtime ns + size) untuk memvalidasi — tanpa
+ * spawn `ld --version` (3–5 ms).
  *
- * Aturan penting: SATRIA_NO_LD tidak pernah dibaca di sini — env override
- * itu diputuskan embed.c SEBELUM menyentuh cache, sehingga fallback tanpa
- * ld (SATRIA_NO_LD=1, dipakai Uji 2 verify-fpic.sh) tetap selalu jalan.
- * Cache juga tidak dipakai di Windows (jalur embed MSVC memakai fallback
- * C-array; lihat embed.h).
+ * Aturan penting: SATRIA_NO_LD tidak pernah dibaca di sini. Cache juga
+ * tidak dipakai di Windows.
  *
  * Format file: "SATRIALD1", version u32, mtime ns (2x u32 LE), size (2x u32
  * LE), key (u32 len + bytes), verdict u8. Helper semuanya menulis byte

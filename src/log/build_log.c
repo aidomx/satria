@@ -121,3 +121,35 @@ void buildLogEnd(int status) {
     if (f) { fprintf(f, "satria: build failed (exit status %d)\n", status); fclose(f); }
   }
 }
+
+void buildLogCapture(const char *buf, size_t n) {
+#ifndef _WIN32
+  /* log_active diwarisi anak workspace dari induk (buildLogBegin dipanggil
+     sebelum fork batch) — gate-nya identik dengan relay stderr. */
+  if (!buf || !n || !log_active) return;
+  size_t i = 0;
+  FILE *out = NULL;
+  while (i < n) {
+    size_t eol = i;
+    while (eol < n && buf[eol] != '\n') eol++;
+    size_t len = eol - i + (eol < n ? 1 : 0); /* sertakan \n bila ada */
+    if (len == 0) break;
+    size_t chk = len < 8191 ? len : 8191;
+    char line[8192];
+    memcpy(line, buf + i, chk);
+    line[chk] = '\0';
+    if (diagnostic(line)) {
+      if (!out) {
+        mkdir(".satria", 0777);
+        out = fopen(".satria/build.log", "a");
+      }
+      if (out) fwrite(buf + i, 1, len, out);
+    }
+    i += len;
+  }
+  if (out) fclose(out);
+#else
+  (void)buf;
+  (void)n;
+#endif
+}

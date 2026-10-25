@@ -288,7 +288,7 @@ Untuk mempercepat cold build, `satria` dapat menerapkan **Source Flattening & Ba
 - [ ] Dependensi siklik (`core ↔ bade`) diselesaikan dengan Two-Phase Build tanpa error `dependency cycle`.
 - [ ] Shared headers di root (nama bebas) dikenali dan ditambahkan ke `-I` secara otomatis.
 - [ ] Platform-specific flags (`flags.linux`, `defines.windows`, dll.) di-resolve dan di-append dengan benar.
-- [ ] Fixture workspace (`tests/rupaws/Buildfile.ws`) dan generator bench dimigrasi ke path root-centric; seluruh regresi lulus (self-host, 12 skenario `bench/ws.sh`, rupaws).
+- [ ] Fixture workspace (`Buildfile.ws` (workspace besar lokal)) dan generator bench dimigrasi ke path root-centric; seluruh regresi lulus (self-host, 12 skenario `bench/ws.sh`, workspace besar lokal).
 - [ ] `pack.*` per proyek diabaikan dengan peringatan di mode workspace (di luar scope v1, tidak menggagalkan build).
 
 ---

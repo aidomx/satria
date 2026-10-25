@@ -241,6 +241,16 @@ void configFinalize(Config *c) {
      eksplisit — defaults hanya mengisi yang kosong. */
   if (c->sources.count == 0) listAdd(&c->sources, "src");
   if (c->headerPublic.count == 0 && fsDirExists("include")) listAdd(&c->headerPublic, "include");
+  /* Output-dir proyek selalu ada di include path: header generated (embedded.h,
+     version.h) bisa di-#include tanpa headers.each (design/embedded.md, "Path &
+     include"). Ditambahkan SETELAH default "include" agar penghapusan default
+     telanjang di wsBuildConfig (cek items[0]=="include") tetap berfungsi. */
+  if (c->outBuildDir[0]) {
+    bool present = false;
+    for (int i = 0; i < c->headerPublic.count; i++)
+      if (strcmp(c->headerPublic.items[i], c->outBuildDir) == 0) present = true;
+    if (!present) listAdd(&c->headerPublic, c->outBuildDir);
+  }
 
   /* Deteksi bahasa C++ dari sources final (termasuk default "src" yang baru
      diisi — proyek standar tanpa deklarasi pun terdeteksi). Proyek campuran
@@ -447,6 +457,12 @@ static void configApply(Config *c, const char *section, const char *sub, const c
     } else if (strcmp(key, "variable") == 0) {
       /* Override prefix macro EMBED_<N>_ — mis. BUILTIN_MODULES. */
       copyStr(e->variable, sizeof(e->variable), value);
+    } else if (strcmp(key, "key") == 0) {
+      /* Kunci getEmbed("<key>"); default = nama entri (design/embedded.md). */
+      copyStr(e->key, sizeof(e->key), value);
+    } else if (strcmp(key, "type") == 0) {
+      /* Label type di struct Embedded; default disimpulkan saat codegen. */
+      copyStr(e->type, sizeof(e->type), value);
     }
     return;
   }

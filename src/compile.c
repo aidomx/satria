@@ -237,6 +237,18 @@ static const char *projectRelRoot(const Config *c, const char *root) {
 }
 
 bool objectPathFor(const Config *c, const char *src, char *out, size_t n) {
+  /* Source embed hasil codegen: <outBuildDir>/embedded.c ->
+     <outBuildDir>/embedded.o. File ini berada di LUAR root sumber proyek,
+     jadi ditangani eksplisit sebelum pencocokan root (design/embedded.md:
+     file generated diperlakukan sebagai source biasa). */
+  if (c->embCount > 0) {
+    size_t pl = strlen(c->outBuildDir);
+    if (strncmp(src, c->outBuildDir, pl) == 0 && src[pl] == '/' &&
+        strcmp(src + pl + 1, "embedded.c") == 0) {
+      snprintf(out, n, "%s/embedded.o", c->outBuildDir);
+      return true;
+    }
+  }
   for (int i = 0; i < c->sources.count; i++) {
     const char *root = c->sources.items[i];
     size_t rl = strlen(root);
@@ -314,18 +326,18 @@ bool excludedSource(const Config *c, const char *src) {
 /* Kompilasi satu source untuk library: identik compileOne, plus -fPIC
    bila library shared diminta (GNU/Clang; MSVC tidak butuh flag). */
 bool compileLibraryOne(const Config *c, const char *inc, const char *wf, const char *src,
-                       const char *obj) {
+                       const char *obj, ProcHandle *cap) {
 #ifndef _WIN32
   if (c->libShared && compilerKind(c->cc) != CC_MSVC) {
     char *picwf = picWarningFlags(c);
-    bool ok = compileOne(c, inc, picwf, src, obj);
+    bool ok = compileOne(c, inc, picwf, src, obj, cap);
     free(picwf);
     return ok;
   }
 #else
   (void)c;
 #endif
-  return compileOne(c, inc, wf, src, obj);
+  return compileOne(c, inc, wf, src, obj, cap);
 }
 
 /* "token1 token2" -> "token1","token2" — pecah per spasi lalu terjemahkan:
@@ -423,10 +435,35 @@ char *compileCmd(const Config *c, const char *inc, const char *wf, const char *s
 }
 
 bool compileOne(const Config *c, const char *inc, const char *wf, const char *src,
-                const char *obj) {
+                const char *obj, ProcHandle *cap) {
   mkparent(obj);
   char *cmd = compileCmd(c, inc, wf, src, obj);
-  bool ok = runCmd(cmd);
+  bool ok;
+  if (cap) {
+    /* Redirect SEMUA output child (stdout+stderr) ke file tangkapan. Jalur
+       serial selalu lewat shell (system / cmd.exe), jadi sintaks redirect
+       aman di kedua OS. Pemanggil mencetak isi setelah baris [n/m]. */
+    memset(cap, 0, sizeof(*cap));
+    cap->finished = true;
+    if (procCaptureTemp(cap->capPath, sizeof(cap->capPath))) {
+      size_t n = strlen(cmd) + strlen(cap->capPath) + 16;
+      char *cmd2 = malloc(n);
+      if (cmd2) {
+        snprintf(cmd2, n, "%s > \"%s\" 2>&1", cmd, cap->capPath);
+        ok = runCmd(cmd2);
+        free(cmd2);
+      } else {
+        remove(cap->capPath);
+        cap->capPath[0] = '\0';
+        ok = runCmd(cmd);
+      }
+    } else {
+      ok = runCmd(cmd);
+    }
+    cap->ok = ok;
+  } else {
+    ok = runCmd(cmd);
+  }
   free(cmd);
   return ok;
 }

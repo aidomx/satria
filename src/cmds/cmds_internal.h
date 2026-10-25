@@ -6,6 +6,7 @@
 #include <stdint.h>
 
 #include "../config.h" /* Config, List */
+#include "../portability.h" /* ProcHandle — tangkapan output compiler */
 
 /* Ukuran buffer path untuk state workspace. WS_SCAN = WS_PATH_LEN - 1 sebagai teks
    lebar sscanf: lebar baca selalu lebih kecil dari buffer tujuan (-Wfortify-source). */
@@ -48,6 +49,13 @@ bool cmdsBuildLibrary(const Config *c, const List *srcs);
 bool cmdsRunParallelJobs(const Config *c, const char *inc, const char *wf, const List *srcs,
                          char *objPath, size_t objCap, int jobs, int *outCompiled,
                          int *outFailed, int *outInterrupted, bool quiet);
+
+/*
+ * Cetak output compiler yang ditangkap (procCaptureTake) ke stdout — UTUH
+ * setelah baris progress, sehingga urutan terjaga dan blok tidak bisa
+ * tercampur job lain — lalu salin ke build.log bila relay log aktif.
+ */
+void cmdsEmitCapture(ProcHandle *h);
 
 /* Terbitkan build/version.h dari .satria-version (root project). */
 bool cmdsEmitVersionHeader(const Config *c, bool *changed);

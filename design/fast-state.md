@@ -17,7 +17,7 @@ workspace yang sama (65 stat), single project (102 stat).
 | no-op, sesudah kunci memo dinormalisasi | 153 | 2 | 65 |
 | cold, workspace bench | 627 → 581 | 32 → 26 | 65 |
 | no-op, single project (compare.sh, `headers = include`) | 102 | 0 | - |
-| no-op, tests/rupaws (3 proyek, 213 TU) | 1615 → 847 (memo) | 9 | 65 |
+| no-op, workspace besar lokal (3 proyek, 213 TU) | 1615 → 847 (memo) | 9 | 65 |
 
 Jumlah path unik pada no-op bench: 110 dari 157 panggilan stat. Header
 `library/` yang sama dicek dua kali (oleh `core` dan `bade`). Kunci memo
@@ -33,13 +33,13 @@ dan sumber. Akibatnya:
 1. Folder `include/` dan `library/` dicatat seluruh isinya, walaupun TU hanya
    meng-include sebagian.
 2. `build` di `headers` menelusuri output (.o, .d, dan direktori build).
-   Di tests/rupaws ini 354 dari 547 stamp file `rupa`.
+   Di workspace besar lokal ini 354 dari 547 stamp file `rupa`.
 3. (Koreksi) `I.` bukan folder: `headerEntryDir` menerjemahkannya menjadi `.`, dan
    kode lama melewati `.`. Jadi `I.` tidak menelusuri root proyek; penyebab utamanya
    tetap entri `build`.
 
 Pembatasan `build` dari `headers` sudah dipakai di generator bench dan terbukti
-tidak mengubah artefak (sha256 identik pada tests/rupaws).
+tidak mengubah artefak (sha256 identik pada workspace besar lokal).
 
 ## Prinsip desain yang diusulkan
 
@@ -139,7 +139,7 @@ project tetap memakai `cmdsFastStateSave`/`cmdsFastStateValid` tanpa perubahan.
      benar: edit header yang ada di closure merebuild; header baru yang
      menimpa resolusi merebuild; touch tidak merebuild.
 2. Hapus `build` dari `headers` di template workspace (sudah dilakukan di
-   generator bench; tests/rupaws belum diubah).
+   generator bench; workspace besar lokal belum diubah).
 3. Pindahkan stat sisa di jalur decide (`src/deps/`) ke memo yang sama.
 4. Cache hash isi per (path, mtime, size).
 5. Ukur `touch` dan `cold` setelah 1–4 pada workspace, lalu bandingkan dengan

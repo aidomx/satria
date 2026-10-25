@@ -16,6 +16,7 @@
 
 #include "../compile.h"
 #include "../embed.h"
+#include "../log/build_log.h"
 #include "../pack/pack.h"
 #include "../portability.h"
 #include "../util.h"
@@ -137,7 +138,7 @@ bool cmdsRunParallelJobs(const Config *c, const char *inc, const char *wf, const
       }
       mkparent(objPath);
       char *cmd = compileCmd(c, inc, wfUse, src, objPath);
-      bool started = procStart(cmd, &handles[active]);
+      bool started = procStartCapture(cmd, &handles[active]);
       free(cmd);
       if (!started) {
         fprintf(stderr, "satria: cannot start compiler for %s\n", src);
@@ -163,6 +164,10 @@ bool cmdsRunParallelJobs(const Config *c, const char *inc, const char *wf, const
       printf("[%3d/%3d] %-4s %5.2fs  %s\n", compiled, total, tag, dt, slots[w].src);
       fflush(stdout);
     }
+    /* Output compiler (warning/error) dicetak UTUH setelah baris progress:
+       stream yang sama -> urutan terjaga dan blok tidak bisa tercampur job
+       lain yang selesai bersamaan (anti-interleaving). */
+    cmdsEmitCapture(fin);
     if (!fin->ok) {
       if (fin->interrupted)
         interrupted++;
@@ -176,6 +181,12 @@ bool cmdsRunParallelJobs(const Config *c, const char *inc, const char *wf, const
     active--;
   }
 
+  /* Tangkapan job yang berhenti tanpa sempat dicetak (break saat Ctrl+C /
+     wait gagal) dibuang supaya file sementara tidak tertinggal. */
+  for (int i = 0; i < active; i++) {
+    size_t n = 0;
+    free(procCaptureTake(&handles[i], &n));
+  }
   free(slots);
   free(handles);
 #ifndef _WIN32
@@ -185,6 +196,17 @@ bool cmdsRunParallelJobs(const Config *c, const char *inc, const char *wf, const
   *outFailed = failed;
   *outInterrupted = interrupted;
   return failed == 0 && interrupted == 0;
+}
+
+void cmdsEmitCapture(ProcHandle *h) {
+  size_t n = 0;
+  char *buf = procCaptureTake(h, &n);
+  if (!buf) return;
+  fwrite(buf, 1, n, stdout);
+  if (buf[n - 1] != '\n') fputc('\n', stdout);
+  fflush(stdout);
+  buildLogCapture(buf, n); /* relay stderr tidak melihat output ini */
+  free(buf);
 }
 
 /*
@@ -223,17 +245,11 @@ bool cmdsBuildLibraryEx(const Config *c, const List *srcs, bool linkPathLibs) {
   char obj[MAX_PATH];
   for (int i = 0; i < srcs->count; i++) {
     /* exclude: source tidak ikut DIKEMAS ke library (mis. main.c milik
-       binary) — tetap dikompilasi untuk executable. */
+       binary) — tetap dikompilasi untuk executable. Object embed kini
+       object source biasa (embedded.c ikut srcs) — tanpa perlakuan khusus. */
     if (excludedSource(c, srcs->items[i])) continue;
     if (objectPathFor(c, srcs->items[i], obj, sizeof(obj))) listAdd(&objs, obj);
   }
-  /* Workspace embed belongs to the consuming executable, not its exported
-     libraries. Otherwise an asset update rewrites libbade.a and needlessly
-     relinks unrelated consumers (e.g. core/rupa via cdeps). Preserve the
-     existing single-project library behavior. */
-  for (int i = 0; !wsModeActive() && i < c->embCount; i++)
-    if (c->emb[i].enable && fsFileExists(c->emb[i].objectPath))
-      listAdd(&objs, c->emb[i].objectPath);
 
   if (objs.count == 0) {
     fprintf(stderr, "satria: library requested but no object files found\n");
@@ -361,11 +377,6 @@ bool cmdsLibVariantUpToDate(const Config *c, bool isStatic, const List *srcs) {
     if (excludedSource(c, srcs->items[i])) continue;
     if (!objectPathFor(c, srcs->items[i], obj, sizeof(obj))) continue;
     int64_t om = fsMTimeNs(obj);
-    if (om < 0 || om > mtime) return false;
-  }
-  for (int i = 0; !wsModeActive() && i < c->embCount; i++) {
-    if (!c->emb[i].enable) continue;
-    int64_t om = fsMTimeNs(c->emb[i].objectPath);
     if (om < 0 || om > mtime) return false;
   }
   return true;

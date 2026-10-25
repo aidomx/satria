@@ -18,7 +18,8 @@
 #include "../util.h"
 
 #define CONFIG_CACHE_MAGIC "SATRIACFG1"
-#define CONFIG_CACHE_VERSION 11u /* 10: defines + suffix flags/library/headers/std (design/flags.md) */
+#define CONFIG_CACHE_VERSION 12u /* 12: embedded.key + embedded.type (design/embedded.md)
+                                     11: ... 10: defines + suffix flags/library/headers/std */
 #define CONFIG_CACHE_DIR ".satria"
 #define CONFIG_CACHE_FILE "startup.state"
 
@@ -84,7 +85,8 @@ static bool cacheWriteEmbedded(FILE *fp, const EmbeddedEntry *e) {
          cacheWriteU8(fp, tar) && cacheWriteString(fp, e->ext) &&
          cacheWriteString(fp, e->archivePath) && cacheWriteString(fp, e->objectPath) &&
          cacheWriteU8(fp, pre) && cacheWriteString(fp, e->prebuiltPath) &&
-         cacheWriteString(fp, e->variable) && cacheWriteList(fp, &e->excludes);
+         cacheWriteString(fp, e->variable) && cacheWriteList(fp, &e->excludes) &&
+         cacheWriteString(fp, e->key) && cacheWriteString(fp, e->type);
 }
 
 static bool cacheReadEmbedded(FILE *fp, EmbeddedEntry *e) {
@@ -100,7 +102,8 @@ static bool cacheReadEmbedded(FILE *fp, EmbeddedEntry *e) {
       !cacheReadString(fp, e->archivePath, sizeof(e->archivePath)) ||
       !cacheReadString(fp, e->objectPath, sizeof(e->objectPath)) || !cacheReadU8(fp, &pre) ||
       !cacheReadString(fp, e->prebuiltPath, sizeof(e->prebuiltPath)) ||
-      !cacheReadString(fp, e->variable, sizeof(e->variable)) || !cacheReadList(fp, &e->excludes))
+      !cacheReadString(fp, e->variable, sizeof(e->variable)) || !cacheReadList(fp, &e->excludes) ||
+      !cacheReadString(fp, e->key, sizeof(e->key)) || !cacheReadString(fp, e->type, sizeof(e->type)))
     return false;
   e->enable = b != 0;
   e->tar = tar != 0;

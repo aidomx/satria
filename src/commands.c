@@ -837,6 +837,22 @@ void cmdsCollectSources(const Config *c, List *out) {
     stateWalkDirCached(entry, ".c", out);
     stateWalkDirCached(entry, ".cpp", out);
   }
+  /* Source embed hasil codegen: berada di outBuildDir (bukan root sumber),
+     jadi ditambahkan eksplisit — ikut fingerprint, decide, compdb, link,
+     dan kemasan library seperti source biasa (design/embedded.md §Pipeline).
+     Hanya proyek binary: proyek kemasan mengarsipkan, bukan mengcompile. */
+  if (c->binary && c->embCount > 0) {
+    char emb[MAX_PATH + 32];
+    snprintf(emb, sizeof(emb), "%s/embedded.c", c->outBuildDir);
+    bool dup = false;
+    for (int i = 0; i < out->count; i++) {
+      if (strcmp(out->items[i], emb) == 0) {
+        dup = true;
+        break;
+      }
+    }
+    if (!dup) listAdd(out, emb);
+  }
   listSort(out);
 }
 
@@ -881,6 +897,28 @@ int cmdsBuildPassRun(int jobs, Config c, const char *buildfilePath, bool libOnly
     if (!anyRebuilt) printf("    Skipped  : true\n");
     printf("    Status   : Success\n");
     return 0;
+  }
+
+  /* Fase parse & generate embedded (design/embedded.md): arsip tiap entri
+     dibangun dulu, lalu embedded.c (array byte + tabel getEmbed) dan
+     embedded.h diterbitkan SEBELUM kompilasi — embedded.c ikut daftar
+     source lewat cmdsCollectSources (fingerprint, decide, compdb, link,
+     kemasan library), persis seperti source biasa. */
+  bool embHeaderChanged = false;
+  if (c.embCount > 0) {
+    mkdirs(c.outBuildDir);
+    if (!buildEmbeddedArchivesEx(&c, NULL)) return 1;
+    if (!emitEmbeddedSource(&c, NULL)) return 1;
+    if (!emitEmbeddedHeader(&c, &embHeaderChanged)) return 1;
+    for (int i = 0; i < c.embCount; i++) {
+      const EmbeddedEntry *e = &c.emb[i];
+      if (!e->enable) continue;
+      if (e->usePrebuilt)
+        printf("%s Embedded: %s (file: %s)\n", repPrefix(), e->name, e->archivePath);
+      else if (fsFileExists(e->archivePath))
+        printf("%s Embedded: %s (archive: %s)\n", repPrefix(), e->name, e->archivePath);
+    }
+    profMark("embed");
   }
 
   List srcs = {0};
@@ -949,15 +987,12 @@ int cmdsBuildPassRun(int jobs, Config c, const char *buildfilePath, bool libOnly
   }
   profMark("compdb");
 
-  /* Terbitkan build/embedded.h & build/version.h sebelum kompilasi agar
-     konsumen melihat simbol/versi yang benar; jika salah satunya berubah,
-     paksa kompilasi ulang total. */
+  /* Terbitkan build/version.h sebelum kompilasi agar konsumen melihat
+     versi yang benar; perubahan memaksa kompilasi ulang total. embedded.h
+     sudah diterbitkan di fase parse & generate (embHeaderChanged dihitung
+     di sana) — jalurnya tetap memaksa recompile penuh di blok di bawah. */
   char obj[MAX_PATH];
-  bool embHeaderChanged = false, verHeaderChanged = false;
-  if (c.embCount > 0 && !emitEmbeddedHeader(&c, &embHeaderChanged)) {
-    statPlanFree(&plan);
-    return 1;
-  }
+  bool verHeaderChanged = false;
   if (!cmdsEmitVersionHeader(&c, &verHeaderChanged)) {
     statPlanFree(&plan);
     return 1;
@@ -1081,8 +1116,9 @@ int cmdsBuildPassRun(int jobs, Config c, const char *buildfilePath, bool libOnly
       const char *src = pending.items[i];
       if (!objectPathFor(&c, src, obj, sizeof(obj))) continue;
 
+      ProcHandle cap;
       double start = nowSeconds();
-      bool ok = compileLibraryOne(&c, inc, wf, src, obj);
+      bool ok = compileLibraryOne(&c, inc, wf, src, obj, &cap);
       double dt = nowSeconds() - start;
 
       compiled++;
@@ -1092,11 +1128,15 @@ int cmdsBuildPassRun(int jobs, Config c, const char *buildfilePath, bool libOnly
         interrupted++;
         if (ok || c.progressErrorAlways)
           printf("[%3d/%3d] %-4s %5.2fs  %s\n", compiled, total, "INT", dt, src);
+        cmdsEmitCapture(&cap);
         break;
       }
       if (!ok) failed++;
       if (ok || c.progressErrorAlways)
         printf("[%3d/%3d] %-4s %5.2fs  %s\n", compiled, total, ok ? "OK" : "FAIL", dt, src);
+      /* Output compiler dicetak UTUH setelah baris progress — stream yang
+         sama menjamin urutan & anti-interleaving (lihat cmdsEmitCapture). */
+      cmdsEmitCapture(&cap);
     }
   }
   profMark("compile");
@@ -1145,14 +1185,6 @@ int cmdsBuildPassRun(int jobs, Config c, const char *buildfilePath, bool libOnly
   listFree(&pendingObjHashes);
 
   profMark("objhash");
-  if (!buildEmbedded(&c)) {
-    free(inc);
-    free(wf);
-    statPlanFree(&plan);
-    profReport();
-    return 1;
-  }
-  profMark("embed");
 
   /* Fase library workspace (pass 1 dari cmdBuildEx, lihat commands.h):
      kemas lib<name>.a/.so dari object milik proyek ini lalu berhenti —
@@ -1248,15 +1280,6 @@ int cmdsBuildPassRun(int jobs, Config c, const char *buildfilePath, bool libOnly
         }
       }
 
-      for (int i = 0; i < c.embCount && !linkNeeded; i++) {
-        if (!c.emb[i].enable) continue;
-        if (!fsFileExists(c.emb[i].objectPath)) {
-          linkNeeded = true;
-          break;
-        }
-        int64_t objectMtime = fsMTimeNs(c.emb[i].objectPath); /* sesudah compile: langsung */
-        if (objectMtime < 0 || objectMtime > targetMtime) linkNeeded = true;
-      }
       /* Library lintas-proyek (cdeps -> `library = <dep>/lib/x.a`) adalah input
          link nyata: perubahan isi .a proyek lain harus me-relink binary ini,
          meski object milik proyek sendiri tidak berubah. Tanpa ini bin/bade
@@ -1322,8 +1345,6 @@ int cmdsBuildPassRun(int jobs, Config c, const char *buildfilePath, bool libOnly
   size_t n = strlen(c.cc) + strlen(c.outBinaryDir) + strlen(c.outBinaryName) + 256;
   for (int i = 0; i < srcs.count; i++)
     if (objectPathFor(&c, srcs.items[i], obj, sizeof(obj))) n += strlen(obj) + 2;
-  for (int i = 0; i < c.embCount; i++)
-    if (c.emb[i].enable) n += strlen(c.emb[i].objectPath) + 2;
   for (int i = 0; i < c.libraries.count; i++)
     n += strlen(c.libraries.items[i]) + 8;
 
@@ -1333,13 +1354,6 @@ int cmdsBuildPassRun(int jobs, Config c, const char *buildfilePath, bool libOnly
     if (!objectPathFor(&c, srcs.items[i], obj, sizeof(obj))) continue;
     strcat(cmd, " ");
     strcat(cmd, obj);
-  }
-  for (int i = 0; i < c.embCount; i++) {
-    if (!c.emb[i].enable) continue;
-    if (fsFileExists(c.emb[i].objectPath)) {
-      strcat(cmd, " ");
-      strcat(cmd, c.emb[i].objectPath);
-    }
   }
   if (compilerIsMSVC(&c)) {
     /* MSVC: object dikumpulkan dulu, opsi linker setelah token /link.

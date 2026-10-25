@@ -1,5 +1,6 @@
 use workspace
-# Minimal counterpart of tests/rupaws/Buildfile.ws
+
+# Fixture minimal: alias, archive, embed, library, dan dependensi sirkular
 projects.rupamod as mod
 projects.core as core
 

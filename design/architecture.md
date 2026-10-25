@@ -50,7 +50,7 @@ pack-only (tanpa binary) → `cmdsPackOnlyProject`; proyek binary sukses →
 | commands.c | routing command, Summary, help |
 | config.c / config.h | parse + finalize + routing key (pack.* → pack/) |
 | compile.c | kompilasi paralel (posix_spawn), link, library |
-| embed.c / embed.h | embedded modules: arsip, object, embedded.h, configFinalizeEntry |
+| embed.c / embed.h | embedded: arsip, codegen embedded.c/.h (getEmbed), configFinalizeEntry |
 | compdb.c | compile_commands.json + cache |
 | util.c | util umum |
 | portability.c/.h | deklarasi portabilitas (fsSetMode/fsGetMode dll.) |

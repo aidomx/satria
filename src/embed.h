@@ -6,53 +6,58 @@
 #include "config.h"
 
 /*
- * Embedding bersifat generik: tiap entri embedded mengarsipkan direktori
- * src-nya, mengonversi arsip jadi object file, dan mendapat sekumpulan macro
- * EMBED_<n>_* yang diterbitkan ke build/embedded.h. Tidak ada bagian di sini
- * yang tahu soal project tertentu — konsumen (mis. loader rupa) include
- * header itu dan pakai macro untuk entri yang mereka pedulikan.
+ * Embedding (design/embedded.md): codegen adalah SATU-SATUNYA mekanisme.
+ * Tiap entri embedded diarsipkan (src -> tar, atau file jadi), lalu seluruh
+ * arsip dibaca menjadi <outBuildDir>/embedded.c — array `static const
+ * uint8_t` + tabel `Embedded` + definisi getEmbed()/getEmbedAt() — dan
+ * <outBuildDir>/embedded.h — struct, deklarasi API, plus macro kompat
+ * EMBED_<VAR>_* yang lama (fase 1 migrasi: simbolnya menunjuk array hasil
+ * codegen, jadi konsumen lama tanpa getEmbed tetap jalan).
  *
- * Dua jalur konversi arsip -> object:
- *   1. GNU ld (Linux/MinGW): `ld -r -b binary` -> simbol nyata
- *      _binary_<path>_start/_end; LEN = (end - start).
- *   2. Fallback portabel (MSVC/tanpa ld, atau SATRIA_NO_LD=1): arsip diubah
- *      jadi file C berisi array byte (build/<name>.embed.c) dengan simbol
- *      _binary_<path>_start[] + _binary_<path>_len; LEN = simbol _len.
- *   Keduanya diekspos lewat macro yang sama di build/embedded.h, lengkap
- *   dengan deklarasi extern-nya, jadi kode konsumen identik di dua jalur.
+ * embedded.c dikompilasi sebagai source biasa bersama source proyek
+ * (fingerprint, decide, -jN, .d closure, ikut kemasan library). Jalur
+ * `ld -r -b binary` dan fallback per-entrilama SUDAH DIHAPUS — tidak ada
+ * simbol linker eksotis; MSVC, GCC, dan Clang hanya melihat array uint8_t.
+ *
+ * Keduanya diregenerasi berbasis KONTEN, bukan mtime: tulis .tmp, bandingkan
+ * byte dengan file lama, identik -> buang temp (mtime tetap), beda -> rename
+ * atomik — `touch` tanpa perubahan isi tidak memicu compile/relink.
  */
 
 /*
- * Terbitkan build/embedded.h agar kode runtime pakai simbol yang sama
- * persis. File hanya ditulis ulang saat isinya berubah; *changed memberi
- * tahu pemanggil bahwa source yang mereferensikan simbol itu perlu
- * dikompilasi ulang.
+ * Terbitkan <outBuildDir>/embedded.h. *changed memberi tahu pemanggil bahwa
+ * konsumen header perlu dikompilasi ulang (key/type/macro berubah).
  */
 bool emitEmbeddedHeader(const Config *c, bool *changed);
 
-/* Fallback tanpa ld: tulis build/<name>.embed.c (array byte dari arsip)
-   lalu kompilasi dengan toolchain aktif. */
-bool embedResourceCompile(const EmbeddedEntry *e, const Config *c);
+/*
+ * Terbitkan <outBuildDir>/embedded.c (array byte + tabel getEmbed).
+ * Arsip entri wajib sudah dibangun dan terbaca; *changed = isi file berubah
+ * (regenerasi content-based — lihat atas).
+ */
+bool emitEmbeddedSource(const Config *c, bool *changed);
 
+/* Bangun arsip tiap entri yang aktif (segar -> no-op). Harus dijalankan
+   SEBELUM emitEmbeddedSource karena codegen membaca byte arsip. */
 bool buildEmbeddedArchives(const Config *c);
 
 /* buildEmbeddedArchivesEx — sama, dengan *anyRebuilt diisi true bila
    minimal satu arsip DIBANGUN ULANG (bukan no-op). Dipakai laporan
    archive pass (design/build_report.md): no-op cetak "Skipped : true". */
 bool buildEmbeddedArchivesEx(const Config *c, bool *anyRebuilt);
-bool buildEmbedded(const Config *c);
 
 /*
  * embedProbeGnuLd — cek GNU ld dengan probe fisik sekali panggil, TANPA
- * membaca/menulis cache .satria/ld.cache. Dipakai jalur non-mutating
- * (`satria profile embed=`) yang tidak boleh menyentuh state build normal.
+ * membaca/menulis cache. Dipakai HANYA `satria profile embed=` (benchmark
+ * tool tar+ld); jalur build sendiri tidak lagi memakai ld.
  */
 bool embedProbeGnuLd(void);
 
 /* Finalisasi satu entri embedded: turunkan archivePath & objectPath dari
    setting arsip (archiveDir/name/tar/ext atau file prebuilt). Dipanggil
    configFinalize() di config.c; didefinisikan di embed.c agar pengetahuan
-   penamaan arsip tinggal di modul embed. */
+   penamaan arsip tinggal di modul embed. objectPath kini hanya dasar nama
+   state sampingan <objectPath>.archive; object embed = <outBuildDir>/embedded.o. */
 void configFinalizeEntry(EmbeddedEntry *e, const char *buildDir);
 
 #endif /* SATRIA_V0_1_0_EMBED_H */

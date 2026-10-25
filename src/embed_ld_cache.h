@@ -7,13 +7,12 @@
 /*
  * embed_ld_cache — cache persisten hasil deteksi GNU ld (.satria/ld.cache).
  *
- * ldAvailable() (embed.c) menjalankan probe `ld --version` paling sering
- * sekali per proses — hasilnya (g_ldAvailable) mati begitu satria keluar,
- * jadi setiap run yang membangun proyek ber-`embedded` men-spawn sh + ld
- * lagi (3–5 ms per run; lihat problem_note.txt P1). Modul ini menyimpan
- * verdict probe lintas-run: run berikutnya cukup SATU stat ke binary ld
- * hasil resolusi PATH (path + mtime ns + size asli) untuk memvalidasi —
- * tanpa spawn.
+ * Jalur build tidak lagi memakai ld (codegen embedded.c — design/
+ * embedded.md); modul ini dipakai untuk validasi stamp 'L' legacy di
+ * fast-state dan probe `satria profile embed=`. Verdict probe disimpan
+ * lintas-run: run berikutnya cukup SATU stat ke binary ld hasil resolusi
+ * PATH (path + mtime ns + size asli) untuk memvalidasi — tanpa spawn
+ * `ld --version` (3–5 ms).
  */
 
 /* Resolusi binary `exe` (mis. "ld") di PATH, semantik setara probeAvailable.

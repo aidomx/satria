@@ -42,6 +42,26 @@ rukamod.extract = /tmp/rupa-system
 rukamod.pattern = .rp
 ```
 
-Generated embedded headers expose archive name, extraction directory, symbol, end symbol, and symbol length through `EMBED_*` macros.
+Satria generates `embedded.c` and `embedded.h` in the project output
+directory. The header defines a flat `Embedded` struct and the accessor API:
 
-Static-library use requires the generated object to remain reachable by the linker when the consuming library/binary references its symbols.
+```c
+#include <embedded.h>
+
+const Embedded *e = getEmbed("modules"); /* NULL when the key is unknown */
+if (e && e->data) {
+  fwrite(e->data, 1, e->size, stdout);
+}
+```
+
+`e->key` defaults to the entry name (`<alias>.key` overrides it), `e->type`
+is `archive` or `asset` unless `<alias>.type` sets a label, `e->name` is the
+archive file name, and `e->extract` is the `.extract` field. Iterate with
+`getEmbedAt(i)` until it returns NULL.
+
+The legacy `EMBED_*` macros (archive name, extraction directory, symbol,
+end symbol, and symbol length) remain available for compatibility; their
+symbols point at the arrays in the generated `embedded.c`. The file is a
+normal source: it joins the fingerprint, the parallel compile, and the
+library archive, so a static-library consumer reaches the embedded object
+without any special linker handling (no `ld -r -b binary` is involved).

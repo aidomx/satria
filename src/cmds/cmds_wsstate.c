@@ -140,15 +140,19 @@ void wsFastStateSave(struct DepCache *dc, const Config *c, const List *srcs, con
   /* Union closure: header bersama antar-source dikunjungi sekali saja. */
   depsClosureVisitMany(dc, (const char *const *)srcs->items, srcs->count, closureCollect, &ctx);
 
-  /* Embedded: object, archive hasil generate, dan verdict ld (sama dengan single). */
-  bool hasEmb = false;
+  /* Embedded: arsip (input) + header hasil codegen. Object embed kini
+     object source biasa — sudah tercatat lewat loop srcs di atas ('F' untuk
+     embedded.c, 'O' untuk embedded.o). Verdict ld tidak lagi relevan:
+     codegen adalah satu-satunya jalur embed (design/embedded.md). */
+  if (c->embCount > 0) {
+    char embPath[WS_PATH_LEN + 40];
+    snprintf(embPath, sizeof(embPath), "%s/embedded.h", c->outBuildDir);
+    addKind(&items, 'F', embPath);
+  }
   for (int i = 0; i < c->embCount; i++) {
     if (!c->emb[i].enable) continue;
-    hasEmb = true;
-    addKind(&items, 'O', c->emb[i].objectPath);
     if (c->emb[i].archivePath[0]) addKind(&items, 'O', c->emb[i].archivePath);
   }
-  if (hasEmb) addKind(&items, 'O', ldCacheFile());
 
   /* Library path-form (cdeps lintas-proyek: `library = <dep>/lib/x.a`) —
      input link fase binary: perubahan .a proyek lain harus membatalkan

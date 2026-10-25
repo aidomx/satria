@@ -66,9 +66,32 @@ typedef struct {
   bool finished;    /* sudah di-reap oleh procWaitAny/procStopAll */
   bool ok;          /* exit code 0 */
   bool interrupted; /* mati karena Ctrl+C (bukan error kompilasi) */
+  /* Tangkapan output child (procStartCapture / compileOne bercap): path file
+     sementara berisi stdout+stderr child; "" = tanpa tangkapan. Ambil isinya
+     dengan procCaptureTake setelah proses selesai. */
+  char capPath[MAX_PATH];
 } ProcHandle;
 
 bool procStart(const char *cmd, ProcHandle *out);
+
+/*
+ * Sama dengan procStart, tetapi seluruh output child (stdout+stderr)
+ * diarahkan ke file sementara — dipakai kompilasi paralel agar warning/error
+ * compiler tidak menulis langsung ke terminal: parent mencetaknya UTUH
+ * setelah baris progress (procCaptureTake), sehingga urutan terjaga dan blok
+ * tidak bisa tercampur job lain (anti-interleaving).
+ */
+bool procStartCapture(const char *cmd, ProcHandle *out);
+
+/* File sementara kosong untuk tangkapan manual (jalur serial meredirect lewat
+   shell `> path 2>&1`). false bila gagal dibuat — pemanggil jalan tanpa cap. */
+bool procCaptureTemp(char *pathOut, size_t n);
+
+/*
+ * Pindahkan isi tangkapan ke buffer malloc (NULL bila tidak ada tangkapan /
+ * kosong), hapus file sementara dan kosongkan capPath. Pemanggil membebaskan.
+ */
+char *procCaptureTake(ProcHandle *h, size_t *outLen);
 
 /* Tunggu satu proses selesai; index di `handles` atau -1 bila ada Ctrl+C.
    `finished` (boleh NULL) diisi handle yang baru selesai. */

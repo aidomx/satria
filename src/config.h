@@ -78,6 +78,12 @@ typedef struct {
   /* Override prefix macro EMBED_<N>_ (embedded.<n>.variable). */
   char variable[EMBED_NAME_LEN];
 
+  /* Kunci akses getEmbed("<key>") (embedded.<n>.key); kosong = nama entri. */
+  char key[EMBED_NAME_LEN];
+  /* Label type di struct Embedded (embedded.<n>.type); kosong = inferensi
+     "archive" bila .file/.src ada, selain itu "asset" (design/embedded.md). */
+  char type[32];
+
   /* diturunkan di configFinalizeEntry */
   char archivePath[MAX_PATH + 192]; /* <archiveDir>/<n>[.tar.<ext>] */
   char objectPath[MAX_PATH + 64];   /* <buildDir>/<n>.o */
@@ -220,8 +226,8 @@ typedef struct {
   /*
    * embedded: entri bernama yang asetnya diarsipkan dan di-embed ke binary
    * (Buildfile: embedded). Generik — project yang menentukan apa yang
-   * di-embed; satria hanya mengarsipkan, mengonversi via ld -r -b binary,
-   * dan menerbitkan header.
+   * di-embed; satria mengarsipkan, men-generate embedded.c/embedded.h
+   * (codegen getEmbed — design/embedded.md).
    */
   EmbeddedEntry emb[MAX_EMBEDDED];
   int embCount;

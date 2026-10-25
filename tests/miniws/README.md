@@ -1,8 +1,8 @@
 # miniws
 
-Small standalone workspace fixture mirroring the *active* configuration of
-`tests/rupaws/Buildfile.ws`: aliases, tar archive, embed, shared/static
-libraries, two-pass linking, and reciprocal `lib.cdeps`.
+Small standalone workspace fixture covering the *active* features of a
+larger workspace: aliases, tar archive, embed, shared/static libraries,
+two-pass linking, and reciprocal `cdeps`.
 
 Run from `tests/miniws` with `../../build/bin/satria` after bootstrap.
 Expected programs: `bin/rupa` prints `core=8 bade=7`, and `bin/bade`
