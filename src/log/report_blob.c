@@ -23,6 +23,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <sys/stat.h> /* struct stat, stat(): juga dipakai jalur Windows */
 #include "../portability.h" /* fsRenameReplace */
 #include "../util.h" /* mkdirs */
 
@@ -31,7 +32,9 @@
 
 static int rbActive = 0;
 static char rbCache[256] = ".satria/caches/fingerprint.cache";
+#ifndef _WIN32
 static struct timespec rbT0;
+#endif
 
 void reportBlobCachePath(const char *p) {
   if (p && *p) snprintf(rbCache, sizeof(rbCache), "%s", p);
@@ -85,6 +88,7 @@ typedef struct {
   int libStatic, libShared, hasArchive, hasTarget, hasStatus, statusOk;
 } RbBlk;
 
+#ifndef _WIN32 /* helper kondensasi: hanya dipakai rbCondense (POSIX) */
 static void rbBlkReset(RbBlk *b) {
   b->libStatic = b->libShared = b->hasArchive = b->hasTarget = b->hasStatus = b->statusOk = 0;
 }
@@ -131,6 +135,8 @@ static const char *rbRepField(const char *line, const char *key) {
   return p;
 }
 
+#endif
+#ifndef _WIN32
 static void rbCondense(const char *in, FILE *out, RbAgg *a, double secs) {
   FILE *f = fopen(in, "r");
   if (!f) return;
@@ -208,6 +214,7 @@ static void rbCondense(const char *in, FILE *out, RbAgg *a, double secs) {
   fprintf(out, "  Binaries   : %d linked\n", a->nBin);
   fprintf(out, "  Status     : %s\n", (a->blocks && !a->bad) ? "Success" : "Failed");
 }
+#endif
 
 void reportBlobBegin(void) {
   if (rbActive) return;
@@ -263,7 +270,9 @@ void reportBlobBegin(void) {
 }
 
 bool reportBlobFinish(bool save) {
-#ifndef _WIN32
+#ifdef _WIN32
+  (void)save;
+#else
   if (!rbActive) return false;
   fflush(stdout);
   dup2(rbSaved, STDOUT_FILENO);
