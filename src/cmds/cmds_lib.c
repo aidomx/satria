@@ -424,7 +424,10 @@ bool cmdsEmitVersionHeader(const Config *c, bool *changed) {
     if (en == strlen(body) && memcmp(existing, body, en) == 0) return true;
   }
 
-  FILE *wf = fopen(path, "w");
+  /* Mode BINER: penulisan teks mengubah \n menjadi \r\n di Windows sehingga
+     perbandingan biner berikutnya selalu beda dan versi dianggap berubah —
+     memaksa recompile penuh di setiap run (gagal inkremental build-manual). */
+  FILE *wf = fopen(path, "wb");
   if (!wf) {
     fprintf(stderr, "satria: cannot write %s\n", path);
     return false;

@@ -808,7 +808,10 @@ bool emitEmbeddedHeader(const Config *c, bool *changed) {
     if (n == used && memcmp(existing, body, n) == 0) return true;
   }
 
-  FILE *hf = fopen(embeddedHeader, "w");
+  /* Mode BINER: agar isi hasil tulis (teks \n) identik dengan hasil baca
+     biner — mode teks membuat \r\n di Windows dan embedded.h selalu
+     dianggap berubah (recompile penuh tiap run). */
+  FILE *hf = fopen(embeddedHeader, "wb");
   if (!hf) {
     fprintf(stderr, "satria: cannot write %s\n", embeddedHeader);
     return false;
