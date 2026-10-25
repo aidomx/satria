@@ -69,7 +69,7 @@ RUN_DELAY=0       # -D : jeda (detik) sebelum tiap pengukuran
 AUDIT_ENABLED=true             # -w true/false: preflight audit sebelum benchmark
 ARTIFACTS_ENABLED=true         # -artifacts true/false: simpan log dan CSV
 STRACE_ENABLED=false           # -strace true/false: syscall profiling (opt-in)
-RUN_ORDER=grouped # -O : grouped atau abba (rotasi urutan tool)
+RUN_ORDER=abba # -O : abba (default, rotasi urutan tool per repetisi) atau grouped
 
 usage() {
   sed -n '2,/^# ====.*$/p' "$0"
