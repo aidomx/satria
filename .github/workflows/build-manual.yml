@@ -4,7 +4,7 @@
 #
 # Build TANPA cmake: bootstrap dengan install.sh --dev / install.ps1 --dev
 # (compiler C langsung), lalu satria membangun dirinya sendiri dari Buildfile.
-name: Build
+name: Build Manual
 
 on:
   workflow_dispatch:
