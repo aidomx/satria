@@ -8,8 +8,11 @@ mut_sel() {
   mut_bade "$@"
 }
 mut_dep() {
+  # Hanya .rp: dengan cakupan selektif bade, mengedit juga source core membuat
+  # CMake dipaksa me-rebuild core_static (tautan link bade -> core) sehingga
+  # pekerjaan kedua tool tidak akan pernah setara. Aspek "input di luar
+  # cakupan diabaikan" sudah dicakup skenario sel (edit bade di luar -w core).
   mut_mod "$@"
-  mut_leaf "$@"
 }
 mut_touch() { (cd "$WS" && touch include/a.h); }
 mut_libtouch() { (cd "$WS" && touch include/ext.h); }

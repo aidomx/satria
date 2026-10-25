@@ -19,8 +19,10 @@
 # ke work.log — bukti pekerjaan aktual, bukan sekadar timestamp artefak.
 #   touch : touch include/a.h tanpa ubah konten (perilaku tiap tool diaudit)
 #   hedit : ubah ISI library/a.h -> semua tool wajib rebuild dependen header
-#   sel   : edit core+bade, satria hanya membangun target -w core; CMake tetap dua proyek
-#   dep   : edit .rp+core, satria hanya membangun target -w bade; CMake tetap dua proyek
+#   sel   : edit core+bade, build selektif core — cakupan DISAMAKAN antar tool
+#            (satria -w core ↔ CMake --target core_static core_shared)
+#   dep   : edit .rp, build selektif bade — cakupan DISAMAKAN antar tool
+#            (satria -w bade ↔ CMake --target bade_static bade_shared bade)
 #   libtouch: touch library/ext.h (header internal via headers.internal), konten sama
 #   libhdr: edit ISI library/ext.h (header internal, diakses include relatif dari r2/k2)
 #   rel   : release terpisah (tar + sha256, satria-only) sesuai docs/guide/releases.md
@@ -35,6 +37,13 @@
 # strategi apa pun, asal pekerjaannya sesuai harapan. Bila tidak, verdict
 # "Not in accordance" dan skenario itu dihitung (failed) di benchmark report,
 # untuk tool mana pun termasuk satria. Tidak ada perbandingan silang "vs satria".
+#
+# KEADILAN PEKERJAAN (problems/ws.md: "pekerjaan dan hasil wajib setara"):
+#  - Mekanisme embed disamakan: satria kini hanya codegen (embedded.c sebagai
+#    source biasa), jadi CMake juga memakai embed_c.sh (carray) — bukan ld -r.
+#  - Cakupan selektif sel/dep disamakan pada output yang sama antar tool.
+#  - Sisa beda kerja yang melekat pada strategi tool (mtime vs content-hash:
+#    touch/libtouch/leaf/bade) ditandai [!] — bukan perbandingan setara 1:1.
 # ============================================================================
 set -uo pipefail
 [ -n "${EPOCHREALTIME:-}" ] || {

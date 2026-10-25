@@ -23,27 +23,18 @@ gen_c() { # gen_c <proyek> <prefix>
   } > "$WS/$proj/src/main.c"
 }
 
-# Mode embed: `ld -r -b binary` bila linker mendukungnya (GNU ld); bila tidak
-# (LLD di Termux), array C lewat embed_c.sh — fallback yang sama dengan satria,
-# sehingga pekerjaan kedua tool setara. BENCH_EMBED=carray|ld memaksa mode.
+# Mode embed: Satria kini HANYA memakai codegen (embedded.c dikompilasi sebagai
+# source biasa — jalur `ld -r -b binary` dihapus, design/embedded.md). Agar
+# pekerjaan kedua tool benar-benar setara, CMake di bench juga memakai array C
+# lewat embed_c.sh (codegen + 1 compile), BUKAN ld -r -b binary yang tidak lagi
+# mewakili pekerjaan satria. BENCH_EMBED=ld memaksa mode ld lama untuk
+# eksperimen (akan menandai kerja berbeda antar tool).
 embed_mode() {
   [ -n "${BENCH_EMBED:-}" ] && {
     printf '%s' "$BENCH_EMBED"
     return
   }
-  # ld -r -b binary adalah fitur GNU/Linux; jangan coba pada platform lain.
-  if [ "$(uname -s)" != Linux ] || ! command -v ld > /dev/null 2>&1; then
-    printf carray
-    return
-  fi
-  local d
-  d=$(mktemp -d 2> /dev/null) || {
-    printf ld
-    return
-  }
-  printf x > "$d/p.bin"
-  if ld -r -b binary -o "$d/p.o" "$d/p.bin" > /dev/null 2>&1; then printf ld; else printf carray; fi
-  rm -rf "$d"
+  printf carray
 }
 EMBED_MODE=$(embed_mode)
 # Kompilasi tambahan per embed (dihitung shim gcc) bila memakai array C.
@@ -153,7 +144,7 @@ EOF
     } > "$WS/Buildfile.ws"
   fi
 
-  # CMake idiomatis, mengikuti tests/rupaws/CMakeLists.txt:
+  # CMake idiomatis, mengikuti tests/miniws/CMakeLists.txt:
   # CMake sendiri melakukan discovery, compile, archive dan link.
   if [ "$ws_tool" = cmake ]; then
     cat > "$WS/CMakeLists.txt" << 'CMAKE_EOF'

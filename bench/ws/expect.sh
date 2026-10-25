@@ -52,11 +52,11 @@ expect_check() { # <tool> <scen> <obj> <arc> <lib> <bin> <cc>
       exp_chk cc "$c" "$EXP_CC"
       ;;
     mod)
-      # Archive wajib diperbarui, tetapi hanya konsumen embed yang perlu
-      # relink. Jumlah object embed berbeda menurut implementasi (ld -b
-      # binary vs C array), maka tidak di-hard-check.
-      EXP_OBJ=1 EXP_ARC=1 EXP_CC=$(embed_extra)
-      if [ "$k" = satria ]; then EXP_LIB=0 EXP_BIN=1; else EXP_LIB=2 EXP_BIN=2; fi
+      # Kedua tool memakai codegen embed (embedded.c source biasa): arsip
+      # berubah -> embedded.c berbeda -> 1 compile, object embed masuk library
+      # bade, dan binary pengguna arsip (bade + rupa via cdeps siklik)
+      # ditaut ulang. Pekerjaan identik antar tool.
+      EXP_OBJ=1 EXP_ARC=1 EXP_CC=$(embed_extra) EXP_LIB=2 EXP_BIN=2
       exp_chk obj "$o" "$EXP_OBJ"
       exp_chk arc "$a" "$EXP_ARC"
       exp_chk lib "$l" "$EXP_LIB"
@@ -95,15 +95,10 @@ expect_check() { # <tool> <scen> <obj> <arc> <lib> <bin> <cc>
       exp_chk cc "$c" "$EXP_CC"
       ;;
     sel)
-      # Perilaku berbeda secara sengaja: satria -w core membangun object/library core tanpa relink binary,
-      # sedangkan CMake meminta target dari kedua proyek untuk menangani siklus.
-      # Karena cakupan kerja berbeda, waktu tidak boleh dibandingkan sebagai 1:1.
-      EXP_ARC=0
-      if [ "$k" = satria ]; then
-        EXP_OBJ=1 EXP_LIB=2 EXP_BIN=0 EXP_CC=1
-      else
-        EXP_OBJ=2 EXP_LIB=4 EXP_BIN=2 EXP_CC=2
-      fi
+      # Cakupan disamakan: satria -w core hanya membangun object/library core
+      # (tanpa relink binary), dan CMake dibatasi --target core_static
+      # core_shared — output yang sama. Edit bade di luar cakupan KEDUA tool.
+      EXP_ARC=0 EXP_OBJ=1 EXP_LIB=2 EXP_BIN=0 EXP_CC=1
       exp_chk obj "$o" "$EXP_OBJ"
       exp_chk arc "$a" "$EXP_ARC"
       exp_chk lib "$l" "$EXP_LIB"
@@ -111,15 +106,10 @@ expect_check() { # <tool> <scen> <obj> <arc> <lib> <bin> <cc>
       exp_chk cc "$c" "$EXP_CC"
       ;;
     dep)
-      # .rp + core source, target satria hanya bade: arsip diperbarui dan
-      # binary konsumen embed ditaut ulang; library tidak berubah; perubahan core di luar target tidak dikompilasi.
-      # CMake tetap membangun target kedua proyek, jadi cc-nya tetap 1+embed.
-      EXP_ARC=1
-      if [ "$k" = satria ]; then
-        EXP_OBJ=1 EXP_LIB=0 EXP_BIN=1 EXP_CC=0
-      else
-        EXP_OBJ=2 EXP_LIB=4 EXP_BIN=2 EXP_CC=$((1 + $(embed_extra)))
-      fi
+      # Edit .rp dengan cakupan selektif bade (kedua tool sama): arsip
+      # diperbarui -> codegen embedded.c (1 compile) -> library bade + binary
+      # konsumen embed ditaut ulang; proyek lain tidak disentuh.
+      EXP_ARC=1 EXP_OBJ=1 EXP_LIB=2 EXP_BIN=1 EXP_CC=$(embed_extra)
       exp_chk obj "$o" "$EXP_OBJ"
       exp_chk arc "$a" "$EXP_ARC"
       exp_chk lib "$l" "$EXP_LIB"
