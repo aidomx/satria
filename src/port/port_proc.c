@@ -175,8 +175,18 @@ bool procCaptureTemp(char *pathOut, size_t n) {
    capPath != NULL: stdout+stderr child diarahkan ke file tangkapan. */
 static bool procCreate(const char *cmd, PROCESS_INFORMATION *pi, const char *capPath) {
   STARTUPINFOA si;
-  char command[MAX_PATH * 4];
-  if (!procBuildShellCommand(cmd, command, sizeof(command))) return false;
+  /* Buffer command shell DIPROSES dinamis: tautan self-host (69+ object,
+     ~1.7KB perintah) melampaui batas lama MAX_PATH*4 (1040 byte) sehingga
+     pembangunan perintah gagal dan link dilaporkan "link failed" diam-diam.
+     Batas absolut tetap 32767 karakter (limit CreateProcessA). */
+  size_t need = strlen(cmd) + MAX_PATH + 64;
+  if (need > 32767) return false;
+  char *command = malloc(need);
+  if (!command) return false;
+  if (!procBuildShellCommand(cmd, command, need)) {
+    free(command);
+    return false;
+  }
 
   memset(&si, 0, sizeof(si));
   memset(pi, 0, sizeof(*pi));
@@ -192,7 +202,10 @@ static bool procCreate(const char *cmd, PROCESS_INFORMATION *pi, const char *cap
     sa.bInheritHandle = TRUE;
     hCap = CreateFileA(capPath, GENERIC_WRITE, FILE_SHARE_READ, &sa, CREATE_ALWAYS,
                        FILE_ATTRIBUTE_NORMAL, NULL);
-    if (hCap == INVALID_HANDLE_VALUE) return false;
+    if (hCap == INVALID_HANDLE_VALUE) {
+      free(command);
+      return false;
+    }
     si.dwFlags = STARTF_USESTDHANDLES;
     si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
     si.hStdOutput = hCap;
@@ -202,9 +215,14 @@ static bool procCreate(const char *cmd, PROCESS_INFORMATION *pi, const char *cap
   procEnsureHandler();
   if (!CreateProcessA(NULL, command, NULL, NULL, TRUE, CREATE_NEW_PROCESS_GROUP, NULL, NULL,
                       &si, pi)) {
+    DWORD err = GetLastError();
     if (hCap) CloseHandle(hCap);
+    free(command);
+    fprintf(stderr, "satria: gagal menjalankan perintah (CreateProcess error %lu)\n",
+            (unsigned long)err);
     return false;
   }
+  free(command);
   if (hCap) CloseHandle(hCap);
   procRegisterPid(pi->dwProcessId);
   return true;
