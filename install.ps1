@@ -25,17 +25,20 @@ $ErrorActionPreference = "Stop"
 $GitHubUser = "aidomx"
 $RepoName   = "satria"
 $Branch     = "main"
-$Version    = "v0.2.0"   # fallback terakhir
+$Version    = "v0.2.0"   # fallback terakhir; ditimpa oleh --version / SATRIA_VERSION / .satria-version
 
 # ---------------------------------------------------------------------------
 # Helper umum
 # ---------------------------------------------------------------------------
 
 function Read-Version([string]$Root) {
+    # Prioritas 1: env SATRIA_VERSION (di-set CI dari git tag v*).
     if ($env:SATRIA_VERSION) {
         $v = $env:SATRIA_VERSION.Trim()
         if ($v) { return $v }
     }
+
+    # Prioritas 2: file .satria-version (untuk dev lokal).
     $file = Join-Path $Root ".satria-version"
     if (Test-Path $file) {
         $v = (Get-Content $file -TotalCount 1).Trim()
@@ -45,6 +48,8 @@ function Read-Version([string]$Root) {
 }
 
 function Find-Compiler {
+    # Hormati CC (seperti install.sh ${CC:-cc}) — dipakai CI untuk memilih
+    # toolchain secara eksplisit (mis. CC=cl untuk job MSVC).
     if ($env:CC) {
         if (Get-Command $env:CC -ErrorAction SilentlyContinue) {
             return $env:CC
@@ -58,40 +63,6 @@ function Find-Compiler {
     return $null
 }
 
-function Get-HumanSize([long]$bytes) {
-    if ($bytes -ge 1MB) { return "{0:F1}M" -f ($bytes / 1MB) }
-    if ($bytes -ge 1KB) { return "{0:F1}K" -f ($bytes / 1KB) }
-    return "${bytes}B"
-}
-
-function Write-CompileProgress {
-    param([int]$Current, [int]$Total)
-    $percent = [int](($Current * 100) / $Total)
-    $width = 40 # Lebar tetap agar konsisten di semua terminal
-    $filled = [int](($percent * $width) / 100)
-    $empty = $width - $filled
-    $bar = "_" * $filled
-    $rest = "." * $empty
-    # `r (carriage return) menimpa baris sebelumnya, persis seperti di bash
-    Write-Host -NoNewline "`r> ${bar}${rest} ${percent}%"
-}
-
-function Invoke-NativeCapture([string]$Exe, [string[]]$CmdArgs) {
-    # stderr compiler/linker digabung ke output. ErrorActionPreference dilonggarkan
-    # hanya selama pemanggilan, agar warning (stderr) tidak dianggap error terminasi
-    # oleh $ErrorActionPreference = "Stop". Output hanya ditampilkan bila gagal.
-    $prev = $ErrorActionPreference
-    $ErrorActionPreference = "Continue"
-    try {
-        $out  = & $Exe @CmdArgs 2>&1
-        $code = $LASTEXITCODE
-    }
-    finally {
-        $ErrorActionPreference = $prev
-    }
-    return [pscustomobject]@{ Code = $code; Output = $out }
-}
-
 function Install-Binary([string]$Binary) {
     $InstallDir  = Join-Path $env:LOCALAPPDATA "satria"
     $InstallPath = Join-Path $InstallDir "satria.exe"
@@ -99,6 +70,7 @@ function Install-Binary([string]$Binary) {
     New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
     Copy-Item -Force $Binary $InstallPath
 
+    # Tambahkan ke User PATH jika belum ada.
     $UserPath  = [Environment]::GetEnvironmentVariable("Path", "User")
     $PathParts = @()
     if ($UserPath) { $PathParts = $UserPath -split ";" | Where-Object { $_ } }
@@ -108,11 +80,12 @@ function Install-Binary([string]$Binary) {
         [Environment]::SetEnvironmentVariable("Path", $NewPath, "User")
     }
 
-    Write-Host "`n> Installed  : $InstallPath"
+    Write-Host "> Installed  : $InstallPath"
 
     if (Test-Path $InstallPath) {
         & $InstallPath version 2>$null
     }
+
     Write-Host "> Note       : buka terminal baru agar PATH diperbarui."
 }
 
@@ -136,6 +109,9 @@ for ($i = 0; $i -lt $args.Count; $i++) {
                 throw "--version memerlukan argumen tag (mis. --version v0.2.0)"
             }
         }
+        default {
+            # abaikan argumen tak dikenal
+        }
     }
 }
 
@@ -147,12 +123,16 @@ $LocalSource = (
 )
 
 # ---------------------------------------------------------------------------
-# Mode --dev: bootstrap build dari source (DISELARASKAN DENGAN install.sh)
+# Mode --dev: bootstrap build dari source
 # ---------------------------------------------------------------------------
 
 if ($Dev) {
     $TempDir = Join-Path ([System.IO.Path]::GetTempPath()) ("satria-" + [guid]::NewGuid().ToString("N"))
     New-Item -ItemType Directory -Force -Path $TempDir | Out-Null
+
+    # Output final diletakkan di luar $TempDir supaya tidak ikut terhapus di finally.
+    $StagingDir = Join-Path ([System.IO.Path]::GetTempPath()) ("satria-build-" + [guid]::NewGuid().ToString("N"))
+    New-Item -ItemType Directory -Force -Path $StagingDir | Out-Null
 
     try {
         if ($LocalSource) {
@@ -171,9 +151,14 @@ if ($Dev) {
         }
 
         if (-not $SrcDir -or -not (Test-Path (Join-Path $SrcDir "src\main.c"))) {
-            throw "source tree tidak valid (src\main.c tidak ditemukan)"
+            throw "source tree tidak valid (src\main.c tidak ditemukan di '$SrcDir')"
         }
 
+        # Prioritas versi:
+        #   1. --version <tag>
+        #   2. SATRIA_VERSION (env, di-set CI dari git tag)
+        #   3. .satria-version
+        #   4. $Version (fallback hardcoded)
         if ($VersionTag) {
             $Version = $VersionTag
         } else {
@@ -189,20 +174,19 @@ if ($Dev) {
         Write-Host "> Bootstrap  : satria $Version"
         Write-Host "> Compiler   : $Compiler"
 
-        $Sources = Get-ChildItem (Join-Path $SrcDir "src") -Filter "*.c" -Recurse
-        $Total = $Sources.Count
-        if ($Total -eq 0) {
-            throw "tidak ada file sumber (.c) ditemukan"
-        }
-
-        Write-Host "> Compile    : $Total file(s)"
-
         $ObjDir = Join-Path $TempDir "obj"
         New-Item -ItemType Directory -Force -Path $ObjDir | Out-Null
 
+        $Sources = Get-ChildItem (Join-Path $SrcDir "src") -Filter "*.c" -Recurse
+        if ($Sources.Count -eq 0) {
+            throw "tidak ada file sumber (.c) ditemukan di $(Join-Path $SrcDir 'src')"
+        }
+
         $IncludeDir = Join-Path $SrcDir "include"
         $SrcInner   = Join-Path $SrcDir "src"
+        $Total      = $Sources.Count
         $Done       = 0
+        $Objects    = @()
 
         foreach ($Source in $Sources) {
             $Relative    = $Source.FullName.Substring($SrcInner.Length).TrimStart("\")
@@ -222,7 +206,8 @@ if ($Dev) {
                     "/c", $Source.FullName,
                     "/Fo$Obj"
                 )
-                $cr = Invoke-NativeCapture "cl" $ClArgs
+                Write-Host ">> cl @ $($Source.Name)"
+                & cl @ClArgs
             } else {
                 $CcArgs = @(
                     "-std=gnu11", "-O2", "-Wall", "-Wextra",
@@ -232,63 +217,60 @@ if ($Dev) {
                     "-c", $Source.FullName,
                     "-o", $Obj
                 )
-                $cr = Invoke-NativeCapture $Compiler $CcArgs
+                Write-Host ">> $Compiler @ $($Source.Name)"
+                & $Compiler @CcArgs
             }
 
-            if ($cr.Code -ne 0) {
-                Write-Host ""
-                $cr.Output | ForEach-Object { Write-Host "$_" }
-                throw "gagal mengompilasi $($Source.Name)"
+            $exitCode = $LASTEXITCODE
+            if ($exitCode -ne 0) {
+                throw "gagal mengompilasi $($Source.FullName) (exit $exitCode)"
             }
 
+            $Objects += $Obj
             $Done++
-            Write-CompileProgress -Current $Done -Total $Total
+            $Percent = [int](($Done * 90) / $Total)
+            Write-Progress -Activity "Building satria" -Status "$Percent%" -PercentComplete $Percent
         }
-        
-        # Cetak newline setelah progress bar 100% selesai
-        Write-Host ""
 
-        # Output langsung ke bin/ (bukan build/bin/)
-        $Output = Join-Path $SrcDir "bin\satria.exe"
-        New-Item -ItemType Directory -Force -Path (Split-Path $Output) | Out-Null
-
-        Write-Host "> Linking    : bin\satria.exe"
-        
-        $Objects = Get-ChildItem $ObjDir -Filter "*.o" -Recurse | Select-Object -ExpandProperty FullName
+        $Output = Join-Path $StagingDir "satria.exe"
 
         $global:LASTEXITCODE = 0
         if ($Compiler -eq "cl") {
-            $LinkArgs = @($Objects) + @("/nologo", "/SUBSYSTEM:CONSOLE", "/OUT:$Output", "shell32.lib")
-            $lr = Invoke-NativeCapture "link" $LinkArgs
+            $LinkArgs = @($Objects) + @(
+                "shell32.lib",
+                "/nologo",
+                "/SUBSYSTEM:CONSOLE",
+                "/OUT:$Output"
+            )
+            $linkOutput = & link @LinkArgs 2>&1
         } else {
-            $LinkArgs = @($Objects) + @("-o", $Output, "-lshell32")
-            $lr = Invoke-NativeCapture $Compiler $LinkArgs
+            $LinkArgs = @($Objects) + @("-lshell32", "-o", $Output)
+            $linkOutput = & $Compiler @LinkArgs 2>&1
         }
 
-        if ($lr.Code -ne 0) {
-            $lr.Output | ForEach-Object { Write-Host "$_" }
-            throw "gagal melakukan linking satria"
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host ($linkOutput | Out-String)
+            throw "gagal melakukan linking satria (exit $LASTEXITCODE)"
         }
 
-        $Size = (Get-Item $Output).Length
-        $SizeStr = Get-HumanSize $Size
-        
-        # Update pesan linking dengan ukuran (meniru install.sh)
-        # Kita timpa baris "Linking" sebelumnya dengan yang ada ukurannya
-        Write-Host "`r> Linking    : bin\satria.exe ($SizeStr)   "
+        Write-Progress -Activity "Building satria" -Completed
+        Write-Host "> Built      : $Output"
 
-        Write-Host "> Built & Saved: $Output"
-        
-        # Jalankan versi untuk memastikan binary valid
-        & $Output version 2>$null
+        # Simpan hasil bootstrap di source tree untuk mode --dev.
+        $DevOutputDir = Join-Path $ScriptDir "build\bin"
+        $DevOutput    = Join-Path $DevOutputDir "satria.exe"
 
-        # Install ke user PATH juga (opsional tapi disarankan)
+        New-Item -ItemType Directory -Force -Path $DevOutputDir | Out-Null
+        Copy-Item -Force $Output $DevOutput
+
+        Write-Host "> Built & Saved: $DevOutput"
+
+        # Install ke user PATH juga.
         Install-Binary $Output
-
-        Write-Host "> Satria is installed, for show help run : bin\satria.exe help"
     }
     finally {
-        Remove-Item -Recurse -Force $TempDir -ErrorAction SilentlyContinue
+        Remove-Item -Recurse -Force $TempDir    -ErrorAction SilentlyContinue
+        Remove-Item -Recurse -Force $StagingDir -ErrorAction SilentlyContinue
     }
 
     exit 0
@@ -306,12 +288,12 @@ function Get-ReleaseInfo([string]$Tag) {
     }
     $headers = @{
         "User-Agent" = "satria-installer"
-        "Accept"     = "td.github+json"
+        "Accept"     = "application/vnd.github+json"
     }
     try {
         return Invoke-RestMethod -Uri $api -Headers $headers
     } catch {
-        throw "gagal mengambil release dari GitHub API: $($_.Exception.Message)"
+        throw "gagal mengambil release dari GitHub API ($api): $($_.Exception.Message)"
     }
 }
 
@@ -323,13 +305,15 @@ function Get-WindowsAssetUrl([string]$Tag) {
 
     if (-not $asset) {
         $names = ($release.assets | ForEach-Object { $_.name }) -join ", "
-        throw "asset 'satria-windows-x64.exe' tidak ada. Tersedia: $names"
+        throw "asset 'satria-windows-x64.exe' tidak ada di release $($release.tag_name). Asset tersedia: $names"
     }
 
     Write-Host "> Release    : $($release.tag_name)"
     return $asset.browser_download_url
 }
 
+# Di mode default, --version eksplisit menang; kalau tidak, SATRIA_VERSION dipakai;
+# kalau tidak ada keduanya, pakai release "latest".
 if (-not $VersionTag -and $env:SATRIA_VERSION) {
     $VersionTag = $env:SATRIA_VERSION.Trim()
 }
