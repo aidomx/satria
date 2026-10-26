@@ -1409,6 +1409,25 @@ int cmdsBuildPassRun(int jobs, Config c, const char *buildfilePath, bool libOnly
     }
   }
 
+  /* Output link = <outBinaryDir>/<outBinaryName> (MSVC /OUT dan gcc -o sama).
+     Di Windows exe yang masih dipakai proses lain (terkunci / discan AV) tidak
+     bisa DITIMPA: linker gagal LNK1104. Exe lama dipindah ke <out>.old lebih
+     dulu. Rename file yang sedang dieksekusi diizinkan di Windows. */
+  char outPath[MAX_PATH * 2];
+  char oldPath[MAX_PATH * 2 + 8];
+  snprintf(outPath, sizeof(outPath), "%s/%s", c.outBinaryDir, c.outBinaryName);
+  snprintf(oldPath, sizeof(oldPath), "%s.old", outPath);
+  bool movedOld = false;
+  if (fsFileExists(outPath)) {
+    remove(oldPath); /* sisa build sebelumnya; gagal (masih terkunci) tidak fatal */
+    if (rename(outPath, oldPath) != 0) {
+      fprintf(stderr, "satria: tidak bisa menyiapkan %s (file dipakai proses lain?)\n", outPath);
+      free(cmd);
+      statPlanFree(&plan);
+      return 1;
+    }
+    movedOld = true;
+  }
   printf("%s Linking : %s/%s\n", repPrefix(), c.outBinaryDir, c.outBinaryName);
   bool linked = runCmd(cmd);
   profMark("link");
@@ -1416,6 +1435,10 @@ int cmdsBuildPassRun(int jobs, Config c, const char *buildfilePath, bool libOnly
      (objek, /OUT, library) agar penyebabnya terlihat di log CI. */
   if (!linked) fprintf(stderr, "satria: link command: %s\n", cmd);
   free(cmd);
+  if (movedOld) {
+    if (linked) remove(oldPath);                       /* best effort */
+    else if (!fsFileExists(outPath)) rename(oldPath, outPath); /* kembalikan exe lama */
+  }
 
   free(inc);
   free(wf);
