@@ -11,7 +11,7 @@ permissions:
 jobs:
   # Job 1: Build binary untuk berbagai OS dan Arsitektur secara paralel.
   # Tanpa cmake — bootstrap dengan install.sh --dev (Unix) / install.ps1
-  # --dev (Windows, toolchain MSVC), hasilnya build/bin/satria(.exe).
+  # --dev (Windows, toolchain MSVC), hasilnya bin/satria(.exe).
   #
   # Versi diambil dari git tag lewat env SATRIA_VERSION (github.ref_name),
   # sehingga tag v* adalah sumber kebenaran dan mengalahkan .satria-version.
@@ -77,7 +77,7 @@ jobs:
         env:
           EXPECTED: ${{ github.ref_name }}
         run: |
-          out=$(./build/bin/satria${{ matrix.exe_ext }} version)
+          out=$(./bin/satria${{ matrix.exe_ext }} version)
           echo "$out"
           case "$out" in
             *"$EXPECTED"*) ;;
@@ -87,8 +87,8 @@ jobs:
       - name: Prepare Binary
         shell: bash
         run: |
-          # install.sh/install.ps1 --dev menghasilkan build/bin/satria(.exe)
-          cp build/bin/satria${{ matrix.exe_ext }} ${{ matrix.asset_name }}
+          # install.sh/install.ps1 --dev menghasilkan bin/satria(.exe)
+          cp bin/satria${{ matrix.exe_ext }} ${{ matrix.asset_name }}
 
       - name: Upload Binary Artifact
         uses: actions/upload-artifact@v4

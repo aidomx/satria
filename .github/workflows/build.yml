@@ -42,6 +42,11 @@ jobs:
 
     runs-on: ${{ matrix.os }}
 
+    env:
+      # Windows mengunci image yang sedang berjalan: self-host tidak boleh
+      # menimpa binary yang dijalankannya. Di Windows pakai salinan bootstrap.
+      SELF_BIN: ${{ startsWith(matrix.os, 'windows') && './bin/satria-bootstrap.exe' || './bin/satria' }}
+
     steps:
       - uses: actions/checkout@v4
 
@@ -78,9 +83,14 @@ jobs:
       # satria membangun dirinya sendiri dari Buildfile — di Windows/MSVC ini
       # menguji jalur tanpa file .d (pemindai #include), translasi flag, dan
       # link MSVC; di MinGW/Lin/macOS menguji jalur .d (-MMD) end-to-end.
+      - name: Copy bootstrap binary (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: cp bin/satria.exe bin/satria-bootstrap.exe
+
       - name: Self-host build (Buildfile)
         shell: bash
-        run: ./bin/satria -j4
+        run: '"$SELF_BIN" -j4'
 
       - name: Self-host incremental (semua up-to-date)
         shell: bash

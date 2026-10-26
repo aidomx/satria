@@ -59,20 +59,20 @@ jobs:
       - name: Bootstrap Satria
         run: |
           ./install.sh --dev
-          test -x build/bin/satria
+          test -x bin/satria
       - name: Warm up (untimed)
         if: ${{ inputs.warmup }}
         shell: bash
         run: |
           set -euo pipefail
-          args=(-b "$PWD/build/bin/satria" -t "$BENCH_TOOLS" -n "$BENCH_SOURCES" -H "$BENCH_HEADERS" -r 1 -A -o "$RUNNER_TEMP/satria-compare-warmup")
+          args=(-b "$PWD/bin/satria" -t "$BENCH_TOOLS" -n "$BENCH_SOURCES" -H "$BENCH_HEADERS" -r 1 -A -o "$RUNNER_TEMP/satria-compare-warmup")
           bash bench/compare.sh "${args[@]}"
           rm -rf "$RUNNER_TEMP/satria-compare-warmup"
       - name: Measure
         shell: bash
         run: |
           set -euo pipefail
-          args=(-b "$PWD/build/bin/satria" -t "$BENCH_TOOLS" -n "$BENCH_SOURCES" -H "$BENCH_HEADERS" -r "$BENCH_REPEATS")
+          args=(-b "$PWD/bin/satria" -t "$BENCH_TOOLS" -n "$BENCH_SOURCES" -H "$BENCH_HEADERS" -r "$BENCH_REPEATS")
           if [[ "$BENCH_AUDIT" != true ]]; then args+=(-A); fi
           if [[ "$BENCH_ARTIFACTS" == true ]]; then
             mkdir -p benchmark-results
