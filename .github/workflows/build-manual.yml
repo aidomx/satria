@@ -53,7 +53,7 @@ jobs:
       # yang menjadi target link. Di Windows pakai salinan bootstrap
       # (bin/satria-bootstrap.exe); platform lain tetap ./bin/satria.
       # (matrix.os, bukan runner.os: konteks runner tidak tersedia di env job.)
-      SELF_BIN: ${{ startsWith(matrix.os, 'windows') && './bin/satria-bootstrap.exe' || './bin/satria' }}
+      SELF_BIN: ${{ startsWith(matrix.os, 'windows') && './build/bin/satria-bootstrap.exe' || './build/bin/satria' }}
 
     steps:
       - uses: actions/checkout@v4
@@ -88,12 +88,12 @@ jobs:
 
       - name: Smoke test
         shell: bash
-        run: ./bin/satria version
+        run: ./build/bin/satria version
 
       - name: Copy bootstrap binary (Windows)
         if: runner.os == 'Windows'
         shell: bash
-        run: cp bin/satria.exe bin/satria-bootstrap.exe
+        run: cp build/bin/satria.exe build/bin/satria-bootstrap.exe
 
       # satria membangun dirinya sendiri dari Buildfile — di Windows/MSVC ini
       # menguji jalur tanpa file .d (pemindai #include), translasi flag, dan
