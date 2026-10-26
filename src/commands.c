@@ -956,6 +956,8 @@ int cmdsBuildPassRun(int jobs, Config c, const char *buildfilePath, bool libOnly
   bool compileConfigChanged = !haveBuildFp || previousFp.compile != currentFp.compile;
   bool sourceSetChanged = !haveBuildFp || previousFp.sources != currentFp.sources;
   bool linkConfigChanged = !haveBuildFp || previousFp.link != currentFp.link;
+  if (!haveBuildFp)
+    printf("%s Fingerprint: state build tidak terbaca; semua object dikompilasi ulang\n", repPrefix());
 
   profMark("fingerprint");
 
@@ -1249,7 +1251,7 @@ int cmdsBuildPassRun(int jobs, Config c, const char *buildfilePath, bool libOnly
 #ifdef _WIN32
   /* Windows dapat menambahkan .exe otomatis saat link. */
   if (!fsFileExists(target)) {
-    char withExe[MAX_PATH * 2];
+    char withExe[sizeof(target) + 8];
     snprintf(withExe, sizeof(withExe), "%s.exe", target);
     if (fsFileExists(withExe)) snprintf(target, sizeof(target), "%s", withExe);
   }
@@ -1416,6 +1418,15 @@ int cmdsBuildPassRun(int jobs, Config c, const char *buildfilePath, bool libOnly
   char outPath[MAX_PATH * 2];
   char oldPath[MAX_PATH * 2 + 8];
   snprintf(outPath, sizeof(outPath), "%s/%s", c.outBinaryDir, c.outBinaryName);
+#ifdef _WIN32
+  /* gcc/ld di Windows menambah .exe sendiri: file aktual bisa <out>.exe, dan
+     itulah yang terkunci saat self-rebuild. Pilih file yang benar-benar ada. */
+  if (!fsFileExists(outPath)) {
+    char withExeOut[sizeof(outPath) + 8];
+    snprintf(withExeOut, sizeof(withExeOut), "%s.exe", outPath);
+    if (fsFileExists(withExeOut)) snprintf(outPath, sizeof(outPath), "%s", withExeOut);
+  }
+#endif
   snprintf(oldPath, sizeof(oldPath), "%s.old", outPath);
   bool movedOld = false;
   if (fsFileExists(outPath)) {
