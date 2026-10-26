@@ -1412,6 +1412,9 @@ int cmdsBuildPassRun(int jobs, Config c, const char *buildfilePath, bool libOnly
   printf("%s Linking : %s/%s\n", repPrefix(), c.outBinaryDir, c.outBinaryName);
   bool linked = runCmd(cmd);
   profMark("link");
+  /* Diagnosa: bila link gagal, cetak perintah lengkap yang dijalankan
+     (objek, /OUT, library) agar penyebabnya terlihat di log CI. */
+  if (!linked) fprintf(stderr, "satria: link command: %s\n", cmd);
   free(cmd);
 
   free(inc);

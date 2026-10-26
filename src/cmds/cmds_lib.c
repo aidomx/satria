@@ -281,6 +281,7 @@ bool cmdsBuildLibraryEx(const Config *c, const List *srcs, bool linkPathLibs) {
       }
       printf("%s Library : %s\n", repPrefix(), target);
       staticDone = runCmd(cmd);
+      if (!staticDone) fprintf(stderr, "satria: static library command: %s\n", cmd);
       free(cmd);
       if (!staticDone) fprintf(stderr, "satria: static library build failed\n");
     }
@@ -350,6 +351,7 @@ bool cmdsBuildLibraryEx(const Config *c, const List *srcs, bool linkPathLibs) {
     }
     printf("%s Library : %s\n", repPrefix(), target);
     sharedDone = runCmd(cmd);
+    if (!sharedDone) fprintf(stderr, "satria: shared library command: %s\n", cmd);
     free(cmd);
     if (!sharedDone) fprintf(stderr, "satria: shared library build failed\n");
   }
