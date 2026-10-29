@@ -2,6 +2,7 @@
  * Bagian dari modul workspace (src/workspace/). Lihat ws_internal.h.
  */
 #include "ws_internal.h"
+#include "../background.h" /* bgProgress: progres watcher (design/background.md) */
 
 
 /* DELETE source: remove orphan compiler outputs before the library/binary
@@ -100,6 +101,7 @@ int wsRunProject(const WsModel *m, const char *name, const char *cmd, int jobs,
   if (libOnly) passLabel = wsProjectArchiveOnly(p) ? "archive" : "library";
   printf("\n%s Project : %s\n", repPrefix(), name);
   printf("%s Fase    : %s\n", repPrefix(), passLabel);
+  bgProgress(1, "Project: %s (%s)", name, passLabel); /* watcher §3B */
 
   /* Reuse the phase configuration for orphan pruning and build.
    * Previously a cache miss constructed the same Config twice. */

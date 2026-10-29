@@ -47,6 +47,11 @@ char *picWarningFlags(const Config *c);
  * Susun command kompilasi satu source (malloc; pemanggil yang membebaskan)
  * — dipakai compileOne dan jalur kompilasi paralel -jN.
  */
+/* Warna diagnostik compiler (gcc/clang: -fdiagnostics-color=always). Diset
+   satria saat output ke terminal dan build.log tidak aktif. Hanya memengaruhi
+   perintah yang DIJALANKAN; fingerprint & compile_commands.json tidak memuatnya. */
+void compileSetDiagColor(bool on);
+
 char *compileCmd(const Config *c, const char *inc, const char *wf, const char *src,
                  const char *obj);
 

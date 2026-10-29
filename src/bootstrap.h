@@ -24,6 +24,7 @@ typedef enum {
   CMD_RELEASE,
   CMD_PROFILE,
   CMD_LOG,
+  CMD_WATCH, /* pantau build background (design/background.md §3) */
   CMD_INTERACTIVE_INIT
 } Command;
 
@@ -31,7 +32,8 @@ typedef struct {
   bool cold;      // True jika ini adalah cold build (tidak ada state sebelumnya)
   bool noop;      // True jika tidak ada yang perlu di-build (fingerprint cocok)
   bool dirty;     // True jika ada perubahan pada Buildfile atau source
-  bool has_state; // True jika file state (.satria/build.state) berhasil dibaca
+  bool has_state; // True jika ada state sebelumnya — gerbang .satria/startup.state
+                  // (single) atau cache fingerprint workspace (lihat bootstrap.c)
 
   // Pointer ke memory-mapped state (jika mmap diaktifkan)
   void *state_map;
@@ -53,6 +55,7 @@ typedef struct {
   bool want_workspace;  // -w
   bool interactive;     // init -p
   bool generate_compdb; // -g compdb
+  bool watch_full;      // `satria watch --full`: stream background.log
 
   // Workspace specific
   const char *ws_only;      // -w <nama>

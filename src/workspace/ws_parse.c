@@ -77,7 +77,10 @@ static void wsRecordLine(WsModel *m, const char *key, const char *value) {
                           "root-centric otomatis: bin/, build/, lib/ di root workspace)\n");
         return;
       }
-      if (strcmp(key, "log") == 0 || wsIsEngineSection(key))
+      /* `background = true` (design/background.md): setting global yang
+         hanya berlaku di root workspace — diterima seperti `log`. */
+      if (strcmp(key, "log") == 0 || strcmp(key, "background") == 0 ||
+          wsIsEngineSection(key))
         wsAddCommon(m, key, value);
       return;
     }

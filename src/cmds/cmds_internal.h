@@ -7,6 +7,7 @@
 
 #include "../config.h" /* Config, List */
 #include "../portability.h" /* ProcHandle — tangkapan output compiler */
+#include "../util.h" /* MAX_PATH — tipe FastState di bawah */
 
 /* Ukuran buffer path untuk state workspace. WS_SCAN = WS_PATH_LEN - 1 sebagai teks
    lebar sscanf: lebar baca selalu lebih kecil dari buffer tujuan (-Wfortify-source). */
@@ -17,9 +18,11 @@
  * cmds_internal — helper bersama antar-file modul cmds/.
  *
  * commands.c menyimpan command publik (cmdBuild/cmdInit/showHelp; cmdClean
- * ada di cmds_state.c). File di sini menyimpan fase-fase build yang
- * dipisah dari commands.c: fingerprint + fast no-op snapshot (cmds_state.c)
- * dan fase library/kompilasi paralel/emit header versi (cmds_lib.c).
+ * ada di cmds_clean.c). File di sini menyimpan fase-fase build yang
+ * dipisah dari commands.c: fingerprint + validasi fast no-op
+ * (cmds_state.c), mesin snapshot (cmds_fast.c), memo stat (cmds_statmemo.c),
+ * lib.cache (cmds_libcache.c), clean (cmds_clean.c), dan fase
+ * library/kompilasi paralel/emit header versi (cmds_lib.c).
  * Semua dulunya static di commands.c — di-prefix cmds* agar unik.
  */
 
@@ -48,7 +51,7 @@ bool cmdsBuildLibrary(const Config *c, const List *srcs);
    outputnya harus bersih agar laporan tidak tercampur log kompilasi). */
 bool cmdsRunParallelJobs(const Config *c, const char *inc, const char *wf, const List *srcs,
                          char *objPath, size_t objCap, int jobs, int *outCompiled,
-                         int *outFailed, int *outInterrupted, bool quiet);
+                         int *outFailed, int *outInterrupted, bool quiet, bool *okOut);
 
 /*
  * Cetak output compiler yang ditangkap (procCaptureTake) ke stdout — UTUH
@@ -108,13 +111,13 @@ bool cmdsEmptyDir(const char *dir, int *removed);
 /* ==================== cmds_state.c ==================== */
 
 /*
- * Lokasi file state (state_path): mode workspace membangun SEMUA proyek
- * dari satu cwd (root workspace), jadi file state per proyek diprefiks
- * nama di .satria/workspace/ (design/workspace_v1.md §State & Cache):
- *   .satria/workspace/<proyek>.build.fingerprint | .ws.state | .ws.lib.state
- *   .satria/workspace/<proyek>.deps.cache | .src
- * Mode single tetap .satria/<leaf> relatif cwd (root proyek). Dipanggil
- * wsCmdBuild sebelum tiap pass proyek; "" = kembali ke jalur lama.
+ * Lokasi file state (state_path): mode workspace menyimpan state per proyek
+ * sebagai BLOB berprefix nama proyek di .satria/caches/state.cache
+ * (leaf: build.fingerprint, ws.state, ws.lib.state, src, hdr/<hash>, compdb);
+ * mode single memakai path biasa .satria/caches/<leaf> (deps.cache,
+ * snapshot semantic header) selain entri di caches/fingerprint.cache.
+ * File .satria/workspace/<proyek>.* adalah format lama dan disweep tiap run.
+ * Dipanggil wsCmdBuild sebelum tiap pass proyek; "" = kembali ke mode single.
  */
 void cmdsStateSetWsProject(const char *name); /* "" / NULL = clear */
 const char *cmdsStateWsProject(void);         /* NULL bila mode single */
@@ -131,7 +134,9 @@ typedef struct {
 /* Hash konfigurasi compile/link + set source (FNV-1a). */
 void cmdsFingerprintMake(const Config *c, const List *srcs, CmdsBuildFingerprint *fp);
 bool cmdsFingerprintLoad(CmdsBuildFingerprint *fp);
-/* Simpan ke .satria/build.fingerprint. libOnly = fase library workspace:
+/* Simpan fingerprint konfigurasi: mode workspace -> blob build.fingerprint
+ * di .satria/caches/state.cache, mode single -> entri <build-fingerprint-v1>
+ * di .satria/caches/fingerprint.cache. libOnly = fase library workspace:
    hanya hash compile yang dikommit; hash sources/link dipertahankan dari
    catatan sebelumnya agar pass binary run yang sama masih mendeteksi
    source set / link config berubah (source dihapus -> link diulang). */
@@ -143,14 +148,14 @@ void cmdsFingerprintInvalidate(void);
 
 /* Fast no-op: true bila state build terakhir masih persis sama — summary
    diulang dari cache dan build dilewati sepenuhnya. libOnly memilih cache
-   fase library (.satria/caches/lib.cache); fase binary memakai
-   .satria/build.state. */
+   fase library (.satria/caches/lib.cache); fase binary memakai entri
+   `build.state` di .satria/caches/fingerprint.cache. */
 bool cmdsFastStateValid(const char *buildfilePath, bool libOnly);
 
 /* ==== .satria/opts.cache (router; design/startup.md §3/§4) ====
    Indeks file caches (deps/lib/embed) yang memuat entri tiap proyek. No-op
    membaca router LEBIH DULU (optsRouterValidate): cache yang dirutekan
-   hilang/kosong -> validasi dibatalkan tanpa memuat build.state.
+   hilang/kosong -> validasi dibatalkan tanpa memuat snapshot fast-state.
    optsRouterRecord dipanggil setelah state tersimpan (SET sukses) dan
    mengganti penuh set entri proyek. Clean mempertahankan opts.cache;
    pengosongan isi caches membuat router gagal sehingga run berikutnya
@@ -217,8 +222,9 @@ bool cmdsStatCached(const char *path, int64_t *mtimeNs, long long *size);
 void cmdsStatMemoSetCwd(void);
 void cmdsStatMemoForget(const char *path);
 int64_t cmdsMTimeDecide(const char *path);
-/* Parser & validasi satu baris format state F/D/X (format bersama ws.state dan
-   workspace.state lama — lihat header cmds_wsstate.c):
+/* Parser & validasi satu baris format state F/D/X (format bersama blob
+   `ws.state` di state.cache — lihat header cmds_wsstate.c; format lama
+   workspace.state memakai berkas yang sama):
      F <mtime_ns> <size> [<content16hex>] <path> | D <mtime_ns> 0 <path> | X 0 0 <path>
    Baris F baru membawa content16hex (FNV-1a isi, bukti sentuh design §4);
    baris lama tanpa kolom itu tetap sah (content = 0). path dan content
@@ -243,6 +249,124 @@ void wsAddSourceDirs(List *items);
 bool wsModeActive(void);
 void wsFastStateSave(struct DepCache *dc, const Config *c, const List *srcs, const char *target,
                      const char *buildfilePath, bool libOnly);
+
+/* ============ tipe & makro fast-state (dipakai 4 file di bawah) ============ */
+
+/* FAST5: baris stamp kini membawa hash isi
+   (<kind> <mtime> <size> <content> <path>) agar "sentuh tanpa perubahan isi"
+   bisa divalidasi (hash sama) lalu di-PATCH, tanpa rebuild (design §4).
+   State FAST4 lama ditolak -> cold sekali, lalu ditulis ulang (self-heal). */
+#define BUILD_STATE_MAGIC "SATRIAFAST5"
+
+/* Entri cache fingerprint: record per cwd (alamat proyek = hash cwd). */
+#define BUILD_FP_CACHE ".satria/caches/fingerprint.cache"
+#define BUILD_FP_KEY "<build-fingerprint-v1>"
+
+typedef struct {
+  char kind;
+  char path[MAX_PATH];
+  int64_t mtime;
+  long long size;
+  uint64_t content; /* hash isi (F); 0 = tak terhitung / bukan file */
+} FastStamp;
+
+typedef struct {
+  char cwd[MAX_PATH];
+  char buildfile[MAX_PATH];
+  int64_t buildfileMtime;
+  long long buildfileSize;
+  char target[MAX_PATH * 2];
+  int64_t targetMtime;
+  long long targetSize;
+  int compiled;
+  int skipped;
+  int count;
+  int phase; /* 0 = binary pass, 1 = library pass */
+  FastStamp *stamps;
+  /* Ringkasan library: no-op berikutnya tetap menampilkan status lib. */
+  bool libRequested, libStaticUp, libSharedUp;
+  char libStaticPath[MAX_PATH * 2];
+  char libSharedPath[MAX_PATH * 2];
+  long long libStaticSize, libSharedSize;
+} FastState;
+
+/* ==================== cmds_fast.c (mesin snapshot) ==================== */
+
+void fastStateFree(FastState *s);
+/* FNV-1a 64 atas isi file (streaming 4KB); 0 = tak terbaca. */
+uint64_t fastStateHash(const char *path);
+/* Muat snapshot sesuai fase (libOnly -> lib.cache, selain itu build.state). */
+bool fastStateLoad(FastState *s, bool libOnly);
+/* Tulis/buang entri snapshot `build.state` di fingerprint.cache. */
+bool fastSnapPut(const char *buf, size_t len);
+/* true bila target terekam (""/"-" = tidak). */
+bool fastTargetRecorded(const char *target);
+
+/* ==================== cmds_libcache.c ==================== */
+
+/* Muat fase library dari caches/lib.cache ke FastState — validasi & cetak
+   status library. Definisi di cmds_libcache.c; dipanggil fastStateLoad. */
+bool fastStateLoadLib(FastState *s);
+
+/* ==================== cmds_statmemo.c ==================== */
+
+/* Stat (mtime_ns+size) lewat memo per-proses untuk path yang divalidasi
+   berulang dalam satu run. */
+bool memoStampNsSize(const char *path, int64_t *mtimeNs, long long *size);
+
+/* ============ pass build: commands.c -> cmds_build/pass/finish ============ */
+
+/* NaiveStatPlan — stamp source + object SEKALI di awal run (satu stat/file)
+   supaya fase decide/link tidak men-stat ulang (audit bench compdb).
+   Opt-out: SATRIA_STATPLAN_OBS=0 dan/atau SATRIA_DECIDE_FROM_PLAN=0. */
+typedef struct {
+  int count;                 /* == srcs.count */
+  const char **path;         /* path source (alias ke list srcs) */
+  int64_t *srcM;             /* mtime ns source (<0 = hilang) */
+  int *objIdx;               /* -1 = path object gagal; else slot objPath */
+  int objCount;              /* jumlah object unik yang distamp */
+  char (*objPath)[MAX_PATH]; /* path object unik */
+  int64_t *objM;             /* mtime ns object (<0 = hilang) */
+  bool obsObj;               /* D1: objek ikut distamp saat gather */
+} StatPlan;
+
+void statPlanInit(StatPlan *p);
+void statPlanFree(StatPlan *p);
+void statPlanBuild(StatPlan *p, const Config *c, const List *srcs);
+/* true bila env diset dan bernilai "0" (opt-out eksplisit ke perilaku lama). */
+bool envOff(const char *name);
+
+/* Verdict byte-object pass library -> pass binary (commands.c): pass binary
+   tidak boleh memakai mtime object yang baru disentuh sebagai alasan
+   relink bila byte object identik. */
+void wsPhaseObjectChangeSet(bool changed);
+bool wsPhaseObjectChangeGet(bool *changed);
+
+/* Warna diagnostic compiler (output TTY, tanpa ANSI di build.log). */
+bool diagColorWanted(void);
+
+/* Konteks serah cmdsBuildPassRun (cmds_pass.c) -> cmdsBuildPassFinish
+   (cmds_passfinish.c): ekor pass (libOnly/link/state/summary) menerima
+   seluruh state lewat struct ini, badan fungsi dipindah verbatim. */
+typedef struct {
+  Config c;
+  const char *buildfilePath;
+  bool libOnly;
+  List srcs;
+  StatPlan plan;
+  struct DepCache *deps;
+  List pending;
+  char *inc, *wf;
+  char obj[MAX_PATH];
+  CmdsBuildFingerprint currentFp;
+  int compiled, skipped;
+  bool objectsChanged;
+  bool sourceSetChanged, linkConfigChanged;
+  int64_t maxObjM;
+  bool anyObjMissing;
+} CmdsPassTail;
+
+int cmdsBuildPassFinish(CmdsPassTail *t);
 /* Kosongkan memo stat validasi fast-state; dipanggil sebelum build mengubah file. */
 void cmdsStatMemoReset(void);
 

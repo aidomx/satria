@@ -14,6 +14,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "../background.h"
 #include "../compile.h"
 #include "../embed.h"
 #include "../log/build_log.h"
@@ -103,11 +104,12 @@ void cmdsLibSharedPath(const Config *c, char *out, size_t n) {
 typedef struct {
   char src[MAX_PATH]; /* source yang dikompilasi slot ini */
   double start;       /* untuk durasi per job */
+  int idx;            /* indeks source di srcs (untuk okOut) */
 } JobSlot;
 
 bool cmdsRunParallelJobs(const Config *c, const char *inc, const char *wf, const List *srcs,
                          char *objPath, size_t objCap, int jobs, int *outCompiled,
-                         int *outFailed, int *outInterrupted, bool quiet) {
+                         int *outFailed, int *outInterrupted, bool quiet, bool *okOut) {
   JobSlot *slots = calloc((size_t)jobs, sizeof(JobSlot));
   ProcHandle *handles = calloc((size_t)jobs, sizeof(ProcHandle));
   if (!slots || !handles) {
@@ -148,6 +150,7 @@ bool cmdsRunParallelJobs(const Config *c, const char *inc, const char *wf, const
       }
       snprintf(slots[active].src, sizeof(slots[active].src), "%s", src);
       slots[active].start = nowSeconds();
+      slots[active].idx = nextSrc;
       nextSrc++;
       active++;
     }
@@ -158,7 +161,9 @@ bool cmdsRunParallelJobs(const Config *c, const char *inc, const char *wf, const
     if (w < 0) break; /* tidak ada job tersisa (atau wait gagal) */
 
     double dt = nowSeconds() - slots[w].start;
+    if (okOut) okOut[slots[w].idx] = fin->ok;
     compiled++;
+    bgProgress(5 + (compiled * 80) / total, "Compiling: %s", slots[w].src); /* §3B */
     const char *tag = fin->interrupted ? "INT" : (fin->ok ? "OK" : "FAIL");
     if (!quiet) {
       printf("[%3d/%3d] %-4s %5.2fs  %s\n", compiled, total, tag, dt, slots[w].src);

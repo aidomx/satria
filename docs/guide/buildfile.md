@@ -208,6 +208,56 @@ defines.windows = UNICODE, WIN32_LEAN_AND_MEAN
 
 `foreground` controls process-group/SIGINT behavior. satria can own SIGINT handling and forward interruption to child build processes.
 
+## Background build
+
+`background = true` runs the build in a detached child process. The command
+returns to the prompt immediately — exit code 0 means "started
+successfully", not "build succeeded" — while the build keeps running with
+its stdout/stderr redirected to `.satria/background.log`:
+
+```text
+background = true
+```
+
+In `Buildfile.ws` it is written as a global line (applies to `satria -w`):
+
+```text
+use workspace
+
+background = true
+projects = app, tool
+```
+
+Monitor the running build with the `watch` command:
+
+```bash
+satria               # starts the build in the background
+satria watch         # poll progress, then print the build summary and exit
+satria watch --full  # stream .satria/background.log live (like tail -f)
+satria -w watch      # same for a workspace background build
+```
+
+Files written under `.satria/`:
+
+| File | Purpose |
+|---|---|
+| `build.pid` (`workspace.pid` in workspace mode) | PID of the running build |
+| `background.log` | build output; truncated by each new background build |
+| `background.status` | `success` or `failed`, written when the build finishes |
+| `background.progress` | `pct\|activity` consumed by the watcher |
+
+Rules:
+
+- Runs that are already up-to-date are answered inline by the
+  no-op/router path ("Nothing to build") — no child is spawned, so exit
+  code 0 means "started" only when a build actually runs in the background.
+- A second build is rejected while one is running:
+  `Error: Background build is already running (PID: N). Use 'satria watch' to monitor.`
+- Ctrl+C inside `watch` only detaches the watcher; the build runs in its own
+  session and can be re-attached at any time.
+- `clean` is blocked while a background build is running.
+- `satria watch` exits 0 on success and 1 on failure.
+
 ## Progress
 
 The build UI can be configured with progress settings such as:

@@ -382,6 +382,9 @@ static char *translateFlagsToMsvc(const char *flags) {
  * untuk jalur embed fallback) dan jalur kompilasi paralel (-jN).
  * Hasil di buffer malloc; pemanggil yang membebaskan.
  */
+static bool g_diagColor = false;
+void compileSetDiagColor(bool on) { g_diagColor = on; }
+
 char *compileCmd(const Config *c, const char *inc, const char *wf, const char *src,
                  const char *obj) {
   char *tf = targetFlags(c); /* NULL bila tidak ada target */
@@ -427,8 +430,8 @@ char *compileCmd(const Config *c, const char *inc, const char *wf, const char *s
   size_t dflen = df ? strlen(df) : 0;
   char *cmd = malloc(strlen(c->cc) + strlen(inc) + strlen(wf) + tflen + dflen +
                      strlen(c->std) + 2 * strlen(src) + strlen(obj) + 64);
-  sprintf(cmd, "%s %s %s %s%s-std=%s -c %s -o %s", c->cc, tf ? tf : "", inc, wf, df ? df : "",
-          c->std, src, obj);
+  sprintf(cmd, "%s %s %s %s%s-std=%s -c %s -o %s%s", c->cc, tf ? tf : "", inc, wf, df ? df : "",
+          c->std, src, obj, g_diagColor ? " -fdiagnostics-color=always" : "");
   free(df);
   free(tf);
   return cmd;

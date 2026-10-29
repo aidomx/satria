@@ -18,13 +18,15 @@ satria profile <ctx>     Measure operation costs (see: help profile)
 satria -w                Build all projects in workspace (Buildfile.ws)
 satria -w <name>         Build <name> and its dependencies
 satria -w release -- name=<p>[,key=value]  Package one release
+satria watch [--full]   Monitor a background build (see: help watch)
+satria -w watch [--full]  Same for a workspace background build
 satria help              Show this help
 satria help <topic>      Show topic help
 satria version           Show version
 satria self-upgrade      Upgrade satria itself
 satria self-uninstall    Remove satria and global state (requires confirmation)
 
-Topics: build, profile, workspace, init, clean, release, compdb, ninja, install
+Topics: build, profile, workspace, init, clean, release, compdb, ninja, install, watch
 ---endhelp
 
 ---build
@@ -50,9 +52,55 @@ the global value applies first, matching suffix values are appended
 with dedup; std.<target> overrides std.
 
 Build is incremental: header tracking (mtime + content hash),
-dependency cache (.satria/deps.cache), and a fast no-op snapshot
-(.satria/build.state) skip work when nothing changed.
+dependency cache (.satria/caches/deps.cache), and a fast no-op snapshot
+(.satria/caches/fingerprint.cache) skip work when nothing changed.
+
+Set `background = true` to run the build detached in the background
+and monitor it with `satria watch` — see: help watch
 ---endbuild
+
+---watch
+Background build & watch (design/background.md)
+
+Set `background = true` in Buildfile (or as a global line in
+Buildfile.ws):
+
+  use workspace
+  background = true
+  projects = app, tool
+
+`satria` / `satria -w` then starts the build in a detached child
+process and returns to the prompt immediately — exit code 0 means
+"started successfully", not "build succeeded". Output goes to
+.satria/background.log.
+
+Files:
+  .satria/build.pid          PID of the running build
+  .satria/workspace.pid      ... in workspace mode
+  .satria/background.log     stdout+stderr of the build (truncated on
+                             each new background build)
+  .satria/background.status  success | failed (written when finished)
+  .satria/background.progress  "pct|activity" for the watcher
+
+Commands:
+  satria watch               Poll progress until the build finishes,
+                             print the build summary, then exit
+                             (0 = success, 1 = failed)
+  satria watch --full        Stream background.log live (like tail -f),
+                             summary appears at the end of the stream
+  satria -w watch [--full]   Same for a workspace background build
+
+Rules:
+  - a second build is rejected while one is running:
+      Error: Background build is already running (PID: N).
+      Use 'satria watch' to monitor.
+  - Ctrl+C inside watch only detaches the watcher; the build keeps
+    running in its own session and can be re-attached anytime
+  - `clean` is blocked while a background build is running
+  - no-op runs (nothing to build) are answered inline by the
+    router/fast-state path — no child is spawned
+  - `satria watch` exits 0 on success, 1 on failure
+---endwatch
 
 ---install
 Satria Lifecycle CLI
@@ -115,6 +163,8 @@ satria -w <name>         Build <name> and its dependency closure
 satria -w clean          Clean the entire workspace
 satria -w release -- name=<p>[,key=value]
                        Package one release to dist/release/<name>/
+satria -w watch [--full] Monitor a background build (requires
+                       `background = true`; see: help watch)
 satria init -w           Create a workspace Buildfile (Buildfile.ws)
 
 A minimal workspace Buildfile.ws:
@@ -154,6 +204,10 @@ satria clean             Remove build artifacts:
 
 Clean follows the active project configuration; in workspace mode
 (`satria -w clean`) it cleans every member project.
+
+While a background build is running (`background = true`), clean is
+blocked so artifacts cannot be removed mid-build — wait for it or
+check with `satria watch` (see: help watch).
 ---endclean
 
 ---release

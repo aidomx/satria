@@ -2,6 +2,7 @@
  * Bagian dari modul workspace (src/workspace/). Lihat ws_internal.h.
  */
 #include "ws_internal.h"
+#include "../background.h"    /* background build + watch (design/background.md) */
 #include "../cmds/cmds_internal.h" /* cmdsLegacyStateSweep: pembersihan state lama */
 #include "../cache/router.h" /* optsSourcesRouteSync: sinkron sources <-> opts */
 #include "../log/report_blob.h" /* detail laporan no-op (design/startup.md §10) */
@@ -18,21 +19,29 @@ static void wsLegacyStateRemove(void) {
   cmdsLegacyStateSweep();
 }
 
-/* Read the global switch from the restored startup model, not Buildfile.ws.
+/* Read a global boolean switch from the restored startup model, not Buildfile.ws.
    Default false; project-specific settings are intentionally excluded. */
-static bool wsLogEnabled(const WsModel *m) {
+static bool wsCommonBool(const WsModel *m, const char *want) {
   bool enabled = false;
   for (int i = 0; i < m->commonLines.count; ++i) {
     char line[WS_LINE_LEN];
     char key[64];
     char *value = NULL;
     snprintf(line, sizeof(line), "%s", m->commonLines.items[i]);
-    if (wsSplitKV(line, key, sizeof(key), &value) && strcmp(key, "log") == 0) {
+    if (wsSplitKV(line, key, sizeof(key), &value) && strcmp(key, want) == 0) {
       if (strcmp(value, "true") == 0) enabled = true;
       else if (strcmp(value, "false") == 0) enabled = false;
     }
   }
   return enabled;
+}
+
+static bool wsLogEnabled(const WsModel *m) { return wsCommonBool(m, "log"); }
+
+/* `background = true` (design/background.md §1): build dijalankan child
+   terpisah dari root workspace. */
+static bool wsBackgroundEnabled(const WsModel *m) {
+  return wsCommonBool(m, "background");
 }
 
 static bool wsBuildLogActive = false;
@@ -155,7 +164,11 @@ static int wsRunCore(const char *cmd, int jobs, const char *only, const char *re
       return 0;
     }
   }
-  if (!wsModelLoad(wsDir, &m, &wsName, true)) return 1;
+  /* Pratinjau `background = true` (lihat wsBackgroundPeek): fase startup
+     dicetak di dalam wsModelLoad, sedangkan keputusan spawn baru dibuat
+     setelah gerbang no-op — jadi niat spawn harus sudah diketahui lebih dulu. */
+  bool spawnPending = strcmp(cmd, "build") == 0 && !bgIsChild() && wsBackgroundPeek(wsDir);
+  if (!wsModelLoad(wsDir, &m, &wsName, true, spawnPending)) return 1;
   profMark("ws-model"); /* profil */
   if (strcmp(cmd, "build") == 0 && wsLogEnabled(&m)) {
     buildLogBegin();
@@ -318,6 +331,26 @@ static int wsRunCore(const char *cmd, int jobs, const char *only, const char *re
       return 0;
     }
   }
+  /* `background = true` (design/background.md §2): spawn HANYA setelah gerbang
+     no-op router di atas — run yang tidak ada yang dikerjakan tetap dilayani
+     langsung (STATUS "Nothing to build"), tanpa child. Induk meluncurkan child
+     memakai argv asli (sama persis: -w/-j/-- selektor) lalu keluar rc 0;
+     child (bgIsChild) melewati cabang ini. */
+  if (strcmp(cmd, "build") == 0 && !bgIsChild() && wsBackgroundEnabled(&m)) {
+    /* Induk tidak menjalankan build: tutup relay build.log yang dibuka di
+       atas (kembalikan stderr) sebelum keluar — child membuka relaynya
+       sendiri. */
+    if (wsBuildLogActive) {
+      buildLogEnd(0);
+      wsBuildLogActive = false;
+    }
+    /* Rekaman startup (cold) disimpan di sini — satu-satunya tempat startup
+       run background tampil adalah replay `satria watch`. */
+    bgStartupRecord(true);
+    int brc = bgSpawn(BG_WS);
+    wsModelFree(&m);
+    return brc;
+  }
   /* Run build penuh: tangkap laporan (tee) -> report.blob bila sukses.
      Jalur cache mode ws untuk baris STATUS di dalamnya. */
   if (strcmp(cmd, "build") == 0) {
@@ -426,7 +459,19 @@ static int wsRunCore(const char *cmd, int jobs, const char *only, const char *re
    kegagalan build. */
 int workspaceRun(const char *cmd, int jobs, const char *only, const char *releaseSel) {
   wsBuildLogActive = false;
+  /* Gerbang background (design/background.md §4): tolak build ganda
+     (§4.1) dan blok clean (§4.4) selama build background berjalan. Child
+     sendiri dilewati — dialah pemilik PID di berkas pid. */
+  if (!bgIsChild()) {
+    int gate = strcmp(cmd, "build") == 0    ? bgBuildGate(BG_WS)
+               : strcmp(cmd, "clean") == 0  ? bgCleanGate(BG_WS)
+                                            : -1;
+    if (gate >= 0) return gate;
+  } else {
+    bgChildBegin(BG_WS);
+  }
   int rc = wsRunCore(cmd, jobs, only, releaseSel);
+  if (bgIsChild()) bgChildFinish(rc == 0); /* §4.3: status lalu hapus PID */
   if (!stateBlobFlush())
     fprintf(stderr, "satria: peringatan: state workspace tidak tertulis (cache dilewati)\n");
   if (wsBuildLogActive) {
@@ -463,7 +508,7 @@ int workspaceEnumerate(const char *wsDir, int *count, const char **projectNames,
   WsModel *m = &mM;
   *count = 0;
 
-  if (!wsModelLoad(wsDir, m, NULL, false)) return 1;
+  if (!wsModelLoad(wsDir, m, NULL, false, false)) return 1;
   if (!wsValidateRelease(m)) {
     wsModelFree(m);
     return 1;

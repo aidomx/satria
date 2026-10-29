@@ -81,6 +81,17 @@ cd ../ruka && satria -w clean
 Release a single project (see [Releases](releases.md)); `clean` works per
 project root like build.
 
+With `background = true` in `Buildfile.ws`, `satria -w` returns to the
+prompt immediately and the build runs detached; watch it with:
+
+```bash
+satria -w watch            # progress until done, then the summary
+satria -w watch --full     # stream .satria/background.log live
+```
+
+`clean` is blocked while a background build is running. See
+[Buildfile](buildfile.md#background-build) for details.
+
 ## Dependencies
 
 A project can declare another workspace project as a dependency:

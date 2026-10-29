@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "bootstrap.h"
+#include "background.h"
 #include "log/build_log.h"
 #include "cmdhelp.h"
 #include "commands.h"
@@ -65,6 +66,9 @@ int satriaRun(int argc, const char *argv[]) {
   int packageStatus = 0;
   if (packageCliRun(argc, argv, &packageStatus)) return packageStatus;
   profInit(); /* profil fase aktif bila SATRIA_PROFILE=1 (stderr, tanpa syscall) */
+  /* Simpan argv (untuk spawn child background) & baca penanda SATRIA_BG_CHILD
+     (design/background.md §2) — harus SEBELUM bootstrapApply yang bisa chdir -f. */
+  bgNoteArgv(argc, argv);
 
   Bootstrap bs;
   int rc = bootstrapParse(argc, argv, &bs);
@@ -133,11 +137,17 @@ int satriaRun(int argc, const char *argv[]) {
       bootstrapCleanup(&bs);
       return irc;
     }
-    if (bs.cmd != CMD_BUILD && bs.cmd != CMD_CLEAN && bs.cmd != CMD_RELEASE) {
+    if (bs.cmd != CMD_BUILD && bs.cmd != CMD_CLEAN && bs.cmd != CMD_RELEASE &&
+        bs.cmd != CMD_WATCH) {
       fprintf(stderr,
               "satria: command '%s' tidak berlaku di mode workspace (pakai build/clean/release)\n",
               bs.cmd_token ? bs.cmd_token : "");
       rc = 2;
+      goto done;
+    }
+    if (bs.cmd == CMD_WATCH) {
+      /* `satria -w watch`: pantau build background workspace (§3B/§3C). */
+      rc = bgWatch(true, bs.watch_full);
       goto done;
     }
     /* `-- key=value` = override setting release run ini (design/release.md
@@ -225,6 +235,10 @@ int satriaRun(int argc, const char *argv[]) {
     fprintf(stderr,
             "satria: release memerlukan mode workspace (pakai 'satria -w release -- name=rupa')\n");
     rc = 2;
+    break;
+
+  case CMD_WATCH: /* `satria watch` — pantau build background satu-proyek (§3) */
+    rc = bgWatch(false, bs.watch_full);
     break;
 
   default:

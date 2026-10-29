@@ -19,13 +19,16 @@
    fingerprint.cache. POSIX saja — Windows dilewati (tanpa tee; sama seperti relay
    build.log). */
 #include "report_blob.h"
+#include "../portability.h" /* fsRenameReplace */
+#include "../util.h"        /* mkdirs */
 #include <stdio.h>
+#ifndef _WIN32
+#include <signal.h>
+#endif
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 #include <sys/stat.h> /* struct stat, stat(): juga dipakai jalur Windows */
-#include "../portability.h" /* fsRenameReplace */
-#include "../util.h" /* mkdirs */
+#include <time.h>
 
 #define RB_FILE ".satria/report.blob"
 #define RB_TMP ".satria/report.blob.tmp"
@@ -80,7 +83,7 @@ static void rbRelayLoop(int rd, int term, int file) {
    Baris progres per file, "Build with", "Embedded", "Linking", dan CompDB
    dibuang — no-op menampilkan ringkasan padat, bukan keluaran basi rinci. */
 typedef struct {
-  int nArch, nLibStatic, nLibShared, nBin;
+  int nArch, nLibStatic, nLibShared, nBin, nBinUp;
   int blocks, bad;
 } RbAgg;
 
@@ -128,10 +131,12 @@ static const char *rbRepField(const char *line, const char *key) {
   size_t kl = strlen(key);
   if (strncmp(p, key, kl) != 0) return NULL;
   p += kl;
-  while (*p == ' ') p++;
+  while (*p == ' ')
+    p++;
   if (*p != ':') return NULL;
   p++;
-  while (*p == ' ') p++;
+  while (*p == ' ')
+    p++;
   return p;
 }
 
@@ -151,10 +156,10 @@ static void rbCondense(const char *in, FILE *out, RbAgg *a, double secs) {
   bool linkUp = false;
   while (fgets(line, sizeof(line), f)) {
     size_t n = strlen(line);
-    while (n && (line[n - 1] == '\n' || line[n - 1] == '\r')) line[--n] = '\0';
+    while (n && (line[n - 1] == '\n' || line[n - 1] == '\r'))
+      line[--n] = '\0';
     const char *fld;
-    if ((fld = rbRepField(line, "Project")) != NULL ||
-        (fld = rbRepField(line, "Fase")) != NULL) {
+    if ((fld = rbRepField(line, "Project")) != NULL || (fld = rbRepField(line, "Fase")) != NULL) {
       rbBlkFlush(&b, a);
       linkUp = false; /* bagian baru: status link di-reset */
     } else if ((fld = rbRepField(line, "Summary")) != NULL) {
@@ -169,12 +174,14 @@ static void rbCondense(const char *in, FILE *out, RbAgg *a, double secs) {
       if (!v) continue;
       char key[32];
       size_t kl = (size_t)(v - k);
-      while (kl && k[kl - 1] == ' ') kl--;
+      while (kl && k[kl - 1] == ' ')
+        kl--;
       if (kl >= sizeof(key)) continue;
       memcpy(key, k, kl);
       key[kl] = '\0';
       v++;
-      while (*v == ' ') v++;
+      while (*v == ' ')
+        v++;
       char val[256];
       rbCopy(val, sizeof(val), v);
       char *up = strstr(val, " ("); /* buang "(up-to-date)" dsb. */
@@ -183,13 +190,17 @@ static void rbCondense(const char *in, FILE *out, RbAgg *a, double secs) {
         b.hasStatus = 1;
         b.statusOk = strcmp(v, "Success") == 0;
       } else if (strcmp(key, "Library") == 0) {
-        if (rbHasSuffix(val, ".a")) b.libStatic++;
-        else if (rbHasSuffix(val, ".so")) b.libShared++;
+        if (rbHasSuffix(val, ".a"))
+          b.libStatic++;
+        else if (rbHasSuffix(val, ".so"))
+          b.libShared++;
       } else if (strcmp(key, "Archive") == 0) {
         b.hasArchive = 1;
       } else if (strcmp(key, "Target") == 0) {
         b.hasTarget = 1;
-        if (!linkUp) a->nBin++; /* link nyata tanpa penanda up-to-date */
+        /* binary yang di-link di run ini vs. binary yang sudah up-to-date */
+        if (linkUp) a->nBinUp++;
+        else a->nBin++;
       }
     }
   }
@@ -205,13 +216,13 @@ static void rbCondense(const char *in, FILE *out, RbAgg *a, double secs) {
     char when[32];
     strftime(when, sizeof(when), "%Y-%m-%d %H:%M", localtime(&now));
     fprintf(out, "LAST BUILD SUMMARY\n");
-    fprintf(out, "  Last       : %s\n", when);
+    fprintf(out, "  %s   : %s\n", "Datetime", when);
   }
   fprintf(out, "  Total time : %.2fs\n", secs);
   fprintf(out, "  Archives   : %d created\n", a->nArch);
-  fprintf(out, "  Libraries  : %d generated (%d static, %d shared)\n", libs,
-          a->nLibStatic, a->nLibShared);
-  fprintf(out, "  Binaries   : %d linked\n", a->nBin);
+  fprintf(out, "  Libraries  : %d generated (%d static, %d shared)\n", libs, a->nLibStatic,
+          a->nLibShared);
+  fprintf(out, "  Binaries   : %d linked, %d up-to-date\n", a->nBin, a->nBinUp);
   fprintf(out, "  Status     : %s\n", (a->blocks && !a->bad) ? "Success" : "Failed");
 }
 #endif
@@ -251,6 +262,10 @@ void reportBlobBegin(void) {
   }
   if (pid == 0) {
     close(p[1]); /* anak: baca p[0], tulis orig + tf */
+    /* Ctrl+C mengenai seluruh grup proses. Relay mengabaikannya agar tetap hidup
+       sampai satria selesai; kalau relay mati, satria menulis ke pipe tertutup
+       dan kena SIGPIPE sebelum sempat menyimpan kemajuan build. */
+    signal(SIGINT, SIG_IGN);
     rbRelayLoop(p[0], orig, tf);
   }
   close(p[0]);
@@ -288,8 +303,7 @@ bool reportBlobFinish(bool save) {
     if (stat(RB_TMP, &sb) == 0 && sb.st_size > 0) {
       struct timespec t1;
       clock_gettime(CLOCK_MONOTONIC, &t1);
-      double secs = (double)(t1.tv_sec - rbT0.tv_sec) +
-                    (double)(t1.tv_nsec - rbT0.tv_nsec) / 1e9;
+      double secs = (double)(t1.tv_sec - rbT0.tv_sec) + (double)(t1.tv_nsec - rbT0.tv_nsec) / 1e9;
       /* Simpan ringkasan terstruktur, bukan keluaran mentah (§10). */
       char sum[sizeof(RB_TMP) + 8];
       snprintf(sum, sizeof(sum), "%s.sum", RB_TMP);
@@ -321,7 +335,8 @@ void reportBlobShow(void) {
   }
   char buf[8192];
   size_t n;
-  while ((n = fread(buf, 1, sizeof(buf), f)) != 0) fwrite(buf, 1, n, stdout);
+  while ((n = fread(buf, 1, sizeof(buf), f)) != 0)
+    fwrite(buf, 1, n, stdout);
   fclose(f);
   fflush(stdout);
 }

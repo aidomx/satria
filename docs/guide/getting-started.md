@@ -86,9 +86,13 @@ satria version
 satria help
 satria -j4
 satria -j1
+satria watch
 ```
 
-`-j` enables the normal parallel build behavior; `-jN` chooses an explicit job count.
+`-j` enables the normal parallel build behavior; `-jN` chooses an explicit job
+count. `satria watch` monitors a background build (`background = true`, see
+[Buildfile](buildfile.md#background-build)) until it finishes, prints the
+build summary and exits.
 
 ## Version
 

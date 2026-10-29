@@ -2,10 +2,12 @@
  * cmds_wsstate — fast-state khusus mode workspace. Terpisah dari
  * cmdsFastStateSave/cmdsFastStateValid (yang tetap untuk single project).
  *
- * File: .satria/workspace/<proyek>.ws.state (fase binary) dan
- *       .satria/workspace/<proyek>.ws.lib.state (fase library) — mode
- *       workspace root-centric (state_path, lihat cmds_internal.h);
- *       bila proyek belum ditetapkan, fallback ke .satria/ws.state lama.
+ * Penyimpanan: blob per proyek di .satria/caches/state.cache (leaf
+ *       `ws.state` fase binary, `src` snapshot sumber, hdr/<hash> semantic header)
+ *       dan .satria/caches/lib.cache (fase library) — mode workspace
+ *       root-centric (state_path, lihat cmds_internal.h). File lama
+ *       .satria/workspace/<proyek>.ws.state[.lib] dan .satria/ws.state tidak
+ *       lagi dibaca/ditulis (dibuang legacy sweep).
  * Format (whitespace-delimited, path tanpa spasi):
  *   SATRIAWS3 <cwd>
  *   META <skipped> <target|-> <buildfile>
@@ -77,7 +79,8 @@ static void stAppendf(char **buf, size_t *used, size_t *cap, const char *fmt, ..
 
 
 /* Snapshot daftar source per proyek (design/workspace_v1.md §State):
-   .satria/workspace/<proyek>.src — dipakai workspace_log sebagai fingerprint
+   blob `src` di .satria/caches/state.cache (dulu .satria/workspace/<proyek>.src)
+   — dipakai workspace_log sebagai fingerprint
    daftar source (keputusan no-op & skip-write CompDB). Ditulis hanya bila
    isinya berubah; tanpa proyek aktif (jalur lama) dilewati. */
 static void wsWriteSrcSnapshot(const List *srcs) {

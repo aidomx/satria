@@ -2,35 +2,40 @@
  * Bagian dari modul workspace (src/workspace/). Lihat ws_internal.h.
  */
 #include "ws_internal.h"
+#include "../startup.h"
 
-static void wsStartupFinish(bool ok);
-static void wsStartupPhase(const char *msg);
-static void wsStartupPhaseEnd(bool ok);
 static void wsStartupPrepare(const char *wsDir);
 
-/* ---- output startup (design/startup.md §8) ----
-   Setiap fase yang selesai DIPERTAHANKAN sebagai baris "startup: <fase> done"
-   dengan newline — informasi startup tetap terlihat setelah cold build.
-   Hanya ke stderr bila stdout interaktif (termIsTTY): output ter-capture
-   (test/CI, pipe) tetap bersih; wsGuardQuiet (deteksi anggota) ikut membungkam. */
-static const char *wsStartupCur = NULL;
-static void wsStartupFinish(bool ok) {
-  if (!wsStartupCur) return;
-  if (!wsGuardQuiet && termIsTTY()) {
-    fprintf(stderr, "> %s: %s\n", wsStartupCur, ok ? "done" : "failed");
-    fflush(stderr);
+/* Pratinjau `background = true` di Buildfile.ws — dipanggil SEBELUM
+ * wsModelLoad. Fase startup dicetak SAAT model dimuat, sedangkan keputusan
+ * spawn baru diketahui belakangan (setelah gerbang no-op); tanpa pratinjau
+ * ini run background masih akan mencetak startup ke terminal. Semantik
+ * mengikuti wsCommonBool: key root-level, nilai persis "true", komentar
+ * dibuang, keputusan terakhir menang. */
+bool wsBackgroundPeek(const char *wsDir) {
+  const char *wsName = workspaceFileName();
+  if (!wsName) return false;
+  char wsFile[WS_PATH_LEN];
+  snprintf(wsFile, sizeof(wsFile), "%s/%s", wsDir, wsName);
+  FILE *fp = fopen(wsFile, "r");
+  if (!fp) return false;
+  bool on = false;
+  char line[WS_LINE_LEN];
+  while (fgets(line, sizeof(line), fp)) {
+    char *hash = strchr(line, '#');
+    if (hash) *hash = '\0';
+    char *slash = strstr(line, "//");
+    if (slash) *slash = '\0';
+    char key[64];
+    char *value = NULL;
+    if (!wsSplitKV(line, key, sizeof(key), &value)) continue;
+    if (strcmp(key, "background") == 0) on = strcmp(value, "true") == 0;
   }
-  wsStartupCur = NULL;
+  fclose(fp);
+  return on;
 }
-/* Mulai fase baru; fase sebelumnya otomatis selesai (done). Fase tidak
-   dicetak saat mulai, hanya saat selesai, supaya pesan dari parser (mis.
-   peringatan Buildfile) tidak menimpa baris progres. */
-static void wsStartupPhase(const char *msg) {
-  wsStartupFinish(true);
-  wsStartupCur = msg;
-}
-/* Akhiri fase terakhir: ok -> "done", gagal -> "failed". */
-static void wsStartupPhaseEnd(bool ok) { wsStartupFinish(ok); }
+
+/* Output fase startup: lihat src/startup.h (dipakai bersama single-project). */
 /* Skeleton direktori startup (design/startup.md): dibuat SEKALI pada clean
    cold. `.satria` memuat startup.state, jadi state yang valid otomatis berarti
    `.satria` ada — jalur build tidak perlu mkdir `.satria` lagi. Direktori
@@ -52,9 +57,11 @@ static void wsStartupPrepare(const char *wsDir) {
    tidak boleh memakai model. Validasi release & topo-sort tetap di
    pemanggil: urutannya berbeda antar mode (workspaceRun memvalidasi topo
    sebelum override release; workspaceEnumerate sebaliknya) dan keduanya
-   membutuhkan model yang sudah dimuat. */
+   membutuhkan model yang sudah dimuat.
+   spawnPending = run ini menuju spawn background (lihat wsBackgroundPeek):
+   fase startup TIDAK dicetak, hanya direkam untuk replay `satria watch`. */
 bool wsModelLoad(const char *wsDir, WsModel *m, const char **wsNameOut,
-                        bool cacheWrite) {
+                        bool cacheWrite, bool spawnPending) {
   const char *wsName = workspaceFileName();
   if (!wsName) {
     fprintf(stderr, "satria: %s not found\n", WORKSPACE_FILENAME);
@@ -73,38 +80,40 @@ bool wsModelLoad(const char *wsDir, WsModel *m, const char **wsNameOut,
      memperbarui startup.state tanpa menjalankan ulang startup. */
   bool coldStart = cacheWrite && !fsFileExists(cacheFile);
   if (coldStart) {
-    if (!wsGuardQuiet && termIsTTY()) fprintf(stderr, "startup :\n");
+    /* Spawn: child tidak punya TTY dan induk langsung keluar — startup cukup
+       direkam (bgStartupRecord di jalur spawn), tidak dicetak di terminal. */
+    startupBegin(spawnPending ? false : startupVisible(wsGuardQuiet));
     wsStartupPrepare(wsDir);
-    wsStartupPhase("discovery");
+    startupPhase("discovery");
   }
   bool restored = wsStartupLoad(m, wsFile, wsName, cacheFile);
   if (!restored) {
-    if (coldStart) wsStartupPhase("resolving dependencies");
+    if (coldStart) startupPhase("resolving dependencies");
     if (!wsParse(m, wsFile)) {
-      if (coldStart) wsStartupPhaseEnd(false);
+      if (coldStart) startupPhaseEnd(false);
       wsModelFree(m);
       return false;
     }
   }
   if (m->projectCount == 0) {
-    if (coldStart) wsStartupPhaseEnd(false);
+    if (coldStart) startupPhaseEnd(false);
     fprintf(stderr, "satria: workspace: no projects declared\n");
     wsModelFree(m);
     return false;
   }
   if (!wsValidatePackMerges(m)) {
-    if (coldStart) wsStartupPhaseEnd(false);
+    if (coldStart) startupPhaseEnd(false);
     wsModelFree(m);
     return false;
   }
   if (cacheWrite) {
     if (!restored) {
-      if (coldStart) wsStartupPhase("indexing sources");
+      if (coldStart) startupPhase("indexing sources");
       wsStartupSave(m, wsFile, wsName, cacheFile);
     }
     if (coldStart) {
-      wsStartupPhase("preparing execution");
-      wsStartupPhaseEnd(true);
+      startupPhase("preparing execution");
+      startupPhaseEnd(true);
     }
   }
   return true;

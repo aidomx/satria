@@ -58,6 +58,10 @@ NMOD=40                       # -m : jumlah file .rp di rupamod
 NRUN=5                        # -r : pengulangan per skenario (median)
 SATRIA=bin/satria             # -b : binary satria
 SATRIA_ARGS=""                # -a : argumen tambahan untuk satria
+# Paksa runner workspace paralel (default satria di foreground = serial;
+# paralel hanya aktif di child background). Set SATRIA_WS_PAR=0 di env bila
+# ingin mengukur jalur serial.
+export SATRIA_WS_PAR="${SATRIA_WS_PAR:-1}"
 COMPILERS="gcc"               # -c : nilai 'compiler =' di Buildfile.ws
 KEEP=0                        # -k : jangan hapus workspace di akhir
 ONLY=""                       # -s : subset skenario
@@ -79,6 +83,11 @@ usage() {
 args=()
 while (($#)); do
   case $1 in
+    -no-parallel|--no-parallel)
+      # Jalur serial (SATRIA_WS_PAR=0) — dipakai untuk memeriksa kedua mode:
+      #   bench/ws.sh ...                 -> paralel (default, diekspor di atas)
+      #   bench/ws.sh --no-parallel ...   -> serial
+      SATRIA_WS_PAR=0; shift ;;
     -strace|--strace)
       (($# >= 2)) || { echo "-strace membutuhkan true/false" >&2; exit 2; }
       STRACE_ENABLED=$2; shift 2 ;;
@@ -272,6 +281,11 @@ rule_line "$(box_width)"
 echo "Workspace : rupamod ($NMOD .rp) · core ($NSRC .c) · bade ($NSRC .c)"
 echo "Graph     : bade depends_on rupamod (embed), core <-> bade (circular)"
 echo "Directory : $WSROOT/{${TOOLS_OPT//,/ ,}}"
+if [ "$SATRIA_WS_PAR" = 0 ]; then
+  echo "Runner    : serial (--no-parallel)"
+else
+  echo "Runner    : paralel (SATRIA_WS_PAR=1)"
+fi
 echo
 echo "Versions  :"
 for k in "${TOOLS[@]}"; do printf '  %-6s : %s\n' "$(tool_display "$k")" "${VER[$k]:-?}"; done

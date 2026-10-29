@@ -10,7 +10,8 @@ static uint64_t wsFnv1aStr(uint64_t h, const char *s);
 /* Fast-hit per proyek pada run berjalan (wsRunProject): proyek yang
    lolos fast-state source-nya dijamin tak berubah oleh stamp folder di
    ws.state — memungkinkan workspace_log memuat ulang daftar source dari
-   snapshot <n>.src tanpa re-scan (keputusan (a) workspace_log). */
+   blob `src` (.satria/caches/state.cache) tanpa re-scan (keputusan (a)
+   workspace_log). */
 bool wsLogFastOk[WS_MAX_PROJECTS];
 /* ==================== workspace_log + CompDB merged ==================== */
 /* Indeks no-op & CompDB (design/workspace_v1.md §No-op dan CompDB): satu

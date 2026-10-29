@@ -1,6 +1,12 @@
 #ifndef SATRIA_PROFILE_H
 #define SATRIA_PROFILE_H
 
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+
+#include "util.h" /* MAX_PATH — field ProfCtx */
+
 /*
  * profile — `satria profile <context> [key=value ...] [--report <file>]`
  * (design/profile.md).
@@ -34,5 +40,55 @@
  * ringkas (pembuatan file tidak ikut terukur).
  */
 int cmdProfile(const char *const *args, int nargs);
+
+/* ==================== tipe bersama modul profile ====================
+   Dipakai profile.c (entry/output), prof_steps.c (archive/embed/library),
+   dan prof_sandbox.c (binary/project/workspace). */
+
+/* Backend kompresi archive: pembanding biaya kompresi (design: profile
+   adalah alat ukur untuk memutuskan optimasi — gz vs xz vs bz2). */
+typedef enum { COMP_NONE = 0, COMP_GZIP, COMP_XZ, COMP_BZ2 } CompBackend;
+
+typedef struct {
+  const char *type;          /* "archive" | "embed" | "library" | "binary" |
+                             "project" | "workspace" */
+  const char *target;        /* value context apa adanya (untuk header) */
+  char dir[MAX_PATH * 2];    /* target absolut (dir, atau file utk embed) */
+  bool dirIsFile;            /* embed=<file> arsip jadi */
+  bool doTar;                /* archive: selalu tar dulu; false = tak valid */
+  CompBackend comp;          /* archive: COMP_NONE = with=tar */
+  bool libStatic, libShared; /* library: backend ar / gcc -shared */
+  int jobs;                  /* binary/project: paralel (default jumlah core) */
+  int repeat;                /* --repeat N: ulangi sesi (default 1) */
+  char tmp[MAX_PATH * 2];    /* direktori kerja sementara */
+  const char *compiler;      /* utk laporan rinci; NULL = n/a */
+  const char *reportFile;    /* --report <file> (opsi global) */
+  /* metrik input */
+  int files;
+  int dirs;
+  uint64_t bytes;
+  /* hasil workspace (utk context workspace=) */
+  int wsProjects;
+  int wsLibCount;
+} ProfCtx;
+
+/* ============ API internal antar-file modul (semula static) ============ */
+
+uint64_t profSizeOf(const char *path);          /* 0 bila tak terbaca */
+void profFmtComma(char *out, size_t n, uint64_t v);
+const char *profCompName(CompBackend b);        /* "gzip" | "xz" | ... */
+const char *profCompTool(CompBackend b);        /* "gzip" CLI */
+bool profExpandTilde(const char *in, char *out, size_t n);
+bool profAbsPath(const char *in, char *out, size_t n);
+bool profTmpDirMake(ProfCtx *p);                /* TMPDIR lalu /tmp */
+void profPlatformString(char *out, size_t n);
+
+/* Langkah ukur per context (prof_steps.c / prof_sandbox.c). */
+int profRunArchive(ProfCtx *p);
+int profRunEmbed(ProfCtx *p);
+int profRunLibrary(ProfCtx *p);
+int profRunWorkspace(ProfCtx *p);
+int profRunProject(ProfCtx *p);
+int profRunBinary(ProfCtx *p);
 
 #endif /* SATRIA_PROFILE_H */

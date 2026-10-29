@@ -183,6 +183,16 @@ typedef struct {
    * ke child secara eksplisit lalu membatalkan build dengan rapi.
    */
   bool foreground;
+
+  /*
+   * background (Buildfile: background = true; design/background.md §1):
+   * build dijalankan di child proses terpisah (output ->
+   * .satria/background.log, PID -> .satria/build.pid); induk keluar segera
+   * dan user memantau lewat `satria watch`. Default false.
+   * Di Buildfile.ws dinyatakan sebagai setting global (baris bare
+   * `background = true`) — dibaca workspace.c dari commonLines.
+   */
+  bool background;
   bool logEnabled;
 
   List excludes; /* nama/path file yang dilepas dari build (mis. main.c) */
@@ -277,5 +287,13 @@ void configMergeUnique(List *dst, const List *src);
  * Dipanggil resolveCompiler(); publik agar dipanggil dari compile.c.
  */
 void configApplyCompilerSuffix(Config *c);
+
+/* ============ API internal antar-file modul config (semula static) ============
+   Definisi di config.c; dipakai config_apply.c (parser & penerapan). */
+
+/* Append entri comma-list (`a, b, c`) ke list tujuan tanpa duplikat. */
+void addCommaList(List *dst, const char *value);
+/* Target suffix platform/compiler dari nama entri (`linux.gcc` -> ...). */
+int sfxTarget(const char *name);
 
 #endif /* SATRIA_V0_1_0_CONFIG_H */

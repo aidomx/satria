@@ -103,6 +103,33 @@ void procStopAll(ProcHandle *handles, int count);
 /* Jumlah core CPU (min. 1) — default jobs untuk -j tanpa angka. */
 int cpuCount(void);
 
+/* ==================== Background build (design/background.md) ============ */
+
+/* PID proses berjalan ini (getpid / GetCurrentProcessId). */
+int procSelfPid(void);
+
+/* true bila proses `pid` masih hidup — POSIX: kill(pid, 0) (EPERM = ada,
+   tetapi tanpa izin); Windows: handle terbuka + exit code STILL_ACTIVE. */
+bool procAlive(int pid);
+
+/* Tidur milidetik (polling watcher). */
+void procSleepMs(int ms);
+
+/* Set (value != NULL) atau hapus (value == NULL) variabel lingkungan proses.
+   Dipakai background.c untuk menandai child build (SATRIA_BG_CHILD) sebelum
+   spawn — child mewarisi env saat exec/CreateProcess. */
+void procEnvSet(const char *name, const char *value);
+
+/*
+Spawn proses terpisah & lepas dari terminal induk (design/background.md §2):
+  - POSIX   : fork + setsid — child jadi sesi baru tanpa controlling terminal;
+  - Windows : CreateProcess DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP.
+stdout+stderr child DIARAHKAN ke `logPath` (mode timpa), stdin dari /dev/null
+(NUL di Windows) agar child tidak pernah membaca terminal induk. argv[0] boleh
+nama di PATH; PID hasil spawn keluar lewat outPid (bila diset).
+*/
+bool procSpawnDetached(char *const argv[], const char *logPath, int *outPid);
+
 /* Detik monotonic untuk pengukuran durasi build. */
 double monotonicSeconds(void);
 

@@ -41,7 +41,8 @@ static bool optNameVisit(const CsEntry *e, CsOp op, void *ctxp) {
 
 /* Dibaca LEBIH DULU oleh no-op (cmdsFastStateValid/wsFastStateValid).
    true = lanjut ke validasi fast-state; false = router menyatakan cache yang
-   dirutekan hilang/kosong untuk proyek ini — build.state tidak perlu dimuat.
+   dirutekan hilang/kosong untuk proyek ini — snapshot fast-state fase binary
+   (entri `build.state` di caches/fingerprint.cache) tidak perlu dimuat.
    Tanpa opts.cache atau tanpa entri proyek: tanpa gate (jalur normal).
    Kontrak opts <-> sources: bila .satria/sources.cache ADA, route `sources`
    wajib ada dan stempelnya (ns + ukuran) harus cocok; route menunjuk indeks

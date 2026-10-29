@@ -60,4 +60,19 @@ bool embedProbeGnuLd(void);
    state sampingan <objectPath>.archive; object embed = <outBuildDir>/embedded.o. */
 void configFinalizeEntry(EmbeddedEntry *e, const char *buildDir);
 
+/* ============ API internal antar-file modul embed (semula static) ============
+   Definisi di embed.c (cache embed.cache); dipakai embed_archive.c. */
+
+/* Simpan stamp-meta arsip (state sampingan <object>.archive). */
+void embArchiveStateSave(const EmbeddedEntry *e);
+/* Rekam entri grup embed.cache bila belum ada (self-healing). */
+void embEmbedCacheRecordIfMissing(const EmbeddedEntry *e);
+void embEmbedCacheRecord(const EmbeddedEntry *e);
+/* true bila `rel` masuk daftar exclude entri (exclude / archive.exclude). */
+bool embExcluded(const EmbeddedEntry *e, const char *rel);
+/* Path relatif entri untuk pesan/kunci cache (buang prefix arsip). */
+void embRelPath(const EmbeddedEntry *e, const char *path, char *rel, size_t n);
+/* true bila arsip masih segar menurut stamp-meta + stamp input. */
+bool embArchiveFresh(const EmbeddedEntry *e);
+
 #endif /* SATRIA_V0_1_0_EMBED_H */

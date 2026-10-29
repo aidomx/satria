@@ -64,6 +64,16 @@ static bool parseJobsArg(const char *inlineVal, bool hasInline, int *outJobs, co
 
 /* ---------- Fase 1: Parse ---------- */
 
+/* Kata yang berarti command (bukan nama proyek) setelah `-w`. */
+static bool bootstrapIsCommandWord(const char *s) {
+  static const char *const kCommands[] = {
+    "build", "clean", "init", "help", "version", "release", "watch", "log",
+  };
+  for (size_t k = 0; k < sizeof(kCommands) / sizeof(kCommands[0]); k++)
+    if (strcmp(s, kCommands[k]) == 0) return true;
+  return false;
+}
+
 int bootstrapParse(int argc, const char *argv[], Bootstrap *bs) {
   memset(bs, 0, sizeof(*bs));
   bs->cmd = CMD_NONE;
@@ -72,9 +82,9 @@ int bootstrapParse(int argc, const char *argv[], Bootstrap *bs) {
   bs->conv_keep = false;
   bs->ws_sel_argv = NULL; /* diisi saat `--` ditemukan */
 
-  bool haveF = false;   /* true bila -f diberikan secara eksplisit */
-  bool convSet = false; /* terlihat -xf / -xcf */
-  const char *cmd = NULL;      /* token command asli, NULL bila tidak ada */
+  bool haveF = false;     /* true bila -f diberikan secara eksplisit */
+  bool convSet = false;   /* terlihat -xf / -xcf */
+  const char *cmd = NULL; /* token command asli, NULL bila tidak ada */
   bool brokeAtProfile = false;
 
   for (int i = 1; i < argc; i++) {
@@ -90,10 +100,7 @@ int bootstrapParse(int argc, const char *argv[], Bootstrap *bs) {
       /* Kata berikutnya = nama proyek KECUALI command yang dikenal
          (satria -w clean harus tetap berarti clean, bukan proyek "clean"). */
       if (i + 1 < argc && argv[i + 1][0] && argv[i + 1][0] != '-' &&
-          strcmp(argv[i + 1], "build") != 0 && strcmp(argv[i + 1], "clean") != 0 &&
-          strcmp(argv[i + 1], "init") != 0 && strcmp(argv[i + 1], "help") != 0 &&
-          strcmp(argv[i + 1], "version") != 0 && strcmp(argv[i + 1], "release") != 0 &&
-          strcmp(argv[i + 1], "log") != 0)
+          !bootstrapIsCommandWord(argv[i + 1]))
         bs->ws_only = argv[++i];
       continue;
     }
@@ -191,9 +198,18 @@ int bootstrapParse(int argc, const char *argv[], Bootstrap *bs) {
         fprintf(stderr, "satria: out of memory\n");
         return 2;
       }
-      for (int k = 0; k < n; k++) sel[k] = argv[i - n + 1 + k];
+      for (int k = 0; k < n; k++)
+        sel[k] = argv[i - n + 1 + k];
       sel[n] = NULL;
       bs->ws_sel_argv = sel;
+      continue;
+    }
+
+    /* `satria watch --full`: stream background.log alih-alih baris progress
+       (design/background.md §3C). Opsi milik command watch; token lain yang
+       tidak dikenal tetap diabaikan setelah command seperti sebelumnya. */
+    if (strcmp(a, "--full") == 0) {
+      bs->watch_full = true;
       continue;
     }
 
@@ -225,15 +241,16 @@ int bootstrapParse(int argc, const char *argv[], Bootstrap *bs) {
       bs->cmd = CMD_INIT;
     } else if (strcmp(cmd, "clean") == 0) {
       bs->cmd = CMD_CLEAN;
-    } else if (strcmp(cmd, "help") == 0 || strcmp(cmd, "--help") == 0 ||
-               strcmp(cmd, "-h") == 0) {
+    } else if (strcmp(cmd, "help") == 0 || strcmp(cmd, "--help") == 0 || strcmp(cmd, "-h") == 0) {
       bs->cmd = CMD_HELP;
-    } else    if (strcmp(cmd, "release") == 0) {
+    } else if (strcmp(cmd, "release") == 0) {
       /* release di workspace = build + release; di mode satu-proyek, ini
          dianggap command asing — ditolak di satria.c agar jelas. */
       bs->cmd = CMD_RELEASE;
     } else if (strcmp(cmd, "log") == 0 || strcmp(cmd, "--log") == 0) {
       bs->cmd = CMD_LOG;
+    } else if (strcmp(cmd, "watch") == 0) {
+      bs->cmd = CMD_WATCH;
     } else if (strcmp(cmd, "version") == 0) {
       bs->cmd = CMD_VERSION;
     } else {
@@ -350,17 +367,19 @@ int bootstrapApply(Bootstrap *bs) {
   /* Evaluasi state build (design fase 2 + design/workspace.md): cold bila
      tidak ada state sebelumnya; noop/dirty ditentukan oleh mesin build
      sendiri saat dispatch (command lain tidak butuh implicit evaluate).
-     Mode workspace memakai .satria/workspace.state — root workspace tidak
-     punya .satria/build.state (itu file per-proyek), jadi cek lama selalu
-     melaporkan cold pada tiap run `satria -w`. */
+     Gerbang cold: mode workspace = keberadaan cache fingerprint
+     (.satria/caches/fingerprint.cache, wsStateFileExists), mode single =
+     .satria/startup.state. File lama (.satria/workspace.state dan
+     .satria/build.state per-proyek) sudah tidak ditulis/dibaca. */
   bool wsMode = bs->want_workspace;
   /* Mode workspace: cold kasar dari keberadaan file gate — validasi stamp
      gate kini per-closure di workspaceRun (murah untuk `-w <nama>`).
      Status di sini hanya untuk SATRIA_STATUS/evaluasi; mesin build
      menentukan noop/dirty sendiri saat dispatch. */
-  bs->status.cold = wsMode ? !wsStateFileExists() : !fsFileExists(".satria/caches/build.state");
+  bs->status.cold = wsMode ? !wsStateFileExists() : !fsFileExists(".satria/startup.state");
   bs->status.has_state = !bs->status.cold;
-  if (getenv("SATRIA_STATUS") && *getenv("SATRIA_STATUS") && strcmp(getenv("SATRIA_STATUS"), "0") != 0)
+  if (getenv("SATRIA_STATUS") && *getenv("SATRIA_STATUS") &&
+      strcmp(getenv("SATRIA_STATUS"), "0") != 0)
     fprintf(stderr, "satria status: mode=%s cold=%d\n", wsMode ? "workspace" : "project",
             bs->status.cold ? 1 : 0);
   return 0;
@@ -400,4 +419,3 @@ void bootstrapCleanup(Bootstrap *bs) {
   free(bs->ws_sel_argv);
   bs->ws_sel_argv = NULL;
 }
-

@@ -18,7 +18,8 @@
 #include "../util.h"
 
 #define CONFIG_CACHE_MAGIC "SATRIACFG1"
-#define CONFIG_CACHE_VERSION 12u /* 12: embedded.key + embedded.type (design/embedded.md)
+#define CONFIG_CACHE_VERSION 13u /* 13: background (design/background.md)
+                                     12: embedded.key + embedded.type (design/embedded.md)
                                      11: ... 10: defines + suffix flags/library/headers/std */
 #define CONFIG_CACHE_DIR ".satria"
 #define CONFIG_CACHE_FILE "startup.state"
@@ -138,6 +139,7 @@ static bool cacheWriteConfig(FILE *fp, const Config *c) {
   uint8_t binary = c->binary ? 1 : 0;
   uint8_t foreground = c->foreground ? 1 : 0;
   uint8_t logEnabled = c->logEnabled ? 1 : 0;
+  uint8_t background = c->background ? 1 : 0;
 
   if (!cacheWriteString(fp, c->root) || !cacheWriteList(fp, &c->sources) ||
       !cacheWriteList(fp, &c->flags) || !cacheWriteList(fp, &c->headerInternal) ||
@@ -146,8 +148,9 @@ static bool cacheWriteConfig(FILE *fp, const Config *c) {
       !cacheWriteString(fp, c->std) || !cacheWriteString(fp, c->cc) ||
       !cacheWriteString(fp, c->target) || !cacheWriteU8(fp, cleanBuild) ||
       !cacheWriteU8(fp, cleanCompdb) || !cacheWriteU8(fp, progress) ||
-      !cacheWriteU8(fp, progressError) || !cacheWriteU8(fp, foreground) ||
+      !cacheWriteU8(fp, progressError) ||      !cacheWriteU8(fp, foreground) ||
       !cacheWriteU8(fp, logEnabled) ||
+      !cacheWriteU8(fp, background) ||
       !cacheWriteU8(fp, binary) || !cacheWriteString(fp, c->outBinaryName) ||
       !cacheWriteString(fp, c->outBinaryDir) || !cacheWriteString(fp, c->outBuildDir) ||
       !cacheWriteString(fp, c->outCompileCommands) || !cacheWriteString(fp, c->outLibName) ||
@@ -172,7 +175,7 @@ static bool cacheWriteConfig(FILE *fp, const Config *c) {
 
 static bool cacheReadConfig(FILE *fp, Config *c) {
   uint8_t cleanBuild = 0, cleanCompdb = 0, progress = 0, progressError = 0, foreground = 0;
-  uint8_t binary = 1, logEnabled = 0;
+  uint8_t binary = 1, logEnabled = 0, background = 0;
   uint8_t libRequested = 0, libStatic = 0, libShared = 0, packRequested = 0, langCpp = 0;
   uint32_t embCount = 0;
 
@@ -185,6 +188,7 @@ static bool cacheReadConfig(FILE *fp, Config *c) {
       !cacheReadU8(fp, &cleanCompdb) || !cacheReadU8(fp, &progress) ||
       !cacheReadU8(fp, &progressError) || !cacheReadU8(fp, &foreground) ||
       !cacheReadU8(fp, &logEnabled) ||
+      !cacheReadU8(fp, &background) ||
       !cacheReadU8(fp, &binary) ||
       !cacheReadString(fp, c->outBinaryName, sizeof(c->outBinaryName)) ||
       !cacheReadString(fp, c->outBinaryDir, sizeof(c->outBinaryDir)) ||
@@ -217,6 +221,7 @@ static bool cacheReadConfig(FILE *fp, Config *c) {
   c->progressErrorAlways = progressError != 0;
   c->foreground = foreground != 0;
   c->logEnabled = logEnabled != 0;
+  c->background = background != 0;
   c->binary = binary != 0;
   c->libRequested = libRequested != 0;
   c->libStatic = libStatic != 0;

@@ -162,7 +162,9 @@ bool wsMapHeaders(const char *root, const char *value, bool global, const char *
 bool wsMapList(const char *root, const char *value, bool headersForm, char *out, size_t n);
 bool wsMarkNeeded(const WsModel *m, int idx, unsigned char *needed, unsigned char *visiting);
 void wsModelFree(WsModel *m);
-bool wsModelLoad(const char *wsDir, WsModel *m, const char **wsNameOut, bool cacheWrite);
+bool wsBackgroundPeek(const char *wsDir);
+bool wsModelLoad(const char *wsDir, WsModel *m, const char **wsNameOut, bool cacheWrite,
+                  bool spawnPending);
 bool wsParse(WsModel *m, const char *path);
 bool wsProjectArchiveOnly(const WsProject *p);
 int wsRelease(WsModel *m, int jobs, const char *wsDir);

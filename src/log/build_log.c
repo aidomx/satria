@@ -1,5 +1,8 @@
 #include "build_log.h"
 #include <stdio.h>
+#ifndef _WIN32
+#include <signal.h>
+#endif
 #include <stdlib.h>
 #include <string.h>
 #ifdef _WIN32
@@ -88,6 +91,8 @@ void buildLogBegin(void) {
   if (pid < 0) { close(original); close(p[0]); close(p[1]); return; }
   if (pid == 0) {
     close(p[1]);
+    /* Lihat report_blob.c: relay mengabaikan SIGINT agar tidak mati di tengah build. */
+    signal(SIGINT, SIG_IGN);
     relayRun(p[0], original);
   }
   close(p[0]);

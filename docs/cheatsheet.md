@@ -91,6 +91,37 @@ satria profile binary=. jobs=4 --report profile.md
 - TTY: ringkasan singkat. Pipe (`> profile.md`): laporan rinci.
 - `--report FILE`: laporan rinci ke file, ringkasan tetap di terminal.
 
+### Background build & watch
+
+Aktifkan di `Buildfile` (atau baris global di `Buildfile.ws`):
+
+```text
+background = true
+```
+
+`satria` / `satria -w` lalu menjalankan build di child terpisah dan langsung
+kembali ke prompt (exit code 0 = "berhasil memulai"); output build masuk ke
+`.satria/background.log`:
+
+```bash
+satria                     # build berjalan di background
+satria -w
+satria watch               # pantau: progress -> summary -> keluar
+satria watch --full        # stream background.log live (tail -f)
+satria -w watch [--full]   # sama untuk workspace
+```
+
+- Run yang sudah no-op (tidak ada yang dikerjakan) dijawab langsung di
+  terminal oleh jalur router/fast-state — tanpa child, tanpa output kosong;
+  exit 0 = "berhasil memulai" hanya saat build benar-benar jalan di background.
+- Watcher keluar `0` = success, `1` = failed; saat selesai otomatis cetak
+  Build Summary (pola `> Summary :`).
+- Build ganda ditolak: `Error: Background build is already running (PID: N).
+  Use 'satria watch' to monitor.`
+- Ctrl+C di watch hanya melepas watcher — build tetap jalan (bisa attach
+  ulang kapan saja).
+- `clean` diblokir selama build background berjalan.
+
 ---
 
 # 2. Project Buildfile
@@ -281,6 +312,13 @@ Process/SIGINT:
 
 ```text
 foreground = true
+```
+
+Background build — `background = true` (lihat §1 *Background build & watch*);
+`clean` diblokir selama build background berjalan:
+
+```text
+background = true
 ```
 
 Progress:
