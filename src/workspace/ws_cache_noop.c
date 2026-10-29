@@ -453,6 +453,7 @@ static bool wsCacheVisit(const CsEntry *e, CsOp op, void *ctx) {
 }
 bool wsCacheNoopValid(const WsModel *m) {
   if (!wsRouterValidate()) return false; /* router opts.cache dibaca lebih dulu */
+  profMark("gate-router"); /* profil */
   /* Metadata artefak (design/startup.md §9): artefak/input release hilang atau
      berubah -> batal no-op SEBELUM membaca fingerprint. */
   if (!artifactCacheValid()) {
@@ -463,14 +464,17 @@ bool wsCacheNoopValid(const WsModel *m) {
   if (stat(WS_CACHE_FP, &fsb) != 0) return false;
   struct stat ssb;
   if (stat(WS_CACHE_SOURCES, &ssb) != 0) return false;
+  profMark("gate-artifact"); /* profil */
   WsCacheMap map = {0};
   if (!wsCacheLoadMap(&map)) {
     wsCacheMapFree(&map);
     return false;
   }
+  profMark("gate-map"); /* profil */
   /* Fast path (§4): semua baris P + stat cocok -> selesai tanpa membuka
      fingerprint.cache. Menolak di sini bukan vonis — jalur penuh menilai. */
   int pfast = wsCachePFast(&map, wsCacheStampNs(&ssb));
+  profMark("gate-pfast"); /* profil */
   if (pfast >= 0) {
     if (wsCacheTrace())
       fprintf(stderr, "satria cache: P-fast %s (checked=%zu)\n",

@@ -316,6 +316,7 @@ static int wsRunCore(const char *cmd, int jobs, const char *only, const char *re
   if (strcmp(cmd, "build") == 0 && wsCacheEnabled() && !(only && *only) &&
       !(releaseSel && *releaseSel)) {
     bool hit = wsCacheNoopValid(&m);
+    profMark("ws-gate"); /* profil: validasi no-op (map+stat+wajib-hash) */
     const char *rs = getenv("SATRIA_STATUS");
     if (rs && *rs && strcmp(rs, "0") != 0)
       fprintf(stderr, "satria status: mode=workspace gate=%s\n", hit ? "valid" : "cold");
@@ -327,6 +328,7 @@ static int wsRunCore(const char *cmd, int jobs, const char *only, const char *re
         reportBlobShow();
       else
         printf("STATUS\n  > Nothing to build\n  > Cache valid: %s\n", WS_CACHE_FP);
+      profMark("ws-gateshow"); /* profil: putar/tulis ringkasan no-op */
       wsModelFree(&m);
       return 0;
     }

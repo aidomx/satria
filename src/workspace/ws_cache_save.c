@@ -7,11 +7,15 @@
 #include "../cache/artifact.h"
 #include "../cache/router.h"
 #include "../cache/state_blob.h"
+#include "../prof/prof.h" /* profMark: sub-fase ws-cachesave (audit overhead) */
+#include <errno.h> /* wsCacheAddDepFile: ENOENT membedakan .d hilang dari gagal baca */
 #include <time.h> /* wsNowNs: clock_gettime */
 
 static bool wsCacheAdd(FILE *pf, CsStore *st, uint64_t proj, const char *path, char type);
 static void wsCacheDirOf(const char *path, char *out, size_t n);
-static bool wsCacheAddDepFile(FILE *pf, CsStore *st, uint64_t proj, const char *dfile);
+/* 1 = ok; 0 = file .d tak ada (ENOENT); -1 = gagal baca/parse. Satu fopen
+   menggantikan fsFileExists+fopen (dua syscall path-walk per object). */
+static int wsCacheAddDepFile(FILE *pf, CsStore *st, uint64_t proj, const char *dfile);
 static bool wsCacheAddProjectDeps(FILE *pf, CsStore *st, uint64_t proj, const char *name);
 
 /* Hash isi dari fingerprint.cache sebelumnya (PERF-01). Dipakai ulang hanya
@@ -62,21 +66,21 @@ static void wsCacheDirOf(const char *path, char *out, size_t n) {
   else snprintf(out, n, ".");
 }
 /* Dependensi header dari file .d (hasil -MMD): setiap token sesudah ':' dicatat
-   sebagai entri H, divalidasi seperti sumber. false bila .d tak terbaca. */
-static bool wsCacheAddDepFile(FILE *pf, CsStore *st, uint64_t proj, const char *dfile) {
+   sebagai entri H, divalidasi seperti sumber. 0 = .d tak ada, -1 = gagal. */
+static int wsCacheAddDepFile(FILE *pf, CsStore *st, uint64_t proj, const char *dfile) {
   FILE *f = fopen(dfile, "rb");
-  if (!f) return false;
+  if (!f) return errno == ENOENT ? 0 : -1;
   fseek(f, 0, SEEK_END);
   long n = ftell(f);
   fseek(f, 0, SEEK_SET);
   if (n < 0) {
     fclose(f);
-    return false;
+    return -1;
   }
   char *buf = malloc((size_t)n + 2);
   if (!buf) {
     fclose(f);
-    return false;
+    return -1;
   }
   size_t got = fread(buf, 1, (size_t)n, f);
   fclose(f);
@@ -106,7 +110,17 @@ static bool wsCacheAddDepFile(FILE *pf, CsStore *st, uint64_t proj, const char *
     e.file = csHash(tok);
     e.time = wsCacheStampNs(&sb);
     e.size = (long long)sb.st_size;
-    e.content = wsStartupHash(tok);
+    /* Reuse hash isi dari simpanan sebelumnya bila (time, size) cocok dan
+       tidak racy — sama seperti wsCacheAdd. Header tak berubah tidak dibaca
+       ulang: tiap fopen+read+hash header berbayar ~1.5 ms di mesin dengan
+       stat/path-walk mahal (proot/Termux/LSM), ~44 header = ~60 ms/save. */
+    CsEntry prev;
+    if (g_prevFp && csGet(g_prevFp, proj, e.file, &prev) && prev.time == e.time &&
+        prev.size == e.size && e.time < g_prevFpMtime) {
+      e.content = prev.content; /* metadata cocok & tidak racy: isi tidak berubah */
+    } else {
+      e.content = wsStartupHash(tok);
+    }
     if (!e.content) {
       ok = false;
       break;
@@ -116,7 +130,7 @@ static bool wsCacheAddDepFile(FILE *pf, CsStore *st, uint64_t proj, const char *
     ok = csPut(st, &e);
   }
   free(buf);
-  return ok;
+  return ok ? 1 : -1;
 }
 /* Recursively inspect actual compiler objects. Generated embed objects have no
    compiler depfile; track their output and the generated embedded header. */
@@ -134,7 +148,11 @@ static bool wsCacheAddObjectTree(FILE *pf, CsStore *st, uint64_t proj,
     (*objects)++;
     char dfile[WS_PATH_LEN];
     snprintf(dfile, sizeof(dfile), "%.*s.d", (int)(len - 2), o);
-    if (fsFileExists(dfile)) ok = wsCacheAddDepFile(pf, st, proj, dfile);
+    /* Satu fopen per object: 0 (ENOENT) = .d tak ada -> cabang embedded di
+       bawah; -1 (gagal baca/parse) = save batal konservatif. */
+    int dr = wsCacheAddDepFile(pf, st, proj, dfile);
+    if (dr > 0) ok = true;
+    else if (dr < 0) ok = false;
     else {
       char header[WS_PATH_LEN];
       snprintf(header, sizeof(header), "%s/embedded.h", root);
@@ -302,6 +320,7 @@ static void wsCacheSaveBody(const WsModel *m, const char *wsName) {
     listFree(&files);
   }
   if (ok && fsFileExists("compile_commands.json")) ok = wsCacheAdd(pf, st, wsProj, "compile_commands.json", 'O');
+  profMark("save-walk"); /* profil: stat+hash seluruh entri (sumber/header/objek/output) */
   /* Metadata grup P (§4): stamp per proyek + grup workspace (content = hash
      Buildfile.ws dari entri W). Disimpan SEBELUM commit agar baris P di
      fingerprint.cache memuat <content> <time> <size>. */
@@ -335,6 +354,7 @@ static void wsCacheSaveBody(const WsModel *m, const char *wsName) {
   }
   if (fclose(pf) != 0) ok = false;
   if (ok) ok = csCommit(st);
+  profMark("save-commit"); /* profil: tulis fingerprint.cache */
   /* Gabungkan peta P ke sources.cache tanpa mengubah format SATRIASRC1.
      Tulis atomik: cache lama tidak boleh hilang jika penulisan gagal. */
   if (ok) {
@@ -360,6 +380,7 @@ static void wsCacheSaveBody(const WsModel *m, const char *wsName) {
     if (ok) ok = fsRenameReplace(combined, WS_CACHE_SOURCES);
     if (!ok) remove(combined);
   }
+  profMark("save-merge"); /* profil: gabung baris P ke sources.cache */
   remove(tmpPaths);
   csClose(st);
   if (!ok) {
@@ -392,4 +413,5 @@ static void wsCacheSaveBody(const WsModel *m, const char *wsName) {
       stateBlobProjMeta(WS_COMPDB_GLOBAL, stamps[sn - 1].content, stamps[sn - 1].time);
     artifactCacheSave(); /* flush metadata artefak/input release (§9) */
   }
+  profMark("save-tail"); /* profil: router/opts/state.blob/artifact */
 }
