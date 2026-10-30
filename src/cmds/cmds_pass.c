@@ -128,6 +128,7 @@ int cmdsBuildPassRun(int jobs, Config c, const char *buildfilePath, bool libOnly
   if (!wsModeActive()) cmdsSingleSourcesCacheBegin();
   cmdsCollectSources(&c, &srcs);
   if (!wsModeActive()) cmdsSingleSourcesCacheEnd();
+  profMark("collect"); /* profil: walk sumber (stateWalkDirCached) */
 
   /* Dua sumber yang berbeda tidak boleh memetakan ke object yang sama: itu
      akan menimpa object diam-diam (design/workspace.md: nama output yang

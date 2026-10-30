@@ -27,6 +27,7 @@
 #include "../portability.h"
 #include "../util.h"
 #include "cmds_internal.h"
+#include "../prof/prof.h" /* profMark: audit overhead ws-faststate */
 #include "../cache/state_blob.h"
 #include <stdarg.h>
 
@@ -301,6 +302,7 @@ static bool wsFastStateValidLib(const char *buildfilePath, const char *cwd) {
   LibStampRec *st = NULL;
   int nst = 0;
   if (!libCacheLoad(&m, &st, &nst)) return false;
+  profMark("fs-load"); /* profil: baca lib.cache (meta + daftar stamp) */
   const char *want = buildfilePath && *buildfilePath ? buildfilePath : "Buildfile";
   if (strcmp(m.cwd, cwd) != 0 || !m.buildfile[0] || strcmp(m.buildfile, want) != 0) {
     libCacheMetaFree(&m);
@@ -322,6 +324,7 @@ static bool wsFastStateValidLib(const char *buildfilePath, const char *cwd) {
     ok = cmdsStateEntryFresh(line);
   }
   free(st);
+  profMark("fs-stamps"); /* profil: loop stat/hash stamp fase library */
   if (!ok) {
     libCacheMetaFree(&m);
     return false;
@@ -350,6 +353,7 @@ bool wsFastStateValid(const char *buildfilePath, bool libOnly) {
   /* Router (opts.cache) dibaca lebih dulu: cache yang dirutekan hilang /
      kosong -> batal cepat tanpa memuat state (design/startup.md §4). */
   if (!optsRouterValidate()) return false;
+  profMark("fs-router"); /* profil: validasi router opts.cache */
   /* Fase library kini dari caches/lib.cache (design/startup.md §3). */
   if (libOnly) return wsFastStateValidLib(buildfilePath, cwd);
   const char *proj = cmdsStateWsProject();
@@ -373,6 +377,7 @@ bool wsFastStateValid(const char *buildfilePath, bool libOnly) {
   }
 
   List libs = {0};
+  profMark("fs-load"); /* profil: baca blob ws.state + parse header */
   while (ok && stateBufGets(tb, tn, &tp, line, sizeof(line))) {
     char kind = line[0];
     if (kind == 'L') {
@@ -384,6 +389,7 @@ bool wsFastStateValid(const char *buildfilePath, bool libOnly) {
     if (kind == 'F' || kind == 'O' || kind == 'I' || kind == 'D' || kind == 'X') ok = cmdsStateEntryFresh(line);
   }
   free(tb);
+  profMark("fs-stamps"); /* profil: loop stat/hash stamp fase binary */
   if (!ok) {
     listFree(&libs);
     return false;

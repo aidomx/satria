@@ -25,6 +25,41 @@ static CsStore *g_prevFp = NULL;
 static long long g_prevFpMtime = 0;
 static void wsCacheSaveBody(const WsModel *m, const char *wsName);
 
+/* Audit save-walk (SATRIA_PROFILE): akumulasi ms baca .d / stat header /
+   hash header agar komposisi save-walk terpetakan tanpa 43+ penanda. */
+static double g_aDRead = 0, g_aHStat = 0, g_aHHash = 0;
+static int g_aD = 0, g_aH = 0, g_aHHashed = 0;
+static double wsNowMs(void) {
+  struct timespec t;
+  clock_gettime(CLOCK_MONOTONIC, &t);
+  return t.tv_sec * 1000.0 + t.tv_nsec / 1e6;
+}
+
+/* Stamp input (sumber/header/direktori/Buildfile) lewat memo stat: jalur
+   fast-state & validasi sudah men-stat path yang sama di run ini, dan input
+   tidak ditulis oleh build — audit 29/10 menunjukkan path-walk ~300 µs/stat,
+   jadi save-walk membayar statist yang sama 2-3 kali per run. Output ('O')
+   tidak memakai memo karena ditulis di tengah run (bisa basi).
+   Windows: memo memakai epoch fsStampNsSize (FILETIME) sedangkan gate
+   membandingkan dengan wsCacheStampNs (st_mtime) — campur epoch membuat
+   stamp fingerprint selalu bentrok, jadi tetap stat langsung di sana. */
+static bool wsCacheInputStamp(const char *path, long long *mtimeNs, long long *size) {
+#if defined(_WIN32)
+  struct stat sb;
+  if (stat(path, &sb) != 0) return false;
+  *mtimeNs = wsCacheStampNs(&sb);
+  *size = (long long)sb.st_size;
+  return true;
+#else
+  int64_t m = -1;
+  long long s = -1;
+  if (!cmdsStatCached(path, &m, &s)) return false;
+  *mtimeNs = (long long)m;
+  *size = s;
+  return true;
+#endif
+}
+
 static bool wsCacheAdd(FILE *pf, CsStore *st, uint64_t proj, const char *path, char type) {
   /* Outputs belong to the workspace as a whole: project-specific discovery
      and the final bin/lib scan may encounter the same physical output.
@@ -35,16 +70,23 @@ static bool wsCacheAdd(FILE *pf, CsStore *st, uint64_t proj, const char *path, c
     if (csGet(st, proj, csHash(path), &existing)) return true;
   }
   struct stat sb;
-  if (stat(path, &sb) != 0) return false;
+  long long mtimeNs = 0, fsize = 0;
+  if (type == 'O') {
+    if (stat(path, &sb) != 0) return false; /* output: stat segar, jangan memo */
+    mtimeNs = wsCacheStampNs(&sb);
+    fsize = (long long)sb.st_size;
+  } else if (!wsCacheInputStamp(path, &mtimeNs, &fsize)) {
+    return false;
+  }
   CsEntry e = {0}; /* wajib: payload harus NULL — csPut menyalinnya (strdup) */
   e.proj = proj;
   e.file = csHash(path);
-  e.time = wsCacheStampNs(&sb);
+  e.time = mtimeNs;
   if (type == 'D') {
     e.size = 0;
     e.content = 0;
   } else {
-    e.size = (long long)sb.st_size;
+    e.size = fsize;
     CsEntry prev;
     if (g_prevFp && csGet(g_prevFp, proj, e.file, &prev) && prev.time == e.time &&
         prev.size == e.size && e.time < g_prevFpMtime) {
@@ -68,6 +110,7 @@ static void wsCacheDirOf(const char *path, char *out, size_t n) {
 /* Dependensi header dari file .d (hasil -MMD): setiap token sesudah ':' dicatat
    sebagai entri H, divalidasi seperti sumber. 0 = .d tak ada, -1 = gagal. */
 static int wsCacheAddDepFile(FILE *pf, CsStore *st, uint64_t proj, const char *dfile) {
+  double t0 = wsNowMs();
   FILE *f = fopen(dfile, "rb");
   if (!f) return errno == ENOENT ? 0 : -1;
   fseek(f, 0, SEEK_END);
@@ -84,6 +127,8 @@ static int wsCacheAddDepFile(FILE *pf, CsStore *st, uint64_t proj, const char *d
   }
   size_t got = fread(buf, 1, (size_t)n, f);
   fclose(f);
+  g_aDRead += wsNowMs() - t0;
+  g_aD++;
   buf[got] = '\0';
   for (size_t i = 0; i + 1 < got; i++) /* sambung baris: backslash+newline -> spasi */
     if (buf[i] == '\\' && (buf[i + 1] == '\n' || buf[i + 1] == '\r')) {
@@ -100,16 +145,20 @@ static int wsCacheAddDepFile(FILE *pf, CsStore *st, uint64_t proj, const char *d
     if (!tok[0]) continue;
     CsEntry probe;
     if (csGet(st, proj, csHash(tok), &probe)) continue; /* sudah tercatat */
-    struct stat sb;
-    if (stat(tok, &sb) != 0) {
+    g_aH++;
+    double ts0 = wsNowMs();
+    long long hm = 0, hsz = 0;
+    bool hok = wsCacheInputStamp(tok, &hm, &hsz);
+    g_aHStat += wsNowMs() - ts0;
+    if (!hok) {
       ok = false;
       break;
     }
     CsEntry e = {0};
     e.proj = proj;
     e.file = csHash(tok);
-    e.time = wsCacheStampNs(&sb);
-    e.size = (long long)sb.st_size;
+    e.time = hm;
+    e.size = hsz;
     /* Reuse hash isi dari simpanan sebelumnya bila (time, size) cocok dan
        tidak racy — sama seperti wsCacheAdd. Header tak berubah tidak dibaca
        ulang: tiap fopen+read+hash header berbayar ~1.5 ms di mesin dengan
@@ -119,7 +168,10 @@ static int wsCacheAddDepFile(FILE *pf, CsStore *st, uint64_t proj, const char *d
         prev.size == e.size && e.time < g_prevFpMtime) {
       e.content = prev.content; /* metadata cocok & tidak racy: isi tidak berubah */
     } else {
+      double th0 = wsNowMs();
       e.content = wsStartupHash(tok);
+      g_aHHash += wsNowMs() - th0;
+      g_aHHashed++;
     }
     if (!e.content) {
       ok = false;
@@ -236,6 +288,8 @@ void wsCacheSave(const WsModel *m, const char *wsName) {
   struct stat pfs;
   g_prevFp = NULL;
   g_prevFpMtime = 0;
+  g_aDRead = g_aHStat = g_aHHash = 0;
+  g_aD = g_aH = g_aHHashed = 0;
   if (stat(WS_CACHE_FP, &pfs) == 0) {
     g_prevFpMtime = wsCacheStampNs(&pfs);
     g_prevFp = csOpen(WS_CACHE_FP);
@@ -321,6 +375,10 @@ static void wsCacheSaveBody(const WsModel *m, const char *wsName) {
   }
   if (ok && fsFileExists("compile_commands.json")) ok = wsCacheAdd(pf, st, wsProj, "compile_commands.json", 'O');
   profMark("save-walk"); /* profil: stat+hash seluruh entri (sumber/header/objek/output) */
+  if (profOn())
+    fprintf(stderr,
+            "[save-walk] .d: %d file %.1f ms | header: %d stat %.1f ms, %d hash ulang %.1f ms\n",
+            g_aD, g_aDRead, g_aH, g_aHStat, g_aHHashed, g_aHHash);
   /* Metadata grup P (§4): stamp per proyek + grup workspace (content = hash
      Buildfile.ws dari entri W). Disimpan SEBELUM commit agar baris P di
      fingerprint.cache memuat <content> <time> <size>. */
@@ -391,7 +449,9 @@ static void wsCacheSaveBody(const WsModel *m, const char *wsName) {
   } else {
     remove(".satria/caches/paths.cache"); /* bersihkan artefak legacy */
     wsRouterRecord();
+    profMark("tail-router"); /* profil: tulis ulang router.cache */
     if (sn > 0) wsOptsMetaSave(stamps, sn); /* stamp grup di opts.cache (§4) */
+    profMark("tail-opts"); /* profil: stamp grup di opts.cache */
     /* Metadata grup P seragam (§4): deps/embed/lib memakai content/time/skema
        yang sama dengan baris P di fingerprint.cache & opts.cache. Satu
        buka+tulis per file untuk SEMUA grup (batch) — loop per grup dulu
@@ -407,11 +467,13 @@ static void wsCacheSaveBody(const WsModel *m, const char *wsName) {
       }
       csProjMetaStampN(projs, contents, times, sn);
     }
+    profMark("tail-stamp"); /* profil: 4 cache file (deps/embed/fp/lib) */
     /* Grup CompDB global di state.cache (__satria_compdb__) ikut distamp
        dengan content/time grup workspace — penutup terakhir tanpa P meta. */
     if (sn > 0 && stamps[sn - 1].proj == wsProj)
       stateBlobProjMeta(WS_COMPDB_GLOBAL, stamps[sn - 1].content, stamps[sn - 1].time);
     artifactCacheSave(); /* flush metadata artefak/input release (§9) */
+    profMark("tail-artifact"); /* profil: artifact.cache */
   }
   profMark("save-tail"); /* profil: router/opts/state.blob/artifact */
 }

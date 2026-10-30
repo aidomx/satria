@@ -2,6 +2,7 @@
 #include "opts_internal.h"
 #include "../cmds/cmds_internal.h"
 #include "../portability.h"
+#include "../prof/prof.h" /* profMark: audit overhead fs-router */
 #include "../util.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -57,6 +58,7 @@ bool optsRouterValidate(void) {
   names.proj = proj;
   bool scanned = csForEach(st, optNameVisit, &names);
   csClose(st);
+  profMark("rt-scan"); /* profil: csOpen+scrap opts.cache */
   if (!scanned) return true; /* rusak: serahkan ke jalur normal */
   if (!names.n && !names.hasSource) return true; /* proyek belum dirutekan */
   long long mt = 0, sz = 0;
@@ -72,6 +74,7 @@ bool optsRouterValidate(void) {
     snprintf(path, sizeof(path), ".satria/caches/%s.cache", names.names[i]);
     if (!optsCacheHasGroup(path, proj)) return false;
   }
+  profMark("rt-groups"); /* profil: buka tiap cache dirutekan utk cek grup */
   return true;
 }
 

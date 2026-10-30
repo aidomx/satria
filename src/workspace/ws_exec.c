@@ -2,6 +2,7 @@
  * Bagian dari modul workspace (src/workspace/). Lihat ws_internal.h.
  */
 #include "ws_internal.h"
+#include "../prof/prof.h" /* profMark: audit overhead */
 #include "../background.h" /* bgProgress: progres watcher (design/background.md) */
 
 
@@ -107,14 +108,17 @@ int wsRunProject(const WsModel *m, const char *name, const char *cmd, int jobs,
    * Previously a cache miss constructed the same Config twice. */
   Config c;
   bool configReady = false;
+  profMark("cfg-pre"); /* profil: sebelum perakitan Config */
   if (!wsProjectArchiveOnly(p)) {
     if (!wsBuildConfig(m, idx, &c)) {
       cmdsStateSetWsProject("");
       return 1;
     }
     configReady = true;
+    profMark("cfg-build"); /* profil: perakitan Config murni (tanpa prune) */
     if (libOnly) wsPruneOrphanSources(&c);
   }
+  profMark("ws-config"); /* profil: delta dari cfg-build = prune .d orphan */
 
   /* Fast no-op per fase — padanan bagian atas cmdBuildEx. Label META
      stabil per proyek (file sintesis sudah tidak ada; label lama berupa
@@ -126,11 +130,13 @@ int wsRunProject(const WsModel *m, const char *name, const char *cmd, int jobs,
     cmdsStateSetWsProject("");
     return 0;
   }
+  profMark("ws-faststate"); /* profil: validasi fast-state per fase */
 
   if ((!configReady && !wsBuildConfig(m, idx, &c)) || !resolveCompiler(&c)) {
     cmdsStateSetWsProject("");
     return 1;
   }
+  profMark("ws-resolvecc"); /* profil: resolveCompiler (probe compiler) */
   procSetForeground(jobs > 1 ? false : c.foreground);
 
   /* pack.* diabaikan (v1): proyek kemasan tanpa arsip & tanpa binary =

@@ -115,8 +115,17 @@ static void embWriteHexBytes(FILE *out, FILE *in, long long *total) {
   fwrite(ob, 1, op, out);
 }
 
+/* Kapasitas baris stamp: kasus terburuk format embStampLine adalah
+   archivePath (MAX_PATH+192) + extract (MAX_PATH) + key/type/name + sym 512
+   + angka = ±4107 byte. Buffer lama 4096 memotong baris itu senyap — stamp
+   kehilangan entri dan perbandingan jadi tidak dapat dipercaya. Jaga selalu
+   di atas maksimum tersebut. */
+#define EMB_STAMP_LINE 8192
+
 /* Baris stamp satu entri: identitas + metadata + ukuran/mtime arsip. Dipakai
-   untuk mendeteksi bahwa codegen tidak perlu diulang (lihat embStampSkip). */
+   untuk mendeteksi bahwa codegen tidak perlu diulang (lihat embStampSkip).
+   false bila arsip tak terbaca ATAU baris tidak muat (tanpa truncation
+   senyap: pemanggil membatalkan skip, codegen diulang — aman). */
 static bool embStampLine(const EmbeddedEntry *e, char *line, size_t cap) {
   long long sz = fsFileSize(e->archivePath);
   int64_t mt = fsMTimeNs(e->archivePath);
@@ -128,9 +137,9 @@ static bool embStampLine(const EmbeddedEntry *e, char *line, size_t cap) {
   const char *key = e->key[0] ? e->key : e->name;
   const char *type = e->type[0] ? e->type
                      : ((e->usePrebuilt || e->src[0]) ? "archive" : "asset");
-  snprintf(line, cap, "e\t%s\t%lld\t%lld\t%s\t%s\t%s\t%s\t%s\n", e->archivePath, sz,
-           (long long)mt, key, type, name, e->extract, sym);
-  return true;
+  int w = snprintf(line, cap, "e\t%s\t%lld\t%lld\t%s\t%s\t%s\t%s\t%s\n", e->archivePath, sz,
+                   (long long)mt, key, type, name, e->extract, sym);
+  return w > 0 && (size_t)w < cap; /* w >= cap: terpotong -> gagal, jangan cocokkan */
 }
 
 /* ---- Mode codegen ----
@@ -265,7 +274,7 @@ static bool embStampSkip(const Config *c, const char *path, const char *stampPat
     return false;
   }
   bool ok = true;
-  char line[4096], cur[4096];
+  char line[EMB_STAMP_LINE], cur[EMB_STAMP_LINE];
   for (int i = 0; i < c->embCount && ok; i++) {
     const EmbeddedEntry *e = &c->emb[i];
     if (!e->enable) continue;
@@ -322,7 +331,7 @@ bool emitEmbeddedSource(const Config *c, bool *changed) {
 
     /* stat dicatat SEBELUM dipakai: bila arsip berubah sesudahnya, stamp tidak
        cocok di run berikutnya dan codegen diulang (aman). */
-    char sline[4096];
+    char sline[EMB_STAMP_LINE];
     if (embStampLine(e, sline, sizeof(sline)) && sigLen + strlen(sline) < sizeof(sigBuf)) {
       memcpy(sigBuf + sigLen, sline, strlen(sline) + 1);
       sigLen += strlen(sline);

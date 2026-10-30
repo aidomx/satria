@@ -17,7 +17,7 @@
  * bahwa ada yang terpotong.
  */
 
-#define PROF_MAX 24
+#define PROF_MAX 96 /* sub-fase audit (walk-*, tail-*, gate-*, cfg-*, fs-*) menambah penanda per blok */
 /*#define _POSIX_C_SOURCE 199309L*/
 
 typedef struct {

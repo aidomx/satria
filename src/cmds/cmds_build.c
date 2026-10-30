@@ -11,6 +11,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h> /* trace audit cmdsCollectSources */
 #ifndef _WIN32
 #include <unistd.h>
 #endif
@@ -170,7 +171,10 @@ void statPlanBuild(StatPlan *p, const Config *c, const List *srcs) {
     p->path[i] = src;
     long long sz = 0;
     int64_t m = -1;
-    fsStampNsSize(src, &m, &sz); /* gagal -> -1, semantik fsMTimeNs */
+    /* Sumber: memo stat (jalur fast-state sudah men-stat path yang sama run
+       ini); epoch identik dengan fsStampNsSize. Object tetap fsStampNsSize
+       langsung — output ditulis build, memo bisa basi. */
+    if (!cmdsStatCached(src, &m, &sz)) fsStampNsSize(src, &m, &sz); /* gagal -> -1, semantik lama */
     p->srcM[i] = m;
 
     char objPath[MAX_PATH];
@@ -327,6 +331,11 @@ bool cmdsCheckObjectCollisions(const Config *c, const List *srcs) {
  * Dipakai cmdsBuildPassRun dan jalur CompDB workspace (wsCompdbRefresh).
  */
 void cmdsCollectSources(const Config *c, List *out) {
+  /* Trace audit (SATRIA_PROFILE): durasi per entri sources — col timestamp
+     diselaraskan dengan [walk] (keduanya CLOCK_MONOTONIC ms absolut). */
+  bool trace = profOn();
+  struct timespec tc0;
+  if (trace) clock_gettime(CLOCK_MONOTONIC, &tc0);
   listReserve(out, 1024);
   for (int i = 0; i < c->sources.count; i++) {
     const char *entry = c->sources.items[i];
@@ -335,10 +344,24 @@ void cmdsCollectSources(const Config *c, List *out) {
         (strcmp(entry + elen - 2, ".c") == 0 || strcmp(entry + elen - 2, ".cpp") == 0) &&
         fsFileExists(entry)) {
       listAdd(out, entry);
+      if (trace) {
+        struct timespec tc1;
+        clock_gettime(CLOCK_MONOTONIC, &tc1);
+        fprintf(stderr, "[collect] t=%.0f file=%s\n", tc1.tv_sec * 1000.0 + tc1.tv_nsec / 1e6,
+                entry);
+      }
       continue;
     }
     stateWalkDirCached(entry, ".c", out);
     stateWalkDirCached(entry, ".cpp", out);
+    if (trace) {
+      struct timespec tc1;
+      clock_gettime(CLOCK_MONOTONIC, &tc1);
+      fprintf(stderr, "[collect] t=%.0f dir=%s %.2f ms\n",
+              tc1.tv_sec * 1000.0 + tc1.tv_nsec / 1e6, entry,
+              (tc1.tv_sec - tc0.tv_sec) * 1000.0 + (tc1.tv_nsec - tc0.tv_nsec) / 1e6);
+      clock_gettime(CLOCK_MONOTONIC, &tc0);
+    }
   }
   /* Source embed hasil codegen: berada di outBuildDir (bukan root sumber),
      jadi ditambahkan eksplisit — ikut fingerprint, decide, compdb, link,

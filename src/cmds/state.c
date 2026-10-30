@@ -3,7 +3,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include <time.h> /* trace audit stateWalkDirCached */
 #include "../portability.h"
+#include "../prof/prof.h" /* profMark: sub-fase walk (audit overhead) */
 #include "../util.h"
 #include "../cache/cache_store.h"
 #include "../cache/router.h"
@@ -358,14 +360,33 @@ void stateWalkDirStamps(const char *dir, const char *ext, List *out) {
 }
 
 void stateWalkDirCached(const char *dir, const char *ext, List *out) {
+  /* Trace audit (SATRIA_PROFILE): durasi + jalur per (dir,ext) — label profMark
+     tidak bisa memuat path, jadi dicetak langsung. */
+  struct timespec tw0;
+  bool trace = profOn();
+  if (trace) clock_gettime(CLOCK_MONOTONIC, &tw0);
+#define WALK_TRACE(branch)                                                                    \
+  do {                                                                                        \
+    if (trace) {                                                                              \
+      struct timespec tw1;                                                                    \
+      clock_gettime(CLOCK_MONOTONIC, &tw1);                                                   \
+      double now = tw1.tv_sec * 1000.0 + tw1.tv_nsec / 1e6;                                   \
+      double ms = (tw1.tv_sec - tw0.tv_sec) * 1000.0 + (tw1.tv_nsec - tw0.tv_nsec) / 1e6;      \
+      fprintf(stderr, "[walk] t=%.0f %s ext=%s -> %s %.2f ms\n", now, dir, ext, branch, ms); \
+    }                                                                                         \
+  } while (0)
   if ((!sourceCacheEnabled) || !dir || !ext || hasSpace(dir) || hasSpace(ext)) {
     walkDir(dir, ext, out);
+    profMark("walk-fallback"); /* profil: jalur tanpa cache */
+    WALK_TRACE("fallback");
     return;
   }
   srcLoad();
   SrcRec *r = srcRecFind(dir, ext);
   if (r && srcRecValid(r)) {
     for (int i = 0; i < r->files.count; i++) listAdd(out, r->files.items[i]);
+    profMark("walk-hit"); /* profil: record valid, salin dari memori */
+    WALK_TRACE("hit");
     return;
   }
   if (r) {
@@ -382,6 +403,9 @@ void stateWalkDirCached(const char *dir, const char *ext, List *out) {
   }
   srcWalk(r, dir, out);
   srcSave();
+  profMark("walk-miss"); /* profil: re-walk + simpan sources.cache */
+  WALK_TRACE("miss");
+#undef WALK_TRACE
 }
 
 static void srcCacheReset(void) {

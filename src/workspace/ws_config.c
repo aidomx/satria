@@ -2,6 +2,7 @@
  * Bagian dari modul workspace (src/workspace/). Lihat ws_internal.h.
  */
 #include "ws_internal.h"
+#include "../prof/prof.h" /* profMark: audit overhead ws-config */
 
 static void wsApplyLine(const WsModel *m, const WsProject *p, Config *c, const char *key,
                         const char *value, bool global);
@@ -268,6 +269,7 @@ bool wsBuildConfig(const WsModel *m, int idx, Config *c) {
     }
   }
   wsApplyCdeps(m, p, c);
+  profMark("cfg-lines"); /* profil: loop baris Buildfile.ws + cdeps */
 
   const char *root = p->root[0] ? p->root : ".";
   /* Root proyek anggota -> projRoot (basis path sumber/object). `root` tetap
@@ -318,5 +320,6 @@ bool wsBuildConfig(const WsModel *m, int idx, Config *c) {
             sizeof(char *) * (size_t)(c->headerPublic.count - 1));
     c->headerPublic.count--;
   }
+  profMark("cfg-final"); /* profil: configFinalize + default header/sources */
   return true;
 }

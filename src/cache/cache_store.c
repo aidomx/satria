@@ -539,8 +539,23 @@ bool csProjMetaStampFileN(const char *path, const uint64_t *projs,
   CsStore *st = csOpen(path);
   if (!st) return false;
   bool ok = true;
-  for (int i = 0; ok && i < n; i++)
-    csProjMetaSet(st, projs[i], contents[i], times[i], (long long)csCountProj(st, projs[i]));
+  for (int i = 0; i < n; i++) {
+    uint64_t c0 = 0;
+    long long t0 = 0, sz0 = 0;
+    long long cnt = (long long)csCountProj(st, projs[i]);
+    bool have = csProjMetaGet(st, projs[i], &c0, &t0, &sz0);
+    /* content & size sudah cocok: jangan disentuh — `time` (stempel ns save)
+       tidak pernah dibaca konsumen mana pun (satu-satunya pembaca baris P,
+       gate no-op di ws_cache_noop, hanya membandingkan content+size). Tanpa
+       jaga ini, 4 cache ditulis ulang penuh (open+commit+rename) tiap run. */
+    if (have && c0 == contents[i] && sz0 == cnt) continue;
+    /* Grup tanpa entri TIDAK mempunyai baris P (kontrak cache_store.h: "grup
+       lahir bersama entri pertamanya") — csCommit memang tak pernah
+       menuliskannya, jadi meta tak akan tersimpan dan store ikut kotor
+       (dirty) tiap run. Lewati: stempel untuk grup kosong memang tak ada. */
+    if (!have && cnt == 0) continue;
+    csProjMetaSet(st, projs[i], contents[i], times[i], cnt);
+  }
   ok = ok && csCommit(st);
   csClose(st);
   return ok;
