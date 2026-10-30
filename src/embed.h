@@ -17,7 +17,8 @@
  * embedded.c dikompilasi sebagai source biasa bersama source proyek
  * (fingerprint, decide, -jN, .d closure, ikut kemasan library). Jalur
  * `ld -r -b binary` dan fallback per-entrilama SUDAH DIHAPUS — tidak ada
- * simbol linker eksotis; MSVC, GCC, dan Clang hanya melihat array uint8_t.
+ * simbol linker eksotis. Payload: array uint8_t (mode carray, MSVC) atau
+ * `.incbin` lewat __asm__ (mode incbin, GCC/Clang  design/embedded.md).
  *
  * Keduanya diregenerasi berbasis KONTEN, bukan mtime: tulis .tmp, bandingkan
  * byte dengan file lama, identik -> buang temp (mtime tetap), beda -> rename

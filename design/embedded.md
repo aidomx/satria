@@ -66,7 +66,7 @@ Menambah tipe baru di masa depan (json, teks, font, ...) = menambah nilai `type`
 
 Satria menangani embedded dalam 4 langkah yang terintegrasi dengan pipeline yang sudah ada:
 
-1. **Fase Parse & Generate:** saat membaca `Buildfile` dan entri embedded aktif, satria men-generate `embedded.c` (array byte + tabel `getEmbed()`) dan `embedded.h`. **Regenerasi berbasis konten, bukan mtime** — lihat seksi *Regenerasi Content-Based* di bawah.
+1. **Fase Parse & Generate:** saat membaca `Buildfile` dan entri embedded aktif, satria men-generate `embedded.c` (payload + tabel `getEmbed()`; payload lewat `.incbin` untuk GCC/Clang, array byte untuk MSVC  lihat *Mode Codegen*) dan `embedded.h`. **Regenerasi berbasis konten, bukan mtime** — lihat seksi *Regenerasi Content-Based* di bawah.
 2. **Fase Kompilasi:** `embedded.c` diterbitkan **sebelum kompilasi dimulai** (sama seperti penerbitan `embedded.h`/`version.h` hari ini di `commands.c`) lalu diperlakukan persis seperti source biasa: masuk daftar source, ikut fingerprint, menghasilkan object dengan compiler yang sama (GCC/Clang/MSVC).
 3. **Fase Linking:** object hasil codegen di-link bersama object lain. Pada fase library, object ini ikut dikemas ke `lib*.a` — kasus *"object harus tetap reachable oleh linker"* yang tercatat di `docs/guide/embedded-and-archives.md` **selesai dengan sendirinya** karena object adalah bagian normal dari build.
 4. **Fase Akses:** developer memanggil `getEmbed("key")`.
@@ -86,6 +86,9 @@ Aturan ini wajib agar tidak melanggar filosofi touch-proof satria (lihat `design
 4. Berbeda → rename atomik (`fsRenameReplace`), seperti pola `reportBlob`/`wsCacheSave`.
 
 Akibatnya `touch data.tar` (isi sama) tidak memicu compile ulang maupun relink, dan run berikutnya tetap no-op. Perubahan isi file sumber tetap terekam lewat stamp/fingerprint seperti input biasa.
+
+5. **Stamp (`embedded.stamp`)**: codegen dilewati bila stamp cocok  versi `2`, `gen` (waktu mulai codegen sebelumnya, ns), `mode`, dan per entri: path, ukuran, mtime (ns), key/type/name/extract/sym. Stamp hanya mempercepat keputusan; isi tetap diverifikasi saat codegen dijalankan.
+6. **Aturan racy:** codegen dilewati hanya bila mtime setiap arsip **lebih awal** dari `gen`. Arsip yang berubah dalam detik yang sama dengan codegen tidak boleh dipercaya, jadi codegen diulang. `gen` diambil dari mtime file `.tmp` setelah header ditulis, sehingga domainnya sama dengan mtime arsip.
 
 ## Konfigurasi Buildfile
 
@@ -128,7 +131,7 @@ Tiga nama untuk satu entri (alias, nama entri, key) pada rancangan sebelumnya di
 
 ## Keuntungan Desain Ini
 
-1. **Portabilitas Mutlak:** tidak ada ketergantungan pada fitur linker eksotis. MSVC, GCC, dan Clang mengompilasi array `uint8_t` standar.
+1. **Portabilitas Mutlak:** tidak ada ketergantungan pada fitur linker eksotis. MSVC mengompilasi array `uint8_t` standar; GCC/Clang memakai `.incbin` (lihat *Mode Codegen*) dengan fallback array untuk MSVC.
 2. **Kemudahan Penggunaan (DX):** tanpa simbol linker aneh, tanpa hutan makro — cukup `getEmbed("key")` dengan null-check.
 3. **Fleksibel:** tidak terkunci untuk archive; aset lain cukup menambah nilai `type`.
 4. **Aman (Safe):** pointer `const` + NULL-check mencegah akses data yang tidak tersedia; ukuran eksplisit (`size`) menggantikan pointer arithmetic.
@@ -138,7 +141,62 @@ Tiga nama untuk satu entri (alias, nama entri, key) pada rancangan sebelumnya di
 ## Catatan Skala & Portabilitas
 
 - Array besar (ratusan KB s.d. beberapa MB) aman di GCC/Clang; **MSVC perlu diverifikasi** pada batas ukuran initializer — uji dengan arsip berukuran representatif (bukan hanya fixture KB).
+- Array C berukuran besar mahal: payload 6 MB  ~7,8 s kompilasi GCC; 60 MB  teks C ~300 MB dan gcc kehabisan memori di mesin uji. Untuk GCC/Clang ini ditangani oleh mode `incbin` (lihat *Mode Codegen*).
 - Bila dibutuhkan kelak: strategi chunking (pecahan array per ~64KB) atau fast path `#embed` (C23) dengan fallback ke array generated. Tidak masuk scope v1, tetapi format `Embedded` (pointer + size) sudah mengakomodasi keduanya tanpa mengubah API.
+
+## Mode Codegen
+
+Dua mode menghasilkan API yang sama (`getEmbed`, `getEmbedAt`, struct `Embedded`, simbol `<sym>_start/_end/_len`); konsumen tidak melihat perbedaannya.
+
+| Mode | Dipakai untuk | Payload masuk ke object lewat |
+|---|---|---|
+| `incbin` | GCC dan Clang (default) | assembler: `.incbin` di blok `__asm__` |
+| `carray` | MSVC (wajib), atau bila diminta | array `static const uint8_t` di C |
+
+### Kenapa `.incbin`
+
+Biaya utama array C ada di **kompilasi**, bukan di codegen: gcc harus mem-parse teks C sebesar payload. `.incbin` menyuruh assembler menyalin byte file langsung ke section `.rodata`, tanpa parsing C sama sekali.
+
+| Payload | Mode | Waktu |
+|---|---|---|
+| 6 MB | carray | 7 753 ms |
+| 6 MB | incbin | 24 ms |
+| 60 MB | incbin | 94 ms (objek 60 MB) |
+| 60 MB | carray | ±77 s (estimasi), teks C ~300 MB, gcc OOM di mesin uji |
+
+Shared library tidak menyelesaikan masalah ini: `.so` yang dibangun dari array C punya biaya kompilasi yang sama. Tidak ada shared library dalam desain ini; payload tetap statis di binary.
+
+### Bentuk `embedded.c` (mode incbin)
+
+- Prelude makro: `SATRIA_PFX` (awalan label dari `__USER_LABEL_PREFIX__`, `_` di Mach-O), `SATRIA_SECT` (`.section .rodata`, atau `__TEXT,__const` di Apple), `SATRIA_LONG_DIR` (`.quad` bila `long` 8 byte, `.long` selain itu).
+- Per entri: satu blok `__asm__` berisi `_start:` `.incbin "<path absolut>"` `_pend:` `_end: .byte 0` `_len: .quad _pend - _start`. Nama simbol **sama** dengan mode carray, jadi `embedded.h` tidak berubah.
+- Tabel `embed_table` dibuat non-const dan ukurannya diisi oleh `__attribute__((constructor))` dari `_len`. Dengan begitu ukuran selalu cocok dengan byte yang benar-benar di-assemble, walaupun arsip berubah di antara codegen dan kompilasi.
+- Komentar per entri memuat `size` dan **hash FNV-1a 64 isi arsip**, bukan mtime. Ini menjaga regenerasi berbasis konten (lihat *Regenerasi Content-Based*): `touch` atau pemulihan arsip dengan isi sama tidak mengubah `embedded.c`, sehingga tidak ada kompilasi ulang.
+- Path arsip diubah menjadi absolut (cwd + path relatif, backslash jadi slash). Path yang mengandung `"` atau newline tidak bisa masuk string assembler; dalam kasus itu satria memakai mode carray untuk seluruh proyek.
+
+### Pemilihan mode
+
+1. `compilerIsMSVC(c)` -> `carray` (MSVC tidak punya `.incbin`).
+2. Env `SATRIA_EMBED_MODE=carray` -> `carray`; `=incbin` -> `incbin` (non-MSVC).
+3. Path arsip tidak bisa dijadikan literal assembler -> `carray`.
+4. Selain itu -> `incbin`.
+
+Mode ikut tercatat di stamp (`mode incbin|carray`). Stamp versi `1` (sebelum mode ada) dianggap tidak cocok, sehingga codegen diulang sekali setelah upgrade.
+
+**Catatan env override:** `SATRIA_EMBED_MODE` bukan bagian dari fingerprint. Build tanpa perubahan lewat fast path no-op tidak menjalankan codegen, sehingga mode tidak berubah. Untuk mengganti mode, hapus `build/<proyek>/embedded.*` atau jalankan `clean`. Ini knob pengujian, bukan pengaturan proyek.
+
+### Batasan yang diterima
+
+- Arsip yang berubah **selama** build (antara codegen dan assembler) menghasilkan object dari isi terbaru, dan ukuran di tabel tetap benar karena dari `_len`. Komentar hash di `embedded.c` bisa tertinggal dari isi itu; run berikutnya mendeteksi mismatch lewat stamp dan meregenerasi. Tidak ada keadaan salah yang bertahan.
+- Build MSVC belum diuji di mesin ini (jalur carray tidak berubah).
+
+### Verifikasi
+
+- Dumper yang sama (`getEmbed` -> ukuran + hash isi + sentinel) menghasilkan output identik untuk mode carray dan incbin.
+- Payload 60 MB: cold build sukses, byte yang dibaca identik dengan arsip, perubahan isi (ukuran berbeda) menghasilkan ukuran baru di tabel.
+- `touch` arsip (isi sama): 0 compile.
+- Path dengan spasi: sukses.
+- `tests/unit/embed_stamp_skip.sh` dan seluruh tes unit lulus.
 
 ## Migrasi & Kompatibilitas
 
@@ -157,4 +215,4 @@ Strategi:
 - `bench/ws.sh` 12/12 *in accordance* (skenario `rel` dan `mod` menyentuh embed).
 - `touch` file embed (isi sama) tetap no-op; ubah isi → konsumen direcompile + relink.
 - `embed_use.c` tetap terbangun dan berjalan (fase 1), lalu dimigrasi ke `getEmbed()` (fase 2).
-- Build MSVC/GCC/Clang dengan arsip berukuran representatif menghasilkan binary yang berfungsi.
+- Build MSVC/GCC/Clang dengan arsip berukuran representatif menghasilkan binary yang berfungsi (GCC/Clang: mode incbin; MSVC: mode carray).
