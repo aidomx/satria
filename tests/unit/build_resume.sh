@@ -39,7 +39,7 @@ printf 'int f15(void){return 15+0;}\n' > src/f15.c
 check "B: perbaikan hanya kompilasi source gagal (29 yang sukses dilewati)" "$(grep -c 'OK ' "$W/b2.txt")" "1"
 
 # C. semua compile sukses, link gagal
-mkproj "$W/c"; printf 'int main(void){return g_missing();}\n' > src/main.c
+mkproj "$W/c"; printf 'int g_missing(void);\nint main(void){return g_missing();}\n' > src/main.c
 "$SAT" > "$W/c1.txt" 2>&1 || true
 printf 'int g_missing(void){return 0;}\n' > src/g.c
 "$SAT" > "$W/c2.txt" 2>&1
