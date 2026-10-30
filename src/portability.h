@@ -133,6 +133,12 @@ bool procSpawnDetached(char *const argv[], const char *logPath, int *outPid);
 /* Detik monotonic untuk pengukuran durasi build. */
 double monotonicSeconds(void);
 
+/* Milidetik monotonic — durasi/trace lintas platform (kolom `t=` pada
+   [walk], [collect], dan audit save-walk). PEMAKAIAN WAJIB untuk kode
+   bersama: clock_gettime/CLOCK_MONOTONIC tidak ada di MSVC (C2065),
+   sedangkan QueryPerformanceCounter hanya Windows. Lihat port/port_time.c. */
+double portMonoMs(void);
+
 /* true bila stdout terhubung ke terminal (prompt interaktif & warna).
    Aman di-pipe: false saat output dialihkan ke file/pipe. */
 bool termIsTTY(void);

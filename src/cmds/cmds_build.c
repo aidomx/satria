@@ -332,10 +332,11 @@ bool cmdsCheckObjectCollisions(const Config *c, const List *srcs) {
  */
 void cmdsCollectSources(const Config *c, List *out) {
   /* Trace audit (SATRIA_PROFILE): durasi per entri sources — col timestamp
-     diselaraskan dengan [walk] (keduanya CLOCK_MONOTONIC ms absolut). */
+     diselaraskan dengan [walk] (keduanya ms absolut dari portMonoMs,
+     wrapper monotonic portabel: MSVC tanpa CLOCK_MONOTONIC). */
   bool trace = profOn();
-  struct timespec tc0;
-  if (trace) clock_gettime(CLOCK_MONOTONIC, &tc0);
+  double tc0 = 0;
+  if (trace) tc0 = portMonoMs();
   listReserve(out, 1024);
   for (int i = 0; i < c->sources.count; i++) {
     const char *entry = c->sources.items[i];
@@ -345,22 +346,17 @@ void cmdsCollectSources(const Config *c, List *out) {
         fsFileExists(entry)) {
       listAdd(out, entry);
       if (trace) {
-        struct timespec tc1;
-        clock_gettime(CLOCK_MONOTONIC, &tc1);
-        fprintf(stderr, "[collect] t=%.0f file=%s\n", tc1.tv_sec * 1000.0 + tc1.tv_nsec / 1e6,
-                entry);
+        double tc1 = portMonoMs();
+        fprintf(stderr, "[collect] t=%.0f file=%s\n", tc1, entry);
       }
       continue;
     }
     stateWalkDirCached(entry, ".c", out);
     stateWalkDirCached(entry, ".cpp", out);
     if (trace) {
-      struct timespec tc1;
-      clock_gettime(CLOCK_MONOTONIC, &tc1);
-      fprintf(stderr, "[collect] t=%.0f dir=%s %.2f ms\n",
-              tc1.tv_sec * 1000.0 + tc1.tv_nsec / 1e6, entry,
-              (tc1.tv_sec - tc0.tv_sec) * 1000.0 + (tc1.tv_nsec - tc0.tv_nsec) / 1e6);
-      clock_gettime(CLOCK_MONOTONIC, &tc0);
+      double tc1 = portMonoMs();
+      fprintf(stderr, "[collect] t=%.0f dir=%s %.2f ms\n", tc1, entry, tc1 - tc0);
+      tc0 = portMonoMs();
     }
   }
   /* Source embed hasil codegen: berada di outBuildDir (bukan root sumber),

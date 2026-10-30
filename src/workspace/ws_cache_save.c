@@ -26,14 +26,11 @@ static long long g_prevFpMtime = 0;
 static void wsCacheSaveBody(const WsModel *m, const char *wsName);
 
 /* Audit save-walk (SATRIA_PROFILE): akumulasi ms baca .d / stat header /
-   hash header agar komposisi save-walk terpetakan tanpa 43+ penanda. */
+   hash header agar komposisi save-walk terpetakan tanpa 43+ penanda.
+   Durasi memakai portMonoMs (wrapper monotonic portabel — MSVC tanpa
+   CLOCK_MONOTONIC; lihat port/port_time.c). */
 static double g_aDRead = 0, g_aHStat = 0, g_aHHash = 0;
 static int g_aD = 0, g_aH = 0, g_aHHashed = 0;
-static double wsNowMs(void) {
-  struct timespec t;
-  clock_gettime(CLOCK_MONOTONIC, &t);
-  return t.tv_sec * 1000.0 + t.tv_nsec / 1e6;
-}
 
 /* Stamp input (sumber/header/direktori/Buildfile) lewat memo stat: jalur
    fast-state & validasi sudah men-stat path yang sama di run ini, dan input
@@ -110,7 +107,7 @@ static void wsCacheDirOf(const char *path, char *out, size_t n) {
 /* Dependensi header dari file .d (hasil -MMD): setiap token sesudah ':' dicatat
    sebagai entri H, divalidasi seperti sumber. 0 = .d tak ada, -1 = gagal. */
 static int wsCacheAddDepFile(FILE *pf, CsStore *st, uint64_t proj, const char *dfile) {
-  double t0 = wsNowMs();
+  double t0 = portMonoMs();
   FILE *f = fopen(dfile, "rb");
   if (!f) return errno == ENOENT ? 0 : -1;
   fseek(f, 0, SEEK_END);
@@ -127,7 +124,7 @@ static int wsCacheAddDepFile(FILE *pf, CsStore *st, uint64_t proj, const char *d
   }
   size_t got = fread(buf, 1, (size_t)n, f);
   fclose(f);
-  g_aDRead += wsNowMs() - t0;
+  g_aDRead += portMonoMs() - t0;
   g_aD++;
   buf[got] = '\0';
   for (size_t i = 0; i + 1 < got; i++) /* sambung baris: backslash+newline -> spasi */
@@ -146,10 +143,10 @@ static int wsCacheAddDepFile(FILE *pf, CsStore *st, uint64_t proj, const char *d
     CsEntry probe;
     if (csGet(st, proj, csHash(tok), &probe)) continue; /* sudah tercatat */
     g_aH++;
-    double ts0 = wsNowMs();
+    double ts0 = portMonoMs();
     long long hm = 0, hsz = 0;
     bool hok = wsCacheInputStamp(tok, &hm, &hsz);
-    g_aHStat += wsNowMs() - ts0;
+    g_aHStat += portMonoMs() - ts0;
     if (!hok) {
       ok = false;
       break;
@@ -168,9 +165,9 @@ static int wsCacheAddDepFile(FILE *pf, CsStore *st, uint64_t proj, const char *d
         prev.size == e.size && e.time < g_prevFpMtime) {
       e.content = prev.content; /* metadata cocok & tidak racy: isi tidak berubah */
     } else {
-      double th0 = wsNowMs();
+      double th0 = portMonoMs();
       e.content = wsStartupHash(tok);
-      g_aHHash += wsNowMs() - th0;
+      g_aHHash += portMonoMs() - th0;
       g_aHHashed++;
     }
     if (!e.content) {

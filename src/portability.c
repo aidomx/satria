@@ -6,6 +6,9 @@
  *     spawn shell, job paralel, cpuCount, monotonicSeconds).
  *   - port/port_fs.c   : filesystem (stat/mtime/size, mkdir/remove,
  *     listdir, cwd) + fsNewerThan.
+ *   - port/port_time.c : waktu lintas-platform (portMonoMs — wrapper ms
+ *     monotonic; menggantikan pemakaian langsung CLOCK_MONOTONIC yang tidak
+ *     ada di MSVC).
  * File ini menyimpan util path portabel yang dipakai lintas lapisan.
  * Deklarasi publik semua tetap di portability.h — pemakai tidak berubah.
  */

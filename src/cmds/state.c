@@ -362,16 +362,15 @@ void stateWalkDirStamps(const char *dir, const char *ext, List *out) {
 void stateWalkDirCached(const char *dir, const char *ext, List *out) {
   /* Trace audit (SATRIA_PROFILE): durasi + jalur per (dir,ext) — label profMark
      tidak bisa memuat path, jadi dicetak langsung. */
-  struct timespec tw0;
+  double tw0 = 0; /* trace: ms monotonic (portMonoMs — portabel MSVC) */
   bool trace = profOn();
-  if (trace) clock_gettime(CLOCK_MONOTONIC, &tw0);
+  if (trace) tw0 = portMonoMs();
 #define WALK_TRACE(branch)                                                                    \
   do {                                                                                        \
     if (trace) {                                                                              \
-      struct timespec tw1;                                                                    \
-      clock_gettime(CLOCK_MONOTONIC, &tw1);                                                   \
-      double now = tw1.tv_sec * 1000.0 + tw1.tv_nsec / 1e6;                                   \
-      double ms = (tw1.tv_sec - tw0.tv_sec) * 1000.0 + (tw1.tv_nsec - tw0.tv_nsec) / 1e6;      \
+      double tw1 = portMonoMs();                                                              \
+      double now = tw1;                                                                       \
+      double ms = tw1 - tw0;                                                                  \
       fprintf(stderr, "[walk] t=%.0f %s ext=%s -> %s %.2f ms\n", now, dir, ext, branch, ms); \
     }                                                                                         \
   } while (0)
