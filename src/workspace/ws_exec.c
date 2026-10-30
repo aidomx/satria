@@ -104,7 +104,9 @@ int wsRunProject(const WsModel *m, const char *name, const char *cmd, int jobs,
   printf("%s Fase    : %s\n", repPrefix(), passLabel);
   bgProgress(1, "Project: %s (%s)", name, passLabel); /* watcher §3B */
 
-  /* Reuse the phase configuration for orphan pruning and build.
+  /* Reuse the phase configuration for the build: Config disusun sekali di sini
+   * dan dipakai sampai pass berjalan. Prune .d orphan TIDAK lagi di sini —
+   * dipindah ke bawah, setelah gerbang fast-state (lihat catatan di sana).
    * Previously a cache miss constructed the same Config twice. */
   Config c;
   bool configReady = false;
@@ -116,9 +118,8 @@ int wsRunProject(const WsModel *m, const char *name, const char *cmd, int jobs,
     }
     configReady = true;
     profMark("cfg-build"); /* profil: perakitan Config murni (tanpa prune) */
-    if (libOnly) wsPruneOrphanSources(&c);
   }
-  profMark("ws-config"); /* profil: delta dari cfg-build = prune .d orphan */
+  profMark("ws-config"); /* profil: perakitan Config (prune pindah setelah gate) */
 
   /* Fast no-op per fase — padanan bagian atas cmdBuildEx. Label META
      stabil per proyek (file sintesis sudah tidak ada; label lama berupa
@@ -137,6 +138,17 @@ int wsRunProject(const WsModel *m, const char *name, const char *cmd, int jobs,
     return 1;
   }
   profMark("ws-resolvecc"); /* profil: resolveCompiler (probe compiler) */
+
+  /* Prune .d orphan SETELAH gerbang fast-state (audit 30/10): fase yang valid
+     tidak membutuhkannya — kehilangan sumber selalu membuat validasi fast-state
+     gagal lewat entri M/F hilang — sedangkan biayanya getdents rekursif +
+     fopen ~21 file .d per proyek = 15–60 ms tiap pass library (itulah delta
+     `ws-config` sebelumnya). Syarat identik dengan perilaku lama:
+     pass library untuk proyek non-arsip. */
+  if (libOnly && configReady) {
+    wsPruneOrphanSources(&c);
+    profMark("cfg-prune"); /* profil: prune .d orphan (0 ms bila dilewati) */
+  }
   procSetForeground(jobs > 1 ? false : c.foreground);
 
   /* pack.* diabaikan (v1): proyek kemasan tanpa arsip & tanpa binary =
