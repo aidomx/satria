@@ -23,6 +23,7 @@ typedef enum {
   CMD_VERSION,
   CMD_RELEASE,
   CMD_PROFILE,
+  CMD_TRACE,
   CMD_LOG,
   CMD_WATCH, /* pantau build background (design/background.md §3) */
   CMD_INTERACTIVE_INIT
@@ -64,6 +65,10 @@ typedef struct {
   // Profile specific
   int profile_argc;
   const char **profile_argv;
+
+  // Trace specific (satria trace [opsi] -- <args satria>)
+  int trace_argc;
+  const char **trace_argv;
 
   // Konversi Ninja/Make (-xf / -xcf)
   const char *conv_file;

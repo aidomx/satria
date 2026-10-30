@@ -15,6 +15,7 @@ satria init -p           Interactive scaffold (name, language, workspace)
 satria init -w           Create Buildfile.ws (workspace template)
 satria clean             Remove build artifacts
 satria profile <ctx>     Measure operation costs (see: help profile)
+satria trace [opts] -- <args>  Trace file access via LD_PRELOAD (see: help trace)
 satria -w                Build all projects in workspace (Buildfile.ws)
 satria -w <name>         Build <name> and its dependencies
 satria -w release -- name=<p>[,key=value]  Package one release
@@ -26,7 +27,7 @@ satria version           Show version
 satria self-upgrade      Upgrade satria itself
 satria self-uninstall    Remove satria and global state (requires confirmation)
 
-Topics: build, profile, workspace, init, clean, release, compdb, ninja, install, watch
+Topics: build, profile, workspace, init, clean, release, compdb, ninja, install, watch, trace
 ---endhelp
 
 ---build
@@ -272,3 +273,31 @@ flagged with a warning comment in the output.
 Conversion is best-effort for common Ninja rules; the converted
 Buildfile may need edits for non-standard setups.
 ---endninja
+
+---trace
+Trace file access (POSIX, LD_PRELOAD)
+
+  satria trace [--out FILE] [--top N] [--so FILE] [--] <args satria>
+
+Runs satria with a tracer that logs each open/stat/access/... call of the
+process and its children, then prints a summary (same as
+`sort log | uniq -c | sort -rn | head`).
+
+  satria trace -- -w core       Trace a workspace build of `core`
+  satria trace --top 50 -- -w   Show the 50 most frequent accesses
+
+Options must come before the satria arguments. The first token that is not
+a trace option starts the arguments for satria.
+
+Tracer: the source is built into satria itself. On each run satria writes
+.satria/trace/openat_trace.c and compiles .satria/trace/openat_trace.so with
+`cc` (env CC, default cc), but only when the source changed or the .so is
+missing. No external files are needed.
+Use --so FILE to supply a prebuilt tracer (for example for another arch).
+
+Log: .satria/trace/openat.log (or --out). Each run starts a new log.
+Child processes (gcc, ld, ar) inherit the tracer, so their accesses are
+included; the summary is not filtered by process.
+
+Not supported on Windows (uses LD_PRELOAD/dlsym).
+---endtrace

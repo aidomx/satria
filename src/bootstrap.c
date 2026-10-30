@@ -67,7 +67,7 @@ static bool parseJobsArg(const char *inlineVal, bool hasInline, int *outJobs, co
 /* Kata yang berarti command (bukan nama proyek) setelah `-w`. */
 static bool bootstrapIsCommandWord(const char *s) {
   static const char *const kCommands[] = {
-    "build", "clean", "init", "help", "version", "release", "watch", "log",
+    "build", "clean", "init", "help", "version", "release", "watch", "log", "trace",
   };
   for (size_t k = 0; k < sizeof(kCommands) / sizeof(kCommands[0]); k++)
     if (strcmp(s, kCommands[k]) == 0) return true;
@@ -223,6 +223,15 @@ int bootstrapParse(int argc, const char *argv[], Bootstrap *bs) {
         bs->cmd = CMD_PROFILE;
         bs->profile_argv = argv + i + 1;
         bs->profile_argc = argc - i - 1;
+        brokeAtProfile = true;
+        break;
+      }
+      /* `trace` juga berdiri sendiri: sisa argumen (opsi trace lalu args satria)
+         diteruskan utuh ke cmdTrace, tidak diparse sebagai opsi global. */
+      if (strcmp(a, "trace") == 0) {
+        bs->cmd = CMD_TRACE;
+        bs->trace_argv = argv + i + 1;
+        bs->trace_argc = argc - i - 1;
         brokeAtProfile = true;
         break;
       }

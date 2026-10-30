@@ -1,0 +1,156 @@
+#define _GNU_SOURCE
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdarg.h>
+#include <dlfcn.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/stat.h>
+#include <sys/syscall.h>
+#include <dirent.h>
+#include <pthread.h>
+
+static int logfd = -1;
+static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+
+static void logline(const char *fn, const char *path, int extra) {
+    if (logfd < 0) return;
+    char buf[4096];
+    int n;
+    if (extra >= 0)
+        n = snprintf(buf, sizeof buf, "%s\t%s\t0x%x\n", fn, path ? path : "(null)", extra);
+    else
+        n = snprintf(buf, sizeof buf, "%s\t%s\n", fn, path ? path : "(null)");
+    if (n <= 0) return;
+    pthread_mutex_lock(&lock);
+    if (write(logfd, buf, n) < 0) { /* log best-effort: abaikan kegagalan */ }
+    pthread_mutex_unlock(&lock);
+}
+
+// Buka log langsung via syscall, jangan lewat libc (hindari rekursi ke hook sendiri)
+__attribute__((constructor))
+static void init_log(void) {
+    /* Lokasi log: SATRIA_TRACE_LOG (diset `satria trace`), fallback /tmp/trace.log. */
+    const char *path = getenv("SATRIA_TRACE_LOG");
+    if (!path || !*path) path = "/tmp/trace.log";
+    logfd = syscall(SYS_openat, AT_FDCWD, path,
+                    O_WRONLY | O_CREAT | O_APPEND, 0644);
+}
+
+#define REAL(name) \
+    static __typeof__(name) *real_##name; \
+    if (!real_##name) real_##name = dlsym(RTLD_NEXT, #name)
+
+// ---------- open family ----------
+int open(const char *path, int flags, ...) {
+    va_list ap; va_start(ap, flags);
+    mode_t mode = va_arg(ap, mode_t); va_end(ap);
+    REAL(open);
+    logline("open", path, flags);
+    return real_open(path, flags, mode);
+}
+
+int open64(const char *path, int flags, ...) {
+    va_list ap; va_start(ap, flags);
+    mode_t mode = va_arg(ap, mode_t); va_end(ap);
+    REAL(open64);
+    logline("open64", path, flags);
+    return real_open64(path, flags, mode);
+}
+
+int openat(int dirfd, const char *path, int flags, ...) {
+    va_list ap; va_start(ap, flags);
+    mode_t mode = va_arg(ap, mode_t); va_end(ap);
+    REAL(openat);
+    logline("openat", path, flags);
+    return real_openat(dirfd, path, flags, mode);
+}
+
+FILE *fopen(const char *path, const char *mode) {
+    REAL(fopen);
+    logline("fopen", path, -1);
+    return real_fopen(path, mode);
+}
+
+FILE *fopen64(const char *path, const char *mode) {
+    REAL(fopen64);
+    logline("fopen64", path, -1);
+    return real_fopen64(path, mode);
+}
+
+// ---------- stat family ----------
+int stat(const char *path, struct stat *st) {
+    REAL(stat);
+    logline("stat", path, -1);
+    return real_stat(path, st);
+}
+
+int lstat(const char *path, struct stat *st) {
+    REAL(lstat);
+    logline("lstat", path, -1);
+    return real_lstat(path, st);
+}
+
+int stat64(const char *path, struct stat64 *st) {
+    REAL(stat64);
+    logline("stat64", path, -1);
+    return real_stat64(path, st);
+}
+
+int fstatat(int fd, const char *path, struct stat *st, int flags) {
+    REAL(fstatat);
+    logline("fstatat", path, flags);
+    return real_fstatat(fd, path, st, flags);
+}
+
+// glibc lama: __xstat / __xstat64 / __lxstat
+int __xstat(int ver, const char *path, struct stat *st) {
+    REAL(__xstat);
+    logline("__xstat", path, -1);
+    return real___xstat(ver, path, st);
+}
+
+int __xstat64(int ver, const char *path, struct stat64 *st) {
+    REAL(__xstat64);
+    logline("__xstat64", path, -1);
+    return real___xstat64(ver, path, st);
+}
+
+int __lxstat(int ver, const char *path, struct stat *st) {
+    REAL(__lxstat);
+    logline("__lxstat", path, -1);
+    return real___lxstat(ver, path, st);
+}
+
+// ---------- access ----------
+int access(const char *path, int mode) {
+    REAL(access);
+    logline("access", path, mode);
+    return real_access(path, mode);
+}
+
+int faccessat(int fd, const char *path, int mode, int flags) {
+    REAL(faccessat);
+    logline("faccessat", path, mode);
+    return real_faccessat(fd, path, mode, flags);
+}
+
+// ---------- readlink ----------
+ssize_t readlink(const char *path, char *buf, size_t sz) {
+    REAL(readlink);
+    logline("readlink", path, -1);
+    return real_readlink(path, buf, sz);
+}
+
+ssize_t readlinkat(int fd, const char *path, char *buf, size_t sz) {
+    REAL(readlinkat);
+    logline("readlinkat", path, -1);
+    return real_readlinkat(fd, path, buf, sz);
+}
+
+// ---------- opendir ----------
+DIR *opendir(const char *path) {
+    REAL(opendir);
+    logline("opendir", path, -1);
+    return real_opendir(path);
+}

@@ -12,6 +12,7 @@
 #include "package_cli.h"
 #include "portability.h"
 #include "prof/prof.h"
+#include "trace.h"
 #include "profile.h"
 #include "uses/workspace.h"
 
@@ -115,6 +116,12 @@ int satriaRun(int argc, const char *argv[]) {
   if (bs.cmd == CMD_PROFILE) {
     bootstrapCleanup(&bs);
     return cmdProfile(bs.profile_argv, bs.profile_argc);
+  }
+
+  /* satria trace [--out F] [--top N] [--so F] [--] <args satria>  (LD_PRELOAD). */
+  if (bs.cmd == CMD_TRACE) {
+    bootstrapCleanup(&bs);
+    return cmdTrace(bs.trace_argv, bs.trace_argc, argv[0]);
   }
 
   /* Workspace hanya dipilih melalui -w. Keberadaan Buildfile.ws tidak
