@@ -10,6 +10,9 @@
 #   curl -fsSL https://raw.githubusercontent.com/aidomx/satria/main/install.sh | sh -s -- --dev --version v0.2.0
 #   curl -fsSL https://raw.githubusercontent.com/aidomx/satria/main/install.sh | sh -s -- --version v0.2.0
 #   ./install.sh --dev  (jika dijalankan dari dalam source tree lokal)
+#   ./install.sh --dev -o /tmp/build.log   (keluaran build ikut ditulis ke log;
+#     layar tetap menampilkan keluaran yang sama — jalankan dari file agar
+#     memakai tee; lewat `curl | sh` keluaran hanya masuk ke file)
 #
 # Mode default (curl) mengunduh binary satria dari GitHub Releases ke /usr/local/bin/satria.
 # Mode --dev melakukan bootstrap build satria dari source dengan compiler C lokal.
@@ -26,6 +29,42 @@ GITHUB_USER="aidomx"
 REPO_NAME="satria"
 BRANCH="main"
 VERSION="v0.2.0" # fallback terakhir; ditimpa oleh --version / SATRIA_VERSION / .satria-version
+
+# ---------------------------------------------------------------------------
+# -o/--output <file> — prescan SEBELUM parse argumen utama, sehingga seluruh
+# keluaran (stdout+stderr) bisa dialihkan ke tee tanpa kehilangan argv asli.
+# Skrip dijalankan ulang lewat pipe; status keluaran asli disimpan di file
+# sementara karena status pipeline = status tee. Mode `curl | sh` ($0 bukan
+# file yang bisa dibaca) tidak bisa dijalankan ulang -> keluaran ke log saja.
+# ---------------------------------------------------------------------------
+LOG_FILE=""
+_o_want=0
+for _arg in "$@"; do
+  if [ "$_o_want" = 1 ]; then
+    LOG_FILE="$_arg"
+    _o_want=0
+    continue
+  fi
+  case "$_arg" in
+    -o | --output) _o_want=1 ;;
+  esac
+done
+if [ "$_o_want" = 1 ]; then
+  echo "satria: -o memerlukan argumen file log (mis. -o /tmp/build.log)" >&2
+  exit 1
+fi
+if [ -n "$LOG_FILE" ] && [ -z "${SATRIA_INSTALL_LOGGED:-}" ]; then
+  if [ -r "$0" ]; then
+    SATRIA_INSTALL_LOGGED=1
+    export SATRIA_INSTALL_LOGGED
+    _rcfile="${TMPDIR:-/tmp}/satria-install.$$.rc"
+    { _rc=0; sh "$0" "$@" || _rc=$?; printf '%s\n' "$_rc" > "$_rcfile"; } 2>&1 | tee "$LOG_FILE"
+    _rc=$(cat "$_rcfile" 2>/dev/null) || _rc=1
+    rm -f "$_rcfile"
+    exit "$_rc"
+  fi
+  exec > "$LOG_FILE" 2>&1
+fi
 
 # Nama asset di GitHub Releases (harus persis sama dengan yang
 # di-upload oleh .github/workflows/release.yml).
@@ -52,6 +91,11 @@ while [ $# -gt 0 ]; do
         exit 1
       fi
       VERSION_TAG="$2"
+      shift 2
+      ;;
+    -o | --output)
+      # Sudah ditangani prescan di atas; lewati agar path log tidak dibaca
+      # sebagai argumen opsional lain.
       shift 2
       ;;
     *)
