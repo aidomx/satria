@@ -111,6 +111,9 @@ static bool buildEmbeddedArchiveEntryEx(const EmbeddedEntry *e, bool *rebuilt) {
     fprintf(stderr, "satria: %s: cannot move archive into place (%s)\n", e->name, e->archivePath);
     return false;
   }
+  /* Arsip diganti: memo stat harus dibuang — validasi fast-state proyek lain
+     men-stat arsip lewat memo (kind O) dan boleh melihat stamp basi. */
+  cmdsStatMemoForget(e->archivePath);
   embArchiveStateSave(e);
   embEmbedCacheRecord(e); /* entri grup + input di caches/embed.cache */
   if (rebuilt) *rebuilt = true;

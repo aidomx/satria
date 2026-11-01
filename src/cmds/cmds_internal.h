@@ -221,6 +221,8 @@ bool wsFastStateValid(const char *buildfilePath, bool libOnly);
 bool cmdsStatCached(const char *path, int64_t *mtimeNs, long long *size);
 void cmdsStatMemoSetCwd(void);
 void cmdsStatMemoForget(const char *path);
+/* Isi memo dari hasil stat pihak lain (audit 30/10 — lihat cmds_statmemo.c). */
+void cmdsStatMemoPut(const char *path, int64_t mtimeNs, long long size);
 int64_t cmdsMTimeDecide(const char *path);
 /* Parser & validasi satu baris format state F/D/X (format bersama blob
    `ws.state` di state.cache — lihat header cmds_wsstate.c; format lama
@@ -341,6 +343,15 @@ bool envOff(const char *name);
    relink bila byte object identik. */
 void wsPhaseObjectChangeSet(bool changed);
 bool wsPhaseObjectChangeGet(bool *changed);
+
+/* Jejak basi gerbang no-op (audit 30/10, kandidat 3+5): path yang hash isi-nya
+   sudah berbeda saat gerbang menilai. Dicatat di ws_cache_noop.c (induk,
+   sebelum fork fase build) dan dibaca validator fast-state (cmds_wsstate.c)
+   yang menilai entri itu lebih dulu — validasi yang memang gagal berhenti pada
+   satu stat, bukan ratusan ms. Murni URUTAN: keputusan akhir tidak berubah. */
+void wsGateStaleMark(const char *path);
+int wsGateStaleCount(void);
+const char *wsGateStalePath(int i);
 
 /* Warna diagnostic compiler (output TTY, tanpa ANSI di build.log). */
 bool diagColorWanted(void);

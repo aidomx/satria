@@ -80,8 +80,11 @@ int cmdsBuildPassFinish(CmdsPassTail *t) {
       for (int i = 0; i < pending.count; i++)
         depsRecordUpdate(deps, pending.items[i]);
     }
+    profMark("deps-rec");  /* profil: rekam snapshot hash sumber */
     depsSave(deps);
+    profMark("deps-save"); /* profil: tulis deps.cache */
     if (wsModeActive()) wsFastStateSave(deps, &c, &srcs, "", buildfilePath, true);
+    profMark("fs-save");   /* profil: tulis fast-state + stamp fase */
     depsFree(deps);
     wsPhaseObjectChangeSet(objectsChanged);
     /* libOnly=true: commit hash compile saja — sources/link diserahkan ke
@@ -191,8 +194,11 @@ int cmdsBuildPassFinish(CmdsPassTail *t) {
       for (int i = 0; i < pending.count; i++)
         depsRecordUpdate(deps, pending.items[i]);
     }
+    profMark("deps-rec");  /* profil: rekam snapshot hash sumber */
     depsSave(deps);
+    profMark("deps-save"); /* profil: tulis deps.cache */
     if (wsModeActive()) wsFastStateSave(deps, &c, &srcs, target, buildfilePath, libOnly);
+    profMark("fs-save");   /* profil: tulis fast-state + stamp fase */
     depsFree(deps);
     cmdsFingerprintSave(&currentFp, libOnly);
     /* Packaging (pack.*) sebelum summary; fast state disimpan di dalamnya
@@ -359,8 +365,11 @@ int cmdsBuildPassFinish(CmdsPassTail *t) {
     for (int i = 0; i < pending.count; i++)
       depsRecordUpdate(deps, pending.items[i]);
   }
+  profMark("deps-rec");  /* profil: rekam snapshot hash sumber */
   depsSave(deps);
+  profMark("deps-save"); /* profil: tulis deps.cache */
   if (wsModeActive()) wsFastStateSave(deps, &c, &srcs, target, buildfilePath, libOnly);
+  profMark("fs-save");   /* profil: tulis fast-state + stamp fase */
   depsFree(deps);
   cmdsFingerprintSave(&currentFp, libOnly);
 

@@ -194,7 +194,7 @@ void statPlanBuild(StatPlan *p, const Config *c, const List *srcs) {
       snprintf(p->objPath[slot], MAX_PATH, "%s", objPath);
       if (p->obsObj) {
         int64_t om = -1;
-        fsStampNsSize(objPath, &om, &sz);
+        memoStampNsSize(objPath, &om, &sz); /* object: lewat memo (dibuang saat compile) */
         p->objM[slot] = om;
       } else {
         p->objM[slot] = -99; /* belum distat — konsumen WAJIB stat sendiri */

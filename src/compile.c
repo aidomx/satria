@@ -6,6 +6,7 @@
 
 #include "portability.h"
 #include "util.h"
+#include "cmds/cmds_internal.h"
 
 /* Keluarga toolchain (CompilerKind) didefinisikan di compile.h — dipakai
    config.c untuk suffix compiler (design/flags.md). */
@@ -468,5 +469,10 @@ bool compileOne(const Config *c, const char *inc, const char *wf, const char *sr
     ok = runCmd(cmd);
   }
   free(cmd);
+  /* Compiler menulis ulang object & .d: buang stamp memo (berhasil maupun
+     gagal) agar pembacaan berikutnya mengambil stat segar. */
+  cmdsStatMemoForget(obj);
+  char dpathF[MAX_PATH * 2];
+  if (dotDPathFor(c, src, dpathF, sizeof(dpathF))) cmdsStatMemoForget(dpathF);
   return ok;
 }

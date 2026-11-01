@@ -162,6 +162,12 @@ bool cmdsRunParallelJobs(const Config *c, const char *inc, const char *wf, const
 
     double dt = nowSeconds() - slots[w].start;
     if (okOut) okOut[slots[w].idx] = fin->ok;
+    {
+      /* Compile paralel: compiler menulis ulang object & .d -> buang memo. */
+      char objF[MAX_PATH * 2], dF[MAX_PATH * 2];
+      if (objectPathFor(c, slots[w].src, objF, sizeof(objF))) cmdsStatMemoForget(objF);
+      if (dotDPathFor(c, slots[w].src, dF, sizeof(dF))) cmdsStatMemoForget(dF);
+    }
     compiled++;
     bgProgress(5 + (compiled * 80) / total, "Compiling: %s", slots[w].src); /* §3B */
     const char *tag = fin->interrupted ? "INT" : (fin->ok ? "OK" : "FAIL");
@@ -383,7 +389,9 @@ bool cmdsLibVariantUpToDate(const Config *c, bool isStatic, const List *srcs) {
   for (int i = 0; i < srcs->count; i++) {
     if (excludedSource(c, srcs->items[i])) continue;
     if (!objectPathFor(c, srcs->items[i], obj, sizeof(obj))) continue;
-    int64_t om = fsMTimeNs(obj);
+    long long osz = 0;
+    int64_t om = -1;
+    if (!memoStampNsSize(obj, &om, &osz)) om = -1; /* object: lewat memo */
     if (om < 0 || om > mtime) return false;
   }
   return true;
@@ -441,6 +449,9 @@ bool cmdsEmitVersionHeader(const Config *c, bool *changed) {
   }
   fwrite(body, 1, strlen(body), wf);
   fclose(wf);
+  /* Header versi baru: invalidasi memo stat (validasi fast-state bisa sudah
+     men-cache stamp lama sebelum terbitan ini). */
+  cmdsStatMemoForget(path);
   if (changed) *changed = true;
   return true;
 }

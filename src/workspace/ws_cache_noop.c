@@ -248,7 +248,11 @@ static bool wsCacheDirEntriesMatch(const WsCacheMap *m, const char *path) {
 /* ===== Fast path metadata P (design/startup.md §4) =====
    Metadata cocok -> no-op tanpa fingerprint.cache. Bila hanya time/size yang
    berubah, hash file tersebut: konten sama berarti cukup menyegarkan metadata
-   P dan fingerprint secara internal; konten berbeda jatuh ke validasi penuh. */
+   P dan fingerprint secara internal.
+   Nilai balik: 1 = hit, 0 = refreshed (metadata disegarkan),
+   -1 = tidak pasti -> jalur penuh menilai,
+   -2 = MISS PASTI (isi berbeda) -> jalur penuh akan menemukan hal yang sama,
+        jadi walk fingerprint.cache penuh dilewati (audit 30/10, kandidat 3). */
 static int wsCachePFast(WsCacheMap *m, long long srcMtime) {
   if (!m->meta || m->n == 0) return -1;
   bool metadataChanged = false;
@@ -258,6 +262,13 @@ static int wsCachePFast(WsCacheMap *m, long long srcMtime) {
     if (stat(r->path, &sb) != 0) return -1;
     long long now = wsCacheStampNs(&sb);
     long long size = (long long)sb.st_size;
+#if !defined(_WIN32)
+    /* Isi memo stat (audit 30/10 — kandidat save-walk): path input ini distat
+       ulang oleh induk saat menulis fingerprint.cache. Direktori ('D') dan
+       output ('O') sengaja TIDAK dicatat — save memakai stamp segar untuk
+       keduanya. Epoch memo == wsCacheStampNs di non-Windows (fsStampNsSize). */
+    if (r->type != 'D' && r->type != 'O') cmdsStatMemoPut(r->path, now, size);
+#endif
     /* Direktori tidak memiliki hash konten. Jika mtime berubah, validasi
        daftar entri langsung; jika tetap identik, hanya metadata waktunya yang
        perlu disegarkan. Penambahan/penghapusan/rename membuat fast path miss. */
@@ -276,7 +287,16 @@ static int wsCachePFast(WsCacheMap *m, long long srcMtime) {
     /* Mtime/ukuran berubah atau timestamp tampak racy. Ukuran sama saja tidak
        membuktikan konten sama, jadi hash wajib sebelum metadata diperbarui. */
     uint64_t h = wsStartupHash(r->path);
-    if (!h || h != r->content) return -1;
+    if (!h) return -1;
+    if (h != r->content) {
+      /* Isi berbeda: vonis miss pasti — jalur penuh (wsCacheVisit) membandingkan
+         hash dengan entri fingerprint yang sama dan juga menyatakan miss.
+         Rekam path-nya supaya validasi fast-state menilai entri itu lebih dulu
+         (kandidat 5). Baris P tanpa hash tercatat (content=0) tetap tidak
+         pasti -> jatuh ke jalur penuh seperti sebelumnya. */
+      if (r->content) wsGateStaleMark(r->path);
+      return -2;
+    }
     /* Cegah menerima file yang berubah saat hash sedang dibaca. */
     struct stat after;
     if (stat(r->path, &after) != 0 || wsCacheStampNs(&after) != now ||
@@ -423,7 +443,15 @@ static bool wsCacheVisit(const CsEntry *e, CsOp op, void *ctx) {
   const WsCachePath *r = wsCacheMapFind(c->map, e->file);
   if (!r) { if (wsCacheTrace()) fprintf(stderr, "satria cache: missing path mapping %016llx\n", (unsigned long long)e->file); return c->ok = false; }
   struct stat sb;
-  if (stat(r->path, &sb) != 0) { if (wsCacheTrace()) fprintf(stderr, "satria cache: missing %s\n", r->path); return c->ok = false; }
+  if (stat(r->path, &sb) != 0) {
+    if (wsCacheTrace()) fprintf(stderr, "satria cache: missing %s\n", r->path);
+    return c->ok = false;
+  }
+#if !defined(_WIN32)
+  /* Isi memo stat — lihat catatan di wsCachePFast (kandidat save-walk). */
+  if (r->type != 'D' && r->type != 'O')
+    cmdsStatMemoPut(r->path, wsCacheStampNs(&sb), (long long)sb.st_size);
+#endif
   /* Direktori tak bisa di-hash: mtime harus sama DAN tidak racy. Racy (diubah
      dalam detik yang sama dengan penulisan cache) -> invalid, jalur normal. */
   if (r->type == 'D') {
@@ -439,6 +467,10 @@ static bool wsCacheVisit(const CsEntry *e, CsOp op, void *ctx) {
      beda -> invalid. Berlaku juga untuk output (O) dan Buildfile (W). */
   uint64_t h = wsStartupHash(r->path);
   bool valid = h != 0 && h == e->content;
+  /* Isi beda dari entri fingerprint: rekam path basi untuk urutan validasi
+     fast-state (kandidat 5). Hash tak terbaca / tanpa hash tersimpan = tetap
+     tidak pasti, tanpa rekaman. */
+  if (!valid && h && e->content) wsGateStaleMark(r->path);
   if (valid && (e->time != wsCacheStampNs(&sb) || e->size != (long long)sb.st_size)) {
     CsPatch patch = {0};
     patch.hasTime = true;
@@ -453,6 +485,10 @@ static bool wsCacheVisit(const CsEntry *e, CsOp op, void *ctx) {
 }
 bool wsCacheNoopValid(const WsModel *m) {
   if (!wsRouterValidate()) return false; /* router opts.cache dibaca lebih dulu */
+  /* Kunci memo stat diset di sini (root workspace — path relatif gerbang) agar
+     catatan yang gerbang tulis di bawah bisa dipakai ulang oleh save-walk di
+     run yang sama (kunci identik = hit). */
+  cmdsStatMemoSetCwd();
   profMark("gate-router"); /* profil */
   /* Metadata artefak (design/startup.md §9): artefak/input release hilang atau
      berubah -> batal no-op SEBELUM membaca fingerprint. */
@@ -475,6 +511,15 @@ bool wsCacheNoopValid(const WsModel *m) {
      fingerprint.cache. Menolak di sini bukan vonis — jalur penuh menilai. */
   int pfast = wsCachePFast(&map, wsCacheStampNs(&ssb));
   profMark("gate-pfast"); /* profil */
+  if (pfast == -2) {
+    /* Miss pasti dari P-fast: jangan bayar walk fingerprint.cache penuh yang
+       vonisnya sama (audit 30/10, kandidat 3). Tanpa efek samping — cabang
+       PATCH/sinkron route hanya dijalankan bila valid. */
+    if (wsCacheTrace())
+      fprintf(stderr, "satria cache: P-fast miss (content, checked=%zu)\n", map.n);
+    wsCacheMapFree(&map);
+    return false;
+  }
   if (pfast >= 0) {
     if (wsCacheTrace())
       fprintf(stderr, "satria cache: P-fast %s (checked=%zu)\n",

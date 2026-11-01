@@ -440,6 +440,11 @@ bool emitEmbeddedSource(const Config *c, bool *changed) {
     fprintf(stderr, "satria: cannot write %s\n", path);
     return false;
   }
+  /* File baru ditulis: buang memo stat agar pass yang berjalan sesudahnya
+     (statPlanBuild/decide) membaca stamp segar, bukan nilai yang di-cache
+     validasi fast-state SEBELUM codegen. Tanpa ini decide melihat stamp lama
+     dan melewatkan kompilasi embedded.c (audit 30/10 — skenario mod/dep). */
+  cmdsStatMemoForget(path);
   if (changed) *changed = true;
   stampOk = embWriteStamp(stampPath, genNs, mode, sigBuf);
   (void)stampOk;
@@ -561,6 +566,7 @@ bool emitEmbeddedHeader(const Config *c, bool *changed) {
   }
   fwrite(body, 1, used, hf);
   fclose(hf);
+  cmdsStatMemoForget(embeddedHeader); /* stamp segar bagi fase sesudahnya */
   if (changed) *changed = true;
   return true;
 }

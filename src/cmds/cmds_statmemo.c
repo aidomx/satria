@@ -33,6 +33,7 @@
 typedef struct {
   char *path;
   bool exists;
+  bool stale; /* dibuang oleh cmdsStatMemoForget: stat ulang saat dibaca */
   int64_t mtime;
   long long size;
 } StatMemoEntry;
@@ -123,7 +124,7 @@ bool memoStampNsSize(const char *path, int64_t *mtimeNs, long long *size) {
   while (statMemo[j].path && strcmp(statMemo[j].path, key) != 0)
     j = (j + 1) & (statMemoCap - 1);
   StatMemoEntry *e = &statMemo[j];
-  if (e->path) {
+  if (e->path && !e->stale) {
     if (!e->exists) return false;
     *mtimeNs = e->mtime;
     *size = e->size;
@@ -131,12 +132,23 @@ bool memoStampNsSize(const char *path, int64_t *mtimeNs, long long *size) {
   }
   bool ok = fsStampNsSize(path, mtimeNs, size);
   /* Hanya hasil positif yang disimpan: file yang belum ada bisa dibuat build,
-     jadi negatif selalu di-stat ulang. */
-  if (ok) {
+     jadi negatif selalu di-stat ulang. Entri stale (dibuang) diperbarui di
+     tempat: tanpa membangun ulang tabel. */
+  if (e->path) {
+    if (ok) {
+      e->exists = true;
+      e->stale = false;
+      e->mtime = *mtimeNs;
+      e->size = *size;
+    } else {
+      e->stale = true; /* tetap stale: negatif tidak pernah dipercaya */
+    }
+  } else if (ok) {
     char *dup = strdup(key);
     if (dup) {
       e->path = dup;
       e->exists = true;
+      e->stale = false;
       e->mtime = *mtimeNs;
       e->size = *size;
       statMemoCount++;
@@ -155,6 +167,37 @@ void cmdsStatMemoSetCwd(void) {
 
 bool cmdsStatCached(const char *path, int64_t *mtimeNs, long long *size) {
   return memoStampNsSize(path, mtimeNs, size);
+}
+
+/* Catat hasil stat pihak lain (audit 30/10 — kandidat save-walk): gerbang no-op
+   sudah men-stat sumber/header/Buildfile yang sama di awal run, tetapi hasilnya
+   dibuang — induk lalu membayar stat ulang yang sama saat menulis
+   fingerprint.cache (1.150 stat = 450 ms di workspace 1.003 objek).
+   Syarat pemanggil: (a) epoch identik dengan fsStampNsSize (non-Windows),
+   (b) path input yang tidak ditulis build — penulis file tetap memanggil
+   cmdsStatMemoForget, (c) kunci memo (cwd) sudah diset pemanggil. */
+void cmdsStatMemoPut(const char *path, int64_t mtimeNs, long long size) {
+  if (!path || !*path || mtimeNs < 0) return;
+  char key[MAX_PATH * 4];
+  memoKeyFor(path, key, sizeof(key));
+  if (statMemoCap == 0 || (statMemoCount + 1) * 2 > statMemoCap)
+    statMemoRehash(statMemoCap ? statMemoCap * 2 : 4096);
+  if (statMemoCap == 0) return;
+  size_t j = statMemoHash(key) & (statMemoCap - 1);
+  while (statMemo[j].path && strcmp(statMemo[j].path, key) != 0)
+    j = (j + 1) & (statMemoCap - 1);
+  if (statMemo[j].path) { /* sudah ada: stamp terbaru menang */
+    statMemo[j].mtime = mtimeNs;
+    statMemo[j].size = size;
+    return;
+  }
+  char *dup = strdup(key);
+  if (!dup) return;
+  statMemo[j].path = dup;
+  statMemo[j].exists = true;
+  statMemo[j].mtime = mtimeNs;
+  statMemo[j].size = size;
+  statMemoCount++;
 }
 
 /* Parser baris format state F/D/X (format bersama ws.state dan workspace.state
@@ -240,29 +283,12 @@ void cmdsStatMemoForget(const char *path) {
   if (statMemoCap == 0 || !path) return;
   char key[MAX_PATH * 4];
   memoKeyFor(path, key, sizeof(key));
-  /* Bangun ulang tabel tanpa kunci itu; open addressing tak punya tombstone. */
-  StatMemoEntry *old = statMemo;
-  size_t oldCap = statMemoCap;
-  statMemo = calloc(oldCap, sizeof(StatMemoEntry));
-  if (!statMemo) {
-    statMemo = old;
-    statMemoCap = oldCap;
-    return;
-  }
-  size_t kept = 0;
-  for (size_t i = 0; i < oldCap; i++) {
-    if (!old[i].path) continue;
-    if (strcmp(old[i].path, key) == 0) {
-      free(old[i].path);
-      continue;
-    }
-    size_t j = statMemoHash(old[i].path) & (oldCap - 1);
-    while (statMemo[j].path) j = (j + 1) & (oldCap - 1);
-    statMemo[j] = old[i];
-    kept++;
-  }
-  free(old);
-  statMemoCount = kept;
+  /* Tanpa rehash: cukup tandai entri (O(probe)). Lookup berikutnya men-stat
+     ulang dan memperbaruinya. Murah dipanggil per object setelah compile. */
+  size_t j = statMemoHash(key) & (statMemoCap - 1);
+  while (statMemo[j].path && strcmp(statMemo[j].path, key) != 0)
+    j = (j + 1) & (statMemoCap - 1);
+  if (statMemo[j].path) statMemo[j].stale = true;
 }
 
 /* Buang semua entri di bawah folder `dir` (relatif cwd), termasuk folder itu. */
@@ -303,6 +329,14 @@ static int memoKeyCompare(const void *a, const void *b) {
   return strcmp(*(const char *const *)a, *(const char *const *)b);
 }
 
+/* Object (.o) dan depfile (.d) dibuang dari memo di titik compile (compileOne,
+   slot paralel). Pre-pass fs-save tidak perlu membuangnya lagi: nilai yang
+   tersisa sudah benar, dan membuangnya memaksa stat ulang di setiap fase. */
+static bool memoIsObjLike(const char *p) {
+  size_t n = strlen(p);
+  return n >= 2 && p[n - 2] == '.' && (p[n - 1] == 'o' || p[n - 1] == 'd');
+}
+
 void cmdsStatMemoForgetOutputs(const char *buildDir, const List *items) {
   if (!statMemoCap) return;
   char prefix[MAX_PATH * 4] = "";
@@ -316,6 +350,7 @@ void cmdsStatMemoForgetOutputs(const char *buildDir, const List *items) {
   size_t used = 0;
   for (int i = 0; items && i < items->count; i++) {
     if (items->items[i][0] != 'O') continue;
+    if (memoIsObjLike(items->items[i] + 2)) continue; /* .o: dibuang di compile */
     keys[used] = malloc(MAX_PATH * 4);
     if (!keys[used]) {
       for (size_t j = 0; j < used; j++) free(keys[j]);
@@ -339,7 +374,7 @@ void cmdsStatMemoForgetOutputs(const char *buildDir, const List *items) {
     if (!statMemo[i].path) continue;
     const char *path = statMemo[i].path;
     bool inTree = pl && strncmp(path, prefix, pl) == 0 &&
-                  (path[pl] == '\0' || path[pl] == '/');
+                  (path[pl] == '\0' || path[pl] == '/') && !memoIsObjLike(path);
     bool inOutputs = used && bsearch(&path, keys, used, sizeof(*keys), memoKeyCompare);
     if (inTree || inOutputs) { free(statMemo[i].path); continue; }
     size_t j = statMemoHash(path) & (statMemoCap - 1);

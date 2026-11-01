@@ -20,6 +20,7 @@
 #include <string.h>
 
 #include "../compile.h"
+#include "../cmds/cmds_internal.h"
 #include "../portability.h"
 #include "../util.h"
 
@@ -250,7 +251,9 @@ bool depsLoadDotD(DepCache *dc, const char *src) {
   char dpath[MAX_PATH * 2];
   if (!dotDPathFor(c, src, dpath, sizeof(dpath))) return false;
 
-  int64_t dm = fsMTimeNs(dpath);
+  int64_t dm = -1;
+  long long dsz = 0;
+  if (!memoStampNsSize(dpath, &dm, &dsz)) dm = -1; /* .d: lewat memo (dibuang saat compile) */
   /* .d basi (source lebih baru — kompilasi berikutnya akan menulis ulang)
      atau .d hilang -> return false, pemanggil jatuh ke pemindai #include.
      mtime source tidak di-stat ulang: pemanggil (depParseNodeIfNeeded) sudah

@@ -80,6 +80,29 @@ bool cmdsWsPhaseVerdictGet(const char *project, bool *changed) {
   return false;
 }
 
+/* Jejak basi gerbang no-op (audit 30/10, kandidat 3+5 — lihat cmds_internal.h).
+   Tabel kecil di memori induk: terisi saat gerbang menemukan hash isi berbeda,
+   diwarisi anak fase build lewat fork, lalu dipakai validator fast-state untuk
+   menilai entri yang sudah pasti basi lebih dulu. Tanpa I/O, tanpa state. */
+#define WS_GATE_STALE_MAX 8
+static char wsGateStale[WS_GATE_STALE_MAX][WS_PATH_LEN];
+static int wsGateStaleN = 0;
+
+void wsGateStaleMark(const char *path) {
+  if (!path || !*path) return;
+  for (int i = 0; i < wsGateStaleN; i++)
+    if (strcmp(wsGateStale[i], path) == 0) return;
+  if (wsGateStaleN >= WS_GATE_STALE_MAX) return;
+  snprintf(wsGateStale[wsGateStaleN], WS_PATH_LEN, "%s", path);
+  wsGateStaleN++;
+}
+
+int wsGateStaleCount(void) { return wsGateStaleN; }
+
+const char *wsGateStalePath(int i) {
+  return (i >= 0 && i < wsGateStaleN) ? wsGateStale[i] : NULL;
+}
+
 void wsPhaseObjectChangeSet(bool changed) {
   cmdsWsPhaseVerdictSet(cmdsStateWsProject(), changed);
 }

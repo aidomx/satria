@@ -30,7 +30,80 @@ static void wsCacheSaveBody(const WsModel *m, const char *wsName);
    Durasi memakai portMonoMs (wrapper monotonic portabel — MSVC tanpa
    CLOCK_MONOTONIC; lihat port/port_time.c). */
 static double g_aDRead = 0, g_aHStat = 0, g_aHHash = 0;
-static int g_aD = 0, g_aH = 0, g_aHHashed = 0;
+static int g_aD = 0, g_aH = 0, g_aHHashed = 0, g_aDSkip = 0;
+/* Komposisi save-walk (audit 30/10, kandidat save-walk): stat input (sumber/
+   header/dir/Buildfile lewat memo), cek .d (langsung, .d ditulis di tengah
+   run), dan stat output (bin/lib/arsip/embedded). Murni pengukuran — tanpa
+   SATRIA_PROFILE tidak ada panggilan jam sama sekali. */
+static double g_aInMs = 0, g_aDSCheckMs = 0, g_aOutMs = 0;
+static int g_aIn = 0, g_aDSCheck = 0, g_aOut = 0;
+
+/* Entri header (H) dari sources.cache SEBELUMNYA — daftar gabungan seluruh
+   file .d pada save terakhir. Disalin ulang agar object yang .d-nya TIDAK
+   berubah tidak perlu dibuka lagi (audit 30/10: 10.003 fopen+read .d per
+   save adalah biaya terbesar jalur inkremental; jalur baca kini hanya untuk
+   .d yang digenerate ulang oleh compile di run ini).
+   Atribusi proyek lewat g_prevFp: fingerprint.cache menyimpan (proj,file)
+   untuk tiap entri, sedangkan baris P di sources.cache tidak memuat proj. */
+typedef struct {
+  uint64_t file;
+  char *path;
+} WsPrevH;
+static WsPrevH *g_prevH = NULL;
+static int g_prevHN = 0, g_prevHCap = 0;
+
+static void wsPrevHFree(void) {
+  for (int i = 0; i < g_prevHN; i++) free(g_prevH[i].path);
+  free(g_prevH);
+  g_prevH = NULL;
+  g_prevHN = g_prevHCap = 0;
+}
+
+/* P <file> <type> <content> <time> <size> <path> — hanya type H yang
+   disimpan; hash isi/stamp diambil ulang dari g_prevFp + stat segar. */
+static void wsPrevHLoad(void) {
+  FILE *f = fopen(WS_CACHE_SOURCES, "r");
+  if (!f) return;
+  char line[WS_PATH_LEN + 128];
+  while (fgets(line, sizeof(line), f)) {
+    if (line[0] != 'P' || line[1] != ' ') continue;
+    unsigned long long file = 0, content = 0;
+    long long time = 0, size = 0;
+    char type = 0;
+    int off = 0;
+    if (sscanf(line + 2, "%16llx %c %16llx %lld %lld %n", &file, &type, &content,
+               &time, &size, &off) < 5 ||
+        off <= 0)
+      continue;
+    if (type != 'H') continue;
+    char *path = line + 2 + off;
+    size_t pn = strlen(path);
+    while (pn && (path[pn - 1] == '\n' || path[pn - 1] == '\r')) path[--pn] = '\0';
+    if (!pn) continue;
+    /* Satu entri per file: baris P lama boleh punya duplikat (id = hash path),
+       dan salinan tanpa dedup membuat jumlahnya berlipat tiap save. */
+    bool seen = false;
+    for (int i = 0; i < g_prevHN; i++)
+      if (g_prevH[i].file == (uint64_t)file) {
+        seen = true;
+        break;
+      }
+    if (seen) continue;
+    if (g_prevHN == g_prevHCap) {
+      int nc = g_prevHCap ? g_prevHCap * 2 : 64;
+      WsPrevH *np = (WsPrevH *)realloc(g_prevH, (size_t)nc * sizeof(WsPrevH));
+      if (!np) break;
+      g_prevH = np;
+      g_prevHCap = nc;
+    }
+    char *dup = strdup(path);
+    if (!dup) break;
+    g_prevH[g_prevHN].file = (uint64_t)file;
+    g_prevH[g_prevHN].path = dup;
+    g_prevHN++;
+  }
+  fclose(f);
+}
 
 /* Stamp input (sumber/header/direktori/Buildfile) lewat memo stat: jalur
    fast-state & validasi sudah men-stat path yang sama di run ini, dan input
@@ -43,14 +116,22 @@ static int g_aD = 0, g_aH = 0, g_aHHashed = 0;
 static bool wsCacheInputStamp(const char *path, long long *mtimeNs, long long *size) {
 #if defined(_WIN32)
   struct stat sb;
-  if (stat(path, &sb) != 0) return false;
+  double t0 = portMonoMs();
+  bool ok = stat(path, &sb) == 0;
+  g_aInMs += portMonoMs() - t0;
+  g_aIn++;
+  if (!ok) return false;
   *mtimeNs = wsCacheStampNs(&sb);
   *size = (long long)sb.st_size;
   return true;
 #else
   int64_t m = -1;
   long long s = -1;
-  if (!cmdsStatCached(path, &m, &s)) return false;
+  double t0 = portMonoMs();
+  bool ok = cmdsStatCached(path, &m, &s);
+  g_aInMs += portMonoMs() - t0;
+  g_aIn++;
+  if (!ok) return false;
   *mtimeNs = (long long)m;
   *size = s;
   return true;
@@ -69,7 +150,11 @@ static bool wsCacheAdd(FILE *pf, CsStore *st, uint64_t proj, const char *path, c
   struct stat sb;
   long long mtimeNs = 0, fsize = 0;
   if (type == 'O') {
-    if (stat(path, &sb) != 0) return false; /* output: stat segar, jangan memo */
+    double t0 = portMonoMs();
+    bool okO = stat(path, &sb) == 0;
+    g_aOutMs += portMonoMs() - t0;
+    g_aOut++;
+    if (!okO) return false; /* output: stat segar, jangan memo */
     mtimeNs = wsCacheStampNs(&sb);
     fsize = (long long)sb.st_size;
   } else if (!wsCacheInputStamp(path, &mtimeNs, &fsize)) {
@@ -197,9 +282,28 @@ static bool wsCacheAddObjectTree(FILE *pf, CsStore *st, uint64_t proj,
     (*objects)++;
     char dfile[WS_PATH_LEN];
     snprintf(dfile, sizeof(dfile), "%.*s.d", (int)(len - 2), o);
+    /* .d TIDAK berubah sejak save terakhir -> lewati: seluruh entri header
+       yang bersumber darinya sudah tersalin di awal wsCacheSaveBody (audit
+       30/10 — 10k fopen+read per save murni I/O ulang). Hanya .d yang
+       digenerate ulang run ini yang dibaca. Stat LANGSUNG (bukan memo):
+       .d ditulis oleh compiler di tengah run sehingga memo bisa basi —
+       keputusan lewat/baca ini wajib memakai stamp segar. */
+    int dr;
+    struct stat dst;
+    double td0 = portMonoMs();
+    bool dstat = stat(dfile, &dst) == 0;
+    g_aDSCheckMs += portMonoMs() - td0;
+    g_aDSCheck++;
+    if (!dstat) {
+      dr = 0;
+    } else if (wsCacheStampNs(&dst) < g_prevFpMtime) {
+      g_aDSkip++;
+      dr = 1;
+    } else {
+      dr = wsCacheAddDepFile(pf, st, proj, dfile);
+    }
     /* Satu fopen per object: 0 (ENOENT) = .d tak ada -> cabang embedded di
        bawah; -1 (gagal baca/parse) = save batal konservatif. */
-    int dr = wsCacheAddDepFile(pf, st, proj, dfile);
     if (dr > 0) ok = true;
     else if (dr < 0) ok = false;
     else {
@@ -283,18 +387,27 @@ static void wsOptsMetaSave(const WsProjStamp *st, int n) {
 /* Simpan cache sesudah build sukses. Gagal -> kedua file dibuang (tidak ada cache palsu). */
 void wsCacheSave(const WsModel *m, const char *wsName) {
   struct stat pfs;
+  /* Kunci memo stat: sama dengan gerbang no-op (root workspace) supaya stat
+     input yang gerbang catat di awal run tidak dibayar ulang di sini
+     (audit 30/10 — kandidat save-walk). */
+  cmdsStatMemoSetCwd();
   g_prevFp = NULL;
   g_prevFpMtime = 0;
   g_aDRead = g_aHStat = g_aHHash = 0;
-  g_aD = g_aH = g_aHHashed = 0;
+  g_aD = g_aH = g_aHHashed = g_aDSkip = 0;
+  g_aInMs = g_aDSCheckMs = g_aOutMs = 0;
+  g_aIn = g_aDSCheck = g_aOut = 0;
+  wsPrevHFree();
   if (stat(WS_CACHE_FP, &pfs) == 0) {
     g_prevFpMtime = wsCacheStampNs(&pfs);
     g_prevFp = csOpen(WS_CACHE_FP);
   }
+  wsPrevHLoad(); /* daftar header save sebelumnya (disalin di wsCacheSaveBody) */
   wsCacheSaveBody(m, wsName);
   if (g_prevFp) csClose(g_prevFp);
   g_prevFp = NULL;
   g_prevFpMtime = 0;
+  wsPrevHFree();
 }
 
 static void wsCacheSaveBody(const WsModel *m, const char *wsName) {
@@ -313,6 +426,43 @@ static void wsCacheSaveBody(const WsModel *m, const char *wsName) {
   bool ok = true;
   uint64_t wsProj = csHash("workspace");
   ok = ok && wsCacheAdd(pf, st, wsProj, wsName, 'W');
+  /* Salin entri header lama (audit 30/10): stamp di-stat ulang dari disk
+     sehingga perubahan header sejak save terakhir tetap terdeteksi, dan isi
+     hanya di-hash ulang bila (time,size) berbeda — aturan yang sama dengan
+     jalur baca .d. Header yang sudah hilang dari disk dibuang (tidak lagi
+     milik build mana pun); .d kotor yang masih merujuknya tetap dibaca dan
+     memakai jalur konservatif lama (save batal) seperti biasa. */
+  for (int i = 0; ok && i < g_prevHN; i++) {
+    long long hm = 0, hsz = 0;
+    if (!wsCacheInputStamp(g_prevH[i].path, &hm, &hsz)) continue;
+    for (int pi = 0; pi < m->projectCount; pi++) {
+      uint64_t proj = csHash(m->projects[pi].name);
+      CsEntry prev;
+      if (!g_prevFp || !csGet(g_prevFp, proj, g_prevH[i].file, &prev)) continue;
+      /* (proj,file) sudah tersalin save ini -> jangan tulis baris kedua:
+         baris P duplikat menggandakan stat di gate P-fast tiap run. */
+      CsEntry taken;
+      if (csGet(st, proj, g_prevH[i].file, &taken)) continue;
+      CsEntry e = {0};
+      e.proj = proj;
+      e.file = g_prevH[i].file;
+      e.time = hm;
+      e.size = hsz;
+      if (prev.time == hm && prev.size == hsz && hm < g_prevFpMtime) {
+        e.content = prev.content; /* metadata cocok & tidak racy: tanpa baca ulang */
+      } else {
+        e.content = wsStartupHash(g_prevH[i].path);
+        if (!e.content) {
+          ok = false;
+          break;
+        }
+      }
+      fprintf(pf, "%016llx H %016llx %lld %lld %s\n", (unsigned long long)e.file,
+              (unsigned long long)e.content, e.time, e.size, g_prevH[i].path);
+      ok = csPut(st, &e);
+    }
+  }
+  profMark("save-headers"); /* profil: salin entri H dari sources.cache lama */
   char dirPath[WS_PATH_LEN];
   for (int i = 0; ok && i < m->projectCount; i++) {
     const char *name = m->projects[i].name;
@@ -374,8 +524,11 @@ static void wsCacheSaveBody(const WsModel *m, const char *wsName) {
   profMark("save-walk"); /* profil: stat+hash seluruh entri (sumber/header/objek/output) */
   if (profOn())
     fprintf(stderr,
-            "[save-walk] .d: %d file %.1f ms | header: %d stat %.1f ms, %d hash ulang %.1f ms\n",
-            g_aD, g_aDRead, g_aH, g_aHStat, g_aHHashed, g_aHHash);
+            "[save-walk] .d: baca %d file %.1f ms (lewati %d) | header: %d stat %.1f ms, "
+            "%d hash ulang %.1f ms | input: %d stat %.1f ms | .d-cek: %d stat %.1f ms | "
+            "output: %d stat %.1f ms\n",
+            g_aD, g_aDRead, g_aDSkip, g_aH, g_aHStat, g_aHHashed, g_aHHash, g_aIn,
+            g_aInMs, g_aDSCheck, g_aDSCheckMs, g_aOut, g_aOutMs);
   /* Metadata grup P (§4): stamp per proyek + grup workspace (content = hash
      Buildfile.ws dari entri W). Disimpan SEBELUM commit agar baris P di
      fingerprint.cache memuat <content> <time> <size>. */

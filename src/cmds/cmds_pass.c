@@ -34,6 +34,87 @@
 #include "../prof/prof.h"
 #include "../uses/workspace.h"
 #include "../util.h"
+/* ---- Prune .d/.o yatim (DELETE source) — audit 30/10/2026 ----------------
+ * Versi lama (ws_exec.c) membaca baris pertama SETIAP file .d untuk mencari
+ * sumbernya lalu men-stat sumber itu: 10.003 fopen+read per build di
+ * workspace 10k objek — biaya terbesar jalur inkremental — dan lagipula
+ * memakai daftar sumber yang belum di-walk ulang (belum termasuk sumber
+ * yang baru dihapus).
+ *
+ * Sekarang daftar sumber segar sudah di tangan (koleksi pass ini), jadi
+ * cukup bandingkan object yang diharapkan dengan isi build/ — GETDENTS
+ * saja, tanpa satu pun pembacaan .d. Object yatim (sumber terhapus) beserta
+ * .d-nya dihapus; object embed (tanpa .d) tidak pernah masuk daftar jadi
+ * tak tersentuh. Bila ada yang terhapus, arsip statis/shared ikut dibuang
+ * karena `ar rcs` tidak menghapus member lama.
+ *
+ * Dipanggil hanya fase library mode workspace — cakupan identik dengan
+ * pemanggilan lama (proyek output.binary = false kembali lewat jalur embed
+ * di atas, jadi tak pernah sampai ke sini). */
+static int wsPruneCmp(const void *a, const void *b) {
+  return strcmp(*(char *const *)a, *(char *const *)b);
+}
+
+/* Kumpulkan seluruh path .d di bawah `dir` (rekursif; GETDENTS saja). */
+static void wsCollectDepFiles(const char *dir, List *out, unsigned depth) {
+  if (depth > 64) return;
+  List dirs = {0}, files = {0};
+  fsListDir(dir, &dirs, &files);
+  for (int i = 0; i < files.count; i++) {
+    const char *f = files.items[i];
+    size_t n = strlen(f);
+    if (n >= 3 && strcmp(f + n - 2, ".d") == 0) listAdd(out, f);
+  }
+  for (int i = 0; i < dirs.count; i++) wsCollectDepFiles(dirs.items[i], out, depth + 1);
+  listFree(&dirs);
+  listFree(&files);
+}
+
+static void wsPruneOrphanSources(const Config *c, const List *srcs) {
+  if (srcs->count <= 0) return;
+  char **keep = (char **)calloc((size_t)srcs->count, sizeof(char *));
+  if (!keep) return; /* alokasi gagal: jangan hapus apa pun (jalur aman) */
+  int kn = 0;
+  for (int i = 0; i < srcs->count; i++) {
+    char obj[MAX_PATH * 2];
+    if (!objectPathFor(c, srcs->items[i], obj, sizeof(obj))) continue;
+    keep[kn] = strdup(obj);
+    if (keep[kn]) kn++;
+  }
+  qsort(keep, (size_t)kn, sizeof(char *), wsPruneCmp);
+  List dfiles = {0};
+  wsCollectDepFiles(c->outBuildDir, &dfiles, 0);
+  bool removed = false;
+  for (int i = 0; i < dfiles.count; i++) {
+    const char *dep = dfiles.items[i];
+    size_t n = strlen(dep);
+    char object[WS_PATH_LEN];
+    if (n + 1 >= sizeof(object)) continue;
+    memcpy(object, dep, n + 1);
+    object[n - 1] = 'o'; /* "X.d" -> "X.o" */
+    const char *key = object;
+    if (bsearch(&key, keep, (size_t)kn, sizeof(char *), wsPruneCmp)) continue; /* masih dipakai */
+    if (fsRemoveFile(object)) cmdsStatMemoForget(object);
+    if (fsRemoveFile(dep)) cmdsStatMemoForget(dep);
+    removed = true;
+  }
+  listFree(&dfiles);
+  for (int i = 0; i < kn; i++) free(keep[i]);
+  free(keep);
+  if (!removed) return;
+  /* `ar rcs` replaces members but does not delete obsolete members.
+   * Removing the old archive is necessary for a correct source DELETE. */
+  char path[WS_PATH_LEN];
+  if (c->libStatic) {
+    cmdsLibStaticPath(c, path, sizeof(path));
+    if (fsRemoveFile(path)) cmdsStatMemoForget(path);
+  }
+  if (c->libShared) {
+    cmdsLibSharedPath(c, path, sizeof(path));
+    if (fsRemoveFile(path)) cmdsStatMemoForget(path);
+  }
+}
+
 /*
  * cmdsBuildPassRun — isi pass build satu proyek (fase library / fase
  * binary): koleksi source, fingerprint, decide, compile, embed, library,
@@ -140,10 +221,28 @@ int cmdsBuildPassRun(int jobs, Config c, const char *buildfilePath, bool libOnly
 
   /* One-pass stat plan: stamp source (selalu) + object (default; hilangkan
    * dengan SATRIA_STATPLAN_OBS=0) SEKALI di sini. Konsumen berikutnya memakai
-   * hasilnya tanpa stat ulang. */
+   * hasilnya tanpa stat ulang.
+   *
+   * Kandidat 2 (audit 30/10): pass BINER mode workspace mewarisi verdict byte
+   * object dari pass library yang baru berjalan (`wsPhaseObjectChangeGet`).
+   * Bila verdict bilang byte object IDENTIK, satu-satunya hasil yang mungkin
+   * dari statPlan + decide di pass ini adalah "nol kompilasi, jangan relink"
+   * — yaitu keputusan yang memang sudah dipakai ekor pass (linkNeeded=false
+   * lewat phaseObjectVerdict). Melewatinya menghemat stat 2N file + loop
+   * decide (647 ms di workspace 1.003 objek), tanpa menyentuh ekor pass:
+   * output, fingerprint, dan penyimpanan state tetap lewat kode yang sama.
+   * Gagal/absennya verdict (pass library tadi no-op), projek mode single,
+   * perubahan embed/version header, atau SATRIA_SKIP_BINPASS=0 -> jalur lama
+   * utuh. Rencana kosong aman: decide jatuh ke stat sendiri dan blok version
+   * header menghapus object tanpa syarat bila header memang berubah. */
+  bool fastTail = false;
+  if (wsModeActive() && !libOnly && !embHeaderChanged && !envOff("SATRIA_SKIP_BINPASS")) {
+    bool vchanged = true;
+    fastTail = wsPhaseObjectChangeGet(&vchanged) && !vchanged;
+  }
   StatPlan plan;
   statPlanInit(&plan);
-  statPlanBuild(&plan, &c, &srcs);
+  if (!fastTail) statPlanBuild(&plan, &c, &srcs);
   profMark("collect+plan");
 
   if (srcs.count == 0) {
@@ -152,6 +251,12 @@ int cmdsBuildPassRun(int jobs, Config c, const char *buildfilePath, bool libOnly
     statPlanFree(&plan);
     return 1;
   }
+
+  /* Prune .d/.o yatim sesudah koleksi: daftar sumber sudah segar sehingga
+     penghapusan sumber terdeteksi di run yang sama, tanpa membaca .d
+     (lihat catatan wsPruneOrphanSources di atas). */
+  if (libOnly && wsModeActive()) wsPruneOrphanSources(&c, &srcs);
+  profMark("prune"); /* profil: prune yatim (0 ms bila tak ada yang dihapus) */
 
   CmdsBuildFingerprint currentFp;
   cmdsFingerprintMake(&c, &srcs, &currentFp);
@@ -258,6 +363,14 @@ int cmdsBuildPassRun(int jobs, Config c, const char *buildfilePath, bool libOnly
   /* Default: decide membaca plan (satu stat / file). SATRIA_DECIDE_FROM_PLAN=0
      mengembalikan stat sendiri (perilaku lama). */
   bool decideFromPlan = !envOff("SATRIA_DECIDE_FROM_PLAN");
+  if (fastTail) {
+    /* Verdict pass library: byte object identik -> tidak ada yang perlu
+       dikompilasi dan tidak ada alasan relink (lihat catatan fastTail di
+       atas). `skipped` = seluruh sumber, sama seperti hasil decide yang
+       sebenarnya; ekor pass memakai nilai ini untuk laporan & keputusan
+       link. Rencana & loop dilewati — bukan dijalankan dengan hasil bohong. */
+    skipped = srcs.count;
+  } else
   for (int i = 0; i < srcs.count; i++) {
     const char *src = srcs.items[i];
     if (!objectPathFor(&c, src, obj, sizeof(obj))) continue;

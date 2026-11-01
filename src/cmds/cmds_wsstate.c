@@ -101,6 +101,148 @@ static void wsWriteSrcSnapshot(const List *srcs) {
   free(buf);
 }
 
+/* ===== Reuse hash isi entri fast-state (audit 30/10 — kandidat 4) =========
+   wsFastStateSave dulu membaca + hash ULANG seluruh sumber dan closure
+   header tiap build hanya untuk menulis kolom content di baris F (1.510 ms
+   di workspace 1.003 objek — setelah kandidat 1, bucket terbesar sisa).
+   Validasi tidak membutuhkan itu: baris F dianggap segar TANPA hash selama
+   (mtime,size) cocok dengan disk (cmdsStateEntryFresh), jadi stamp yang tak
+   berubah = isi tak mungkin berubah -> pakai ulang hash tersimpan. Entri yang
+   stamp-nya berubah (sumber/header yang disentuh run ini) tetap di-hash ulang
+   seperti biasa — bukti sentuh tetap akurat. */
+typedef struct {
+  char *path;
+  long long mtime, size;
+  unsigned long long content;
+} FsPrevEnt;
+
+typedef struct {
+  FsPrevEnt *v;
+  size_t n, cap; /* cap pangkat dua; v[i].path == NULL = slot kosong */
+} FsPrevTable;
+
+static size_t fsPrevHash(const char *s) {
+  size_t h = 1469598103934665603ULL;
+  for (const unsigned char *p = (const unsigned char *)s; *p; p++) {
+    h ^= *p;
+    h *= 1099511628211ULL;
+  }
+  return h;
+}
+
+static bool fsPrevInit(FsPrevTable *t, size_t n) {
+  size_t cap = 64;
+  while (cap < n * 2 + 16) cap <<= 1;
+  t->v = (FsPrevEnt *)calloc(cap, sizeof(FsPrevEnt));
+  t->n = 0;
+  t->cap = t->v ? cap : 0;
+  return t->v != NULL;
+}
+
+static void fsPrevFree(FsPrevTable *t) {
+  if (t->v)
+    for (size_t i = 0; i < t->cap; i++) free(t->v[i].path);
+  free(t->v);
+  t->v = NULL;
+  t->n = t->cap = 0;
+}
+
+static void fsPrevGrow(FsPrevTable *t) {
+  size_t ncap = t->cap * 2;
+  FsPrevEnt *nv = (FsPrevEnt *)calloc(ncap, sizeof(FsPrevEnt));
+  if (!nv) return; /* gagal: tabel tetap terpakai apa adanya (tanpa tambah) */
+  size_t mask = ncap - 1;
+  for (size_t i = 0; i < t->cap; i++) {
+    if (!t->v[i].path) continue;
+    size_t j = fsPrevHash(t->v[i].path) & mask;
+    while (nv[j].path) j = (j + 1) & mask;
+    nv[j] = t->v[i];
+  }
+  free(t->v);
+  t->v = nv;
+  t->cap = ncap;
+}
+
+static void fsPrevAdd(FsPrevTable *t, const char *path, long long mt, long long sz,
+                      unsigned long long content) {
+  if (!t->cap || !path || !*path) return;
+  if ((t->n + 1) * 4 > t->cap * 3) fsPrevGrow(t);
+  size_t mask = t->cap - 1;
+  size_t j = fsPrevHash(path) & mask;
+  while (t->v[j].path) {
+    if (strcmp(t->v[j].path, path) == 0) return; /* pertama menang */
+    j = (j + 1) & mask;
+  }
+  char *dup = strdup(path);
+  if (!dup) return;
+  t->v[j].path = dup;
+  t->v[j].mtime = mt;
+  t->v[j].size = sz;
+  t->v[j].content = content;
+  t->n++;
+}
+
+static bool fsPrevFind(const FsPrevTable *t, const char *path, long long *mt, long long *sz,
+                       unsigned long long *content) {
+  if (!t->cap || !path) return false;
+  size_t mask = t->cap - 1;
+  size_t j = fsPrevHash(path) & mask;
+  while (t->v[j].path) {
+    if (strcmp(t->v[j].path, path) == 0) {
+      *mt = t->v[j].mtime;
+      *sz = t->v[j].size;
+      *content = t->v[j].content;
+      return true;
+    }
+    j = (j + 1) & mask;
+  }
+  return false;
+}
+
+/* Hash isi: pakai ulang bila stamp (mtime,size) sama dengan catatan lama dan
+   catatan itu memuat hash; selain itu hash segar seperti jalur lama. */
+static uint64_t fsPrevContent(const FsPrevTable *t, const char *path, long long mt,
+                              long long sz) {
+  long long om = 0, os = 0;
+  unsigned long long oc = 0;
+  if (fsPrevFind(t, path, &om, &os, &oc) && om == mt && os == sz && oc)
+    return (uint64_t)oc;
+  return cmdsStateFileHash(path);
+}
+
+/* Muat entri F/I fase library (caches/lib.cache) / fase binary (ws.state). */
+static void fsPrevLoadLib(FsPrevTable *t) {
+  LibCacheMeta om;
+  LibStampRec *ost = NULL;
+  int on = 0;
+  if (!libCacheLoad(&om, &ost, &on)) return;
+  fsPrevInit(t, (size_t)(on > 0 ? on : 0));
+  for (int i = 0; i < on; i++)
+    if (ost[i].kind == 'F')
+      fsPrevAdd(t, ost[i].path, ost[i].mtime, ost[i].size, ost[i].content);
+  free(ost);
+  libCacheMetaFree(&om);
+}
+
+static void fsPrevLoadWsState(FsPrevTable *t, const char *proj) {
+  char *tb = NULL;
+  size_t tn = 0, tp = 0, lines = 0;
+  if (!proj || !stateBlobGet(proj, "ws.state", &tb, &tn)) return;
+  for (size_t i = 0; i < tn; i++)
+    if (tb[i] == '\n') lines++;
+  fsPrevInit(t, lines);
+  char line[MAX_PATH * 6];
+  while (stateBufGets(tb, tn, &tp, line, sizeof(line))) {
+    char k = 0;
+    long long mt = 0, sz = 0;
+    unsigned long long ct = 0;
+    char p[WS_PATH_LEN];
+    if (!cmdsParseStateEntry(line, &k, &mt, &sz, &ct, p)) continue;
+    if (k == 'F' || k == 'I') fsPrevAdd(t, p, mt, sz, ct);
+  }
+  free(tb);
+}
+
 void wsFastStateSave(struct DepCache *dc, const Config *c, const List *srcs, const char *target,
                      const char *buildfilePath, bool libOnly) {
   if (!dc || !c || !srcs) return;
@@ -226,20 +368,27 @@ void wsFastStateSave(struct DepCache *dc, const Config *c, const List *srcs, con
     }
     LibStampRec *recs = calloc(items.count ? (size_t)items.count : 1, sizeof(LibStampRec));
     if (recs) {
+      FsPrevTable prev = {0};
+      fsPrevLoadLib(&prev); /* stamp lama: sumber/header tak tersentuh tanpa hash ulang */
       int nrec = 0;
       for (int i = 0; i < items.count; i++) {
         char kind = items.items[i][0];
         const char *p = items.items[i] + 2;
         int64_t mm = 0;
         long long sz = 0;
-        bool exists = kind == 'O' ? fsStampNsSize(p, &mm, &sz) : cmdsStatCached(p, &mm, &sz);
+        size_t plen = strlen(p);
+        bool isObj = plen >= 2 && strcmp(p + plen - 2, ".o") == 0;
+        bool exists = kind == 'O' ? (isObj ? memoStampNsSize(p, &mm, &sz) : fsStampNsSize(p, &mm, &sz))
+                                  : cmdsStatCached(p, &mm, &sz);
         recs[nrec].kind = !exists ? 'M' : (kind == 'D' ? 'D' : 'F');
         snprintf(recs[nrec].path, sizeof(recs[nrec].path), "%s", p);
         recs[nrec].mtime = (long long)mm;
         recs[nrec].size = sz;
-        recs[nrec].content = recs[nrec].kind == 'F' ? cmdsStateFileHash(p) : 0; /* bukti sentuh */
+        recs[nrec].content =
+            recs[nrec].kind == 'F' ? fsPrevContent(&prev, p, (long long)mm, sz) : 0;
         nrec++;
       }
+      fsPrevFree(&prev);
       libCacheSave(&m, recs, nrec);
       free(recs);
     }
@@ -256,6 +405,8 @@ void wsFastStateSave(struct DepCache *dc, const Config *c, const List *srcs, con
     listFree(&libs);
     return;
   }
+  FsPrevTable prev = {0};
+  fsPrevLoadWsState(&prev, proj); /* stamp lama ws.state: hindari hash ulang */
   char *ob = NULL;
   size_t ou = 0, oc = 0;
   stAppendf(&ob, &ou, &oc, "%s %s\n", WS_STATE_MAGIC, cwd);
@@ -272,7 +423,10 @@ void wsFastStateSave(struct DepCache *dc, const Config *c, const List *srcs, con
     /* Output: stat langsung. Input (source, header, folder): dari memo (nilai
        dari validasi/decide yang sudah didapat); pra-pass di atas menjamin tidak ada
        output atau folder build/ yang basi di memo. */
-    bool exists = (kind == 'O' || kind == 'I') ? fsStampNsSize(p, &m, &sz) : cmdsStatCached(p, &m, &sz);
+    size_t plen2 = strlen(p);
+    bool isObj2 = plen2 >= 2 && strcmp(p + plen2 - 2, ".o") == 0;
+    bool exists = kind == 'O' && isObj2 ? memoStampNsSize(p, &m, &sz)
+                  : (kind == 'O' || kind == 'I') ? fsStampNsSize(p, &m, &sz) : cmdsStatCached(p, &m, &sz);
     if (!exists) {
       stAppendf(&ob, &ou, &oc, "X 0 0 %s\n", p);
     } else if (kind == 'D') {
@@ -281,8 +435,10 @@ void wsFastStateSave(struct DepCache *dc, const Config *c, const List *srcs, con
       /* v2: baris F membawa content16hex (FNV-1a isi) — sentuh tanpa
          perubahan isi tetap lolos validasi lewat bukti hash, tanpa rebuild
          (design/startup.md §4). Kompatibel mundur: parser menerima baris
-         lama tanpa kolom itu. */
-      uint64_t content = (kind == 'I' || kind == 'F') ? cmdsStateFileHash(p) : 0;
+         lama tanpa kolom itu. Hash diambil dari catatan lama bila stamp tak
+         berubah (audit 30/10 — kandidat 4); stamp berubah -> hash segar. */
+      uint64_t content =
+          (kind == 'I' || kind == 'F') ? fsPrevContent(&prev, p, (long long)m, sz) : 0;
       stAppendf(&ob, &ou, &oc, "%c %lld %lld %016llx %s\n",
                 kind == 'O' ? 'O' : (kind == 'I' ? 'I' : 'F'), (long long)m, sz,
                 (unsigned long long)content, p);
@@ -290,6 +446,7 @@ void wsFastStateSave(struct DepCache *dc, const Config *c, const List *srcs, con
   }
   if (stateBlobPut(proj, "ws.state", ob ? ob : "", ou)) optsRouterRecord(c, libOnly); /* router: deps (+lib/+embed) */
   free(ob);
+  fsPrevFree(&prev);
   listFree(&items);
   listFree(&libs);
 
@@ -308,6 +465,24 @@ static bool wsFastStateValidLib(const char *buildfilePath, const char *cwd) {
     libCacheMetaFree(&m);
     free(st);
     return false;
+  }
+  /* Audit 30/10 (kandidat 5): daftar stamp disimpan urut-hash store, jadi
+     entri yang basi bisa berada di ujung dan memaksa ratusan stat sia-sia
+     (fs-stamps 690 ms di n=500). Gerbang sudah tahu path mana yang isinya
+     berbeda (wsGateStale*) — entri itu dipindah ke depan dan dinilai lebih
+     dulu. Murni urutan (swap antar slot): seluruh entri tetap dinilai, keputusan
+     akhir identik. Bila path tak ada di state ini, tidak ada yang berubah. */
+  for (int s = 0, front = 0; front < nst && s < wsGateStaleCount(); s++) {
+    const char *stale = wsGateStalePath(s);
+    if (!stale) break;
+    for (int i = front; i < nst; i++) {
+      if (strcmp(st[i].path, stale) != 0) continue;
+      LibStampRec tmp = st[front];
+      st[front] = st[i];
+      st[i] = tmp;
+      front++;
+      break;
+    }
   }
   bool ok = true;
   for (int i = 0; ok && i < nst; i++) {
