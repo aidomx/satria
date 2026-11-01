@@ -72,42 +72,41 @@ Design baru menggunakan symbol | (unicode) fallback > kalau tidak mendukung.
 
 ```text
 Build Report
-============
+------------
 Toolchain : gcc -Wall -Wextra -MMD -MP -std=gnu11
-CompDB : compile_commands.json refreshed (workspace)
+CompDB    : compile_commands.json refreshed
 
-Archive
--------
-- rupamod : modules/rupa_modules.tar (12.4 KB) [cached]
+# Archive
+* modules/rupa_modules.tar (12KB, cached)
+* modules/image_modules.tar (1MB)
 
-Libraries
----------
-- bade
-Embedded : config changed -> recompiling all sources
+# Libraries
+> Bade
+* Embedded config changed -> recompiling all sources
 [1/3] OK 0.56s bade/manager/main.c
-[2/3] OK 0.72s bade/src/bade.c
+[2/3] OK 0.7s bade/src/bade.c
 WARN bade/src/bade.c:9:13: 'sayHelloWorld' defined but not used
 [3/3] OK 0.88s bade/src/embed_use.c
-Embedded : modules/rupa_modules.tar
-Output : lib/libbade.a, lib/libbade.so
-Status : Success (3 compiled, 0 skipped, 1 warning)
 
-- core
+> Core
 [1/2] OK 1.15s core/src/core.c
 [2/2] OK 1.29s core/src/main.c
-Output : lib/librupa.a, lib/librupa.so
-Status : Success (2 compiled, 0 skipped)
 
-Binaries
---------
-- bade : bin/bade (79.8 KB)
-- core : bin/rupa (69.2 KB)
+# Binaries
+* bin/bade (79.8 KB, linked)
+* bin/rupa (69.2 KB, linked)
 
-Summary
--------
-Projects : 3
-Compiled : 5
-Skipped : 0
-Warnings : 1
-Status : Success (with warning)
+# Summary
+> Bade
+* libbade.a, 500KB
+* libbade.so, 500KB
+* 3 compiled, 0 skipped, 1 warning
+
+> Core
+* librupa.a, 700KB
+* librupa.so, 700KB
+* 2 compiled, 0 skipped
+
+Total time : 2m50s
+Status     : success
 ```
