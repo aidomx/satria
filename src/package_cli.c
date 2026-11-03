@@ -20,6 +20,7 @@
 
 #define PKG_PATH_MAX 4096
 
+#ifndef _WIN32 /* pathJoin hanya dipakai cabang POSIX (#else di bawah) */
 static bool pathJoin(char *out, size_t cap, const char *a, const char *b) {
   size_t na = strlen(a), nb = strlen(b);
   bool slash = na > 0 && a[na - 1] != '/';
@@ -30,6 +31,7 @@ static bool pathJoin(char *out, size_t cap, const char *a, const char *b) {
   memcpy(out + at, b, nb + 1);
   return true;
 }
+#endif
 
 static bool expandPath(const char *in, char *out, size_t cap) {
   char tmp[PKG_PATH_MAX];
@@ -120,6 +122,7 @@ static bool shellQuote(const char *s, char *out, size_t cap) {
 }
 
 static int cmdSelfUpgrade(int argc, const char *argv0) {
+  (void)argv0; /* dipakai hanya di cabang POSIX/Windows tertentu */
   if (argc != 2) {
     fprintf(stderr, "usage: satria self-upgrade\n");
     return 2;

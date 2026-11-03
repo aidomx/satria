@@ -86,9 +86,13 @@ jobs:
           SATRIA_VERSION: ${{ inputs.version }}
         run: ./install.ps1 --dev
 
-      - name: Smoke test
+      - name: Smoke test version
         shell: bash
         run: ./bin/satria version
+
+      - name: Smoke test help
+        shell: bash
+        run: ./bin/satria help
 
       - name: Copy bootstrap binary (Windows)
         if: runner.os == 'Windows'
