@@ -218,17 +218,15 @@ int cmdsBuildPassFinish(CmdsPassTail *t) {
     n += strlen(c.libraries.items[i]) + 8;
 
   char *cmd = malloc(n);
-  strcpy(cmd, c.cc);
-  for (int i = 0; i < srcs.count; i++) {
-    if (!objectPathFor(&c, srcs.items[i], obj, sizeof(obj))) continue;
-    strcat(cmd, " ");
-    strcat(cmd, obj);
-  }
   if (compilerIsMSVC(&c)) {
-    /* MSVC: object dikumpulkan dulu, opsi linker setelah token /link.
-       /OUT menentukan target; link.exe untuk EXE tanpa /LD tidak menulis
-       .lib/.exp sampingan, jadi tidak perlu /IMPLIB. (Nama variabel beda
-       dari `target` luar — MSVC /W4 memperingatkan shadowing, C4456.) */
+    /* MSVC: link.exe dipanggil langsung, bukan `cl <object> /link ...`. cl
+       hanya mengenal ekstensi ".obj" dan mencetak satu D9024 per object ".o",
+       sedangkan object satria memakai ".o" di semua platform agar jalur deps
+       dan inkrementalnya seragam. /OUT menentukan target; untuk EXE tanpa /LD
+       link.exe tidak menulis .lib/.exp sampingan, jadi tidak perlu /IMPLIB.
+       (Nama variabel beda dari `target` luar — MSVC /W4 memperingatkan
+       shadowing, C4456.) */
+    strcpy(cmd, "link /nologo /INCREMENTAL:NO");
     char linkTarget[SATRIA_MAX_PATH * 2];
     snprintf(linkTarget, sizeof(linkTarget), "%s/%s", c.outBinaryDir, c.outBinaryName);
     /* link.exe TIDAK menambahkan .exe pada /OUT yang tanpa ekstensi (beda dari
@@ -240,8 +238,13 @@ int cmdsBuildPassFinish(CmdsPassTail *t) {
       if (ltLen < 4 || strcmp(linkTarget + ltLen - 4, ".exe") != 0)
         strcat(linkTarget, ".exe");
     }
-    strcat(cmd, " /link /nologo /INCREMENTAL:NO /OUT:");
+    strcat(cmd, " /OUT:");
     strcat(cmd, linkTarget);
+    for (int i = 0; i < srcs.count; i++) {
+      if (!objectPathFor(&c, srcs.items[i], obj, sizeof(obj))) continue;
+      strcat(cmd, " ");
+      strcat(cmd, obj);
+    }
     for (int i = 0; i < c.libraries.count; i++) {
       const char *lib = c.libraries.items[i];
       if (lib[0] == '-') lib++; /* -lssl -> ssl */
@@ -251,6 +254,12 @@ int cmdsBuildPassFinish(CmdsPassTail *t) {
       strcat(cmd, ".lib");
     }
   } else {
+    strcpy(cmd, c.cc);
+    for (int i = 0; i < srcs.count; i++) {
+      if (!objectPathFor(&c, srcs.items[i], obj, sizeof(obj))) continue;
+      strcat(cmd, " ");
+      strcat(cmd, obj);
+    }
     strcat(cmd, " -o ");
     strcat(cmd, c.outBinaryDir);
     strcat(cmd, "/");
