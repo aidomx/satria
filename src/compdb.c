@@ -276,25 +276,30 @@ static void compdbAppendEntries(char *buf, size_t *bufLen, size_t bufCap, const 
   }
 }
 
-void writeCompdb(const Config *c, List *srcs) {
+RepCompdb writeCompdb(const Config *c, List *srcs) {
   char cwd[MAX_PATH];
-  if (!fsGetCwd(cwd, sizeof(cwd))) return;
+  if (!fsGetCwd(cwd, sizeof(cwd))) return REP_COMPDB_FAILED;
 
   uint64_t fingerprint = compdbEntryHash(c, srcs, cwd);
   if (compdbCacheHit(fingerprint)) {
-    printf("%s CompDB  : compile_commands.json unchanged (cache hit)\n", repPrefix());
-    return;
+    /* Jalur build (report aktif): status muncul di header Build Report —
+       jangan cetak live agar tidak dobel. Jalur query (`compdb -g`) tetap
+       cetak live karena tidak memakai report. */
+    if (!buildReportActive())
+      printf("%s CompDB  : compile_commands.json unchanged (cache hit)\n", repPrefix());
+    return REP_COMPDB_UNCHANGED;
   }
   /* Json hilang tapi blob + fingerprint masih cocok: restore tanpa render. */
   if (!fsFileExists("compile_commands.json") && compdbRestoreFromBlob(fingerprint)) {
-    printf("%s CompDB  : compile_commands.json restored (blob)\n", repPrefix());
-    return;
+    if (!buildReportActive())
+      printf("%s CompDB  : compile_commands.json restored (blob)\n", repPrefix());
+    return REP_COMPDB_RESTORED;
   }
 
   // 1. Alokasi buffer di memori (2MB aman untuk ribuan file)
   size_t bufCap = 2 * 1024 * 1024;
   char *buf = malloc(bufCap);
-  if (!buf) return;
+  if (!buf) return REP_COMPDB_FAILED;
   size_t bufLen = 0;
 
   APPEND(buf, bufLen, bufCap, "[\n");
@@ -306,15 +311,21 @@ void writeCompdb(const Config *c, List *srcs) {
 
   // 2. SATU KALI TULIS KE DISK (The Magic Happens Here)
   FILE *fp = fopen("compile_commands.json", "w");
+  bool writeOk = false;
   if (fp) {
-    fwrite(buf, 1, bufLen, fp);
-    fclose(fp);
+    writeOk = fwrite(buf, 1, bufLen, fp) == bufLen;
+    if (fclose(fp) != 0) writeOk = false;
   }
 
   saveCompdbBlob(buf, bufLen); /* konten json untuk restore tanpa render */
   free(buf);
   saveCompdbCache(fingerprint);
-  printf("%s CompDB  : compile_commands.json refreshed\n", repPrefix());
+  /* Kegagalan penulisan/alokasi -> status `failed` (hanya informasi; tidak
+     mengubah exit code build — design/build_report.md §6). */
+  if (!writeOk) return REP_COMPDB_FAILED;
+  if (!buildReportActive())
+    printf("%s CompDB  : compile_commands.json refreshed\n", repPrefix());
+  return REP_COMPDB_REFRESHED;
 }
 
 /* ============ merged workspace (multi-Config) ============
@@ -338,19 +349,27 @@ uint64_t compdbMultiFingerprint(const Config *const *cfgs, List *const *srcs, in
   return fp;
 }
 
-void writeCompdbMulti(const Config *const *cfgs, List *const *srcs, int count) {
+RepCompdb writeCompdbMulti(const Config *const *cfgs, List *const *srcs, int count) {
   uint64_t fingerprint = compdbMultiFingerprint(cfgs, srcs, count);
-  if (!fingerprint) return;
+  if (!fingerprint) return REP_COMPDB_FAILED;
 
-  if (compdbCacheHit(fingerprint)) return; /* identik: tanpa tulis, diam */
-  if (!fsFileExists("compile_commands.json") && compdbRestoreFromBlob(fingerprint)) return;
+  if (compdbCacheHit(fingerprint)) {
+    if (!buildReportActive())
+      printf("%s CompDB  : compile_commands.json unchanged (workspace)\n", repPrefix());
+    return REP_COMPDB_UNCHANGED;
+  }
+  if (!fsFileExists("compile_commands.json") && compdbRestoreFromBlob(fingerprint)) {
+    if (!buildReportActive())
+      printf("%s CompDB  : compile_commands.json restored (workspace)\n", repPrefix());
+    return REP_COMPDB_RESTORED;
+  }
 
   char cwd[MAX_PATH];
-  if (!fsGetCwd(cwd, sizeof(cwd))) return;
+  if (!fsGetCwd(cwd, sizeof(cwd))) return REP_COMPDB_FAILED;
 
   size_t bufCap = 2 * 1024 * 1024;
   char *buf = malloc(bufCap);
-  if (!buf) return;
+  if (!buf) return REP_COMPDB_FAILED;
   size_t bufLen = 0;
   APPEND(buf, bufLen, bufCap, "[\n");
 
@@ -361,12 +380,16 @@ void writeCompdbMulti(const Config *const *cfgs, List *const *srcs, int count) {
   APPEND(buf, bufLen, bufCap, "]\n");
 
   FILE *fp = fopen("compile_commands.json", "w");
+  bool writeOk = false;
   if (fp) {
-    fwrite(buf, 1, bufLen, fp);
-    fclose(fp);
+    writeOk = fwrite(buf, 1, bufLen, fp) == bufLen;
+    if (fclose(fp) != 0) writeOk = false;
   }
   saveCompdbBlob(buf, bufLen);
   free(buf);
   saveCompdbCache(fingerprint);
-  printf("%s CompDB  : compile_commands.json refreshed (workspace)\n", repPrefix());
+  if (!writeOk) return REP_COMPDB_FAILED;
+  if (!buildReportActive())
+    printf("%s CompDB  : compile_commands.json refreshed (workspace)\n", repPrefix());
+  return REP_COMPDB_REFRESHED;
 }

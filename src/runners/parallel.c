@@ -45,6 +45,7 @@
  */
 
 #include "runners.h"
+#include "../log/build_report.h" /* fragment record artefak antar fork */
 
 #ifndef _WIN32
 #include <errno.h>
@@ -81,6 +82,7 @@ typedef struct {
   char tmpl[32];
   char stage[64];
   char verdict[64];
+  char rep[64]; /* fragment record build report anak (A/L/B/R) */
   bool started, done, flushed, forked;
 } WsSlot;
 
@@ -104,7 +106,25 @@ static bool wsDepsDone(const WsModel *m, const WsWork *work, int n,
   return true;
 }
 
-static void wsSlotDump(WsSlot *s) {
+/* Dump slot + impor fragment report anak, mengikuti urutan flush (= urut
+   worklist): heading # Execution + > Nama dicetak INDUK (bukan child), lalu
+   fragment record artefak diimpor, isi slot (compile line + hitungan) dicetak,
+   dan terakhir baris arsip yang belum tampil dirender sesudahnya — posisi
+   identik dengan runner serial (arsip proyek tampil setelah blok proyeknya;
+   lihat buildReportProject). */
+static void wsSlotDump(const WsModel *m, const WsWork *work, WsSlot *s, int idx) {
+  /* Heading `# Execution` + `> Nama` dicetak INDUK SEBELUM impor fragment:
+     arsip proyek INI baru boleh dirender sesudah bloknya (urutan serial),
+     sementara arsip proyek SEBELUMNYA yang masih pending ikut dirender di
+     sini — persis perilaku buildReportProject pada runner serial. Child dalam
+     staging tidak mencetak heading (lihat buildReportProject). */
+  if (s->fd >= 0 && !wsProjectArchiveOnly(&m->projects[work[idx].idx]) &&
+      lseek(s->fd, 0, SEEK_END) > 0)
+    buildReportProject(work[idx].name); /* slot fast-state-hit kosong -> tanpa heading */
+  if (s->rep[0]) {
+    buildReportImport(s->rep);
+    s->rep[0] = '\0';
+  }
   if (s->fd >= 0) {
     char buf[4096];
     ssize_t r;
@@ -114,19 +134,33 @@ static void wsSlotDump(WsSlot *s) {
     s->fd = -1;
     if (s->tmpl[0]) unlink(s->tmpl);
   }
+  buildReportRenderArchives();
   s->flushed = true;
 }
 
-/* Cetak output slot yang selesai selama prefix worklist berurutan; berhenti
-   pada slot yang belum diluncurkan / masih berjalan agar output tetap urut. */
-static void wsFlushPrefix(WsSlot *slot, int n) {
-  for (int i = 0; i < n; i++) {
-    if (slot[i].flushed) continue;
-    if (slot[i].started && slot[i].done) {
-      wsSlotDump(&slot[i]);
-      continue;
+/* Cetak output slot yang selesai mengikuti urutan runner SERIAL (design
+   kriteria pengujian workspace: "urutan proyek sama dengan worklist pada
+   runner serial"): fase library per tingkat dependensi (batch-per-level),
+   fase binary datar atas worklist. Slot berikutnya yang belum siap MENGHENTIKAN
+   flush — output proyek tetap utuh dan deterministik, bukan urutan selesai
+   anak. Peluncuran anak TIDAK berubah: penjadwal siap-dep tetap menindih
+   proyek independen; hanya urutan CETAK yang disamakan. */
+static void wsFlushPrefix(const WsModel *m, const WsWork *work, WsSlot *slot, int n,
+                          bool libOnly) {
+  int maxLevel = 0;
+  if (libOnly)
+    for (int i = 0; i < n; i++)
+      if (work[i].level > maxLevel) maxLevel = work[i].level;
+  for (int lv = 0; lv <= maxLevel; lv++) {
+    for (int i = 0; i < n; i++) {
+      if (libOnly && work[i].level != lv) continue;
+      if (slot[i].flushed) continue;
+      if (slot[i].started && slot[i].done) {
+        wsSlotDump(m, work, &slot[i], i);
+        continue;
+      }
+      return; /* urut serial: berhenti pada slot berikutnya yang belum siap */
     }
-    break;
   }
 }
 
@@ -182,6 +216,8 @@ int runnerParallel(const WsModel *m, const WsWork *work, int n, int jobs,
                  (long)getpid(), seq);
         snprintf(s->verdict, sizeof(s->verdict), ".satria/ws-verdict-%ld-%d",
                  (long)getpid(), seq);
+        snprintf(s->rep, sizeof(s->rep), ".satria/ws-report-%ld-%d",
+                 (long)getpid(), seq);
         seq++;
         snprintf(s->tmpl, sizeof(s->tmpl), "%s", tmpl);
         fflush(NULL);
@@ -197,9 +233,14 @@ int runnerParallel(const WsModel *m, const WsWork *work, int n, int jobs,
              terminal/ERRLOG) — tidak memengaruhi penggretan unit test. */
           if (fd > STDERR_FILENO) close(fd);
           stateBlobForkChild(); /* buang warisan; tulisan anak ke stage sendiri */
+          /* Staging: record artefak anak TIDAK dirender live (heading & baris
+             arsip adalah tanggung jawab induk saat flush worklist) — anak
+             cukup mengekspornya lewat file fragment di bawah. */
+          buildReportStaging(true);
           int crc = wsRunProject(m, work[i].name, cmd, pj, libOnly);
           fflush(NULL);
           stateBlobExport(s->stage);
+          buildReportExport(s->rep);
           if (libOnly) wsVerdictChildExport(work[i].name, s->verdict);
           _exit(crc); /* bukan exit(): hindari atexit ganda setelah fork */
         }
@@ -243,13 +284,13 @@ int runnerParallel(const WsModel *m, const WsWork *work, int n, int jobs,
     if (crc != 0 && rc == 0) rc = crc;
     stateBlobImport(s->stage);
     wsVerdictParentImport(work[si].name, s->verdict);
-    wsFlushPrefix(slot, n);
+    wsFlushPrefix(m, work, slot, n, libOnly);
     if (rc != 0) failed = true; /* berhenti meluncurkan; kerikan sisa anak */
   }
 
   /* Output anak yang belum tercetak (mis. sesudah kegagalan): apa adanya. */
   for (int i = 0; i < n; i++)
-    if (slot[i].forked && !slot[i].flushed) wsSlotDump(&slot[i]);
+    if (slot[i].forked && !slot[i].flushed) wsSlotDump(m, work, &slot[i], i);
 
   /* Sisa proyek yang belum diluncurkan (mkstemp/fork gagal): serial,
      urutan worklist = topo — dependensi sudah selesai atau mendahului. */

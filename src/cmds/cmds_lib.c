@@ -18,6 +18,7 @@
 #include "../compile.h"
 #include "../embed.h"
 #include "../log/build_log.h"
+#include "../log/build_report.h"
 #include "../pack/pack.h"
 #include "../portability.h"
 #include "../util.h"
@@ -50,21 +51,31 @@ bool cmdsPackAfterBinary(const Config *c, bool *fastStateSaved, const List *srcs
    untuk proyek lain), lalu packaging, lalu summary ringkas. */
 int cmdsPackOnlyProject(const Config *c) {
   bool anyRebuilt = false;
+  bool repActive = buildReportActive();
   if (c->embCount > 0) {
     mkdirs(c->outBuildDir);
     if (!buildEmbeddedArchivesEx(c, &anyRebuilt)) return 1;
   }
   if (!packRun(c)) return 1;
   if (packLastRebuilt()) anyRebuilt = true;
-  printf("\n%s Summary :\n", repPrefix());
-  for (int i = 0; i < c->embCount; i++) {
-    if (!c->emb[i].enable) continue;
-    printf("    Archive  : %s%s\n", c->emb[i].archivePath,
-           fsFileExists(c->emb[i].archivePath) ? "" : " (missing)");
+  /* Format lama `Summary :` hanya saat Build Report TIDAK aktif. Saat aktif:
+     arsip & paket tercatat pada # Archive / # Release (step 2 & 8). */
+  if (!repActive) {
+    printf("\n%s Summary :\n", repPrefix());
+    for (int i = 0; i < c->embCount; i++) {
+      if (!c->emb[i].enable) continue;
+      printf("    Archive  : %s%s\n", c->emb[i].archivePath,
+             fsFileExists(c->emb[i].archivePath) ? "" : " (missing)");
+    }
+    /* No-op: tidak ada arsip/paket yang dibangun ulang (design/build_report.md). */
+    if (!anyRebuilt) printf("    Skipped  : true\n");
+    printf("    Status   : Success\n");
+  } else if (!wsModeActive()) {
+    /* Single-project: header dirender setelah record arsip/paket masuk
+       (workspace: header sudah dirender wsRunCore). */
+    buildReportSetCompdb(REP_COMPDB_UNKNOWN, "not applicable (pack-only)");
+    buildReportRenderHeader();
   }
-  /* No-op: tidak ada arsip/paket yang dibangun ulang (design/build_report.md). */
-  if (!anyRebuilt) printf("    Skipped  : true\n");
-  printf("    Status   : Success\n");
   return 0;
 }
 
@@ -177,8 +188,9 @@ bool cmdsRunParallelJobs(const Config *c, const char *inc, const char *wf, const
     }
     /* Output compiler (warning/error) dicetak UTUH setelah baris progress:
        stream yang sama -> urutan terjaga dan blok tidak bisa tercampur job
-       lain yang selesai bersamaan (anti-interleaving). */
-    cmdsEmitCapture(fin);
+       lain yang selesai bersamaan (anti-interleaving). Warning di buffer
+       dihitung ke akumulator pass (cmdsWarningsTake). */
+    cmdsEmitCapture(fin, fin->ok && !fin->interrupted);
     if (!fin->ok) {
       if (fin->interrupted)
         interrupted++;
@@ -209,14 +221,113 @@ bool cmdsRunParallelJobs(const Config *c, const char *inc, const char *wf, const
   return failed == 0 && interrupted == 0;
 }
 
-void cmdsEmitCapture(ProcHandle *h) {
+/* Salin baris [i,e) dari buf tanpa escape ANSI (CSI: ESC '[' ... huruf
+   akhir) ke out (NUL-terminated); kembalikan panjang hasil. Dipakaihitung
+   warning DAN baris WARN — pola diagnostic harus dikenali sama walau output
+   compiler berwarna (-fdiagnostics-color=always saat stderr TTY). */
+static size_t cmdsStripLine(const char *buf, size_t i, size_t e, char *out, size_t cap) {
+  size_t m = 0;
+  for (size_t k = i; k < e && m + 1 < cap; k++) {
+    if (buf[k] == '\x1b' && k + 1 < e && buf[k + 1] == '[') {
+      k += 2;
+      while (k < e && !(buf[k] >= '@' && buf[k] <= '~')) k++; /* huruf akhir CSI */
+      continue;
+    }
+    out[m++] = buf[k];
+  }
+  out[m] = '\0';
+  return m;
+}
+
+/* Satu baris diagnostic warning (setelah ANSI dibuang): GCC/Clang
+   "<...>: warning: ..." atau MSVC "<...>: warning [C]<digit>...".
+   Kata "warning" pada command, teks source, atau ringkasan TIDAK cocok
+   karena hanya pola "<...>: warning" yang dikenali. */
+static bool cmdsLineIsWarning(const char *line, size_t m) {
+  for (size_t k = 0; k + 9 <= m; k++) {
+    if (line[k] != ':' || line[k + 1] != ' ') continue;
+    if (strncmp(line + k + 2, "warning:", 8) == 0) return true; /* GCC/Clang */
+    if (strncmp(line + k + 2, "warning ", 8) == 0) {
+      /* "warning C4996:" bentuk MSVC — C opsional, kode diawali digit */
+      size_t d = k + 10;
+      if (d < m && (line[d] == 'C' || line[d] == 'c')) d++;
+      if (d < m && line[d] >= '0' && line[d] <= '9') return true;
+    }
+  }
+  return false;
+}
+
+/* Hitung diagnostic warning pada buffer compiler (design §5). Lihat
+   cmdsStripLine/cmdsLineIsWarning untuk cakupan pola. */
+static int cmdsCountWarnings(const char *buf, size_t n) {
+  int w = 0;
+  size_t i = 0;
+  while (i < n) {
+    size_t e = i;
+    while (e < n && buf[e] != '\n') e++; /* satu baris */
+    char line[4096];
+    size_t m = cmdsStripLine(buf, i, e, line, sizeof(line));
+    if (cmdsLineIsWarning(line, m)) w++;
+    i = e + 1;
+  }
+  return w;
+}
+
+void cmdsEmitWarnLines(const char *buf, size_t n) {
+#ifndef _WIN32
+  /* Warna dipulihkan oleh satria sendiri: dengan log = true flag compiler
+     dimatikan (compileSetDiagColor) sehingga warning sampai tanpa warna —
+     baris WARN inilah yang membawanya kembali (diagColorWanted: stderr TTY,
+     NO_COLOR/SATRIA_NO_COLOR/TERM=dumb mematikan). Di Windows relay log tidak
+     ada (buildLogActive 0) — jalur ini tak tercapai. */
+  bool color = diagColorWanted();
+#else
+  bool color = false;
+#endif
+  size_t i = 0;
+  while (i < n) {
+    size_t e = i;
+    while (e < n && buf[e] != '\n') e++;
+    char line[4096];
+    size_t m = cmdsStripLine(buf, i, e, line, sizeof(line));
+    if (cmdsLineIsWarning(line, m)) {
+      if (color) printf("\033[33mWARN %s\033[0m\n", line);
+      else printf("WARN %s\n", line);
+    }
+    i = e + 1;
+  }
+}
+
+/* Akumulator warning pass berjalan (per-produk: dipakai lintas job paralel
+   maupun serial dalam satu pass). Dikuras oleh cmdsWarningsTake(). */
+static int cmdsWarnAcc = 0;
+
+int cmdsWarningsTake(void) {
+  int w = cmdsWarnAcc;
+  cmdsWarnAcc = 0;
+  return w;
+}
+
+void cmdsEmitCapture(ProcHandle *h, bool unitOk) {
   size_t n = 0;
   char *buf = procCaptureTake(h, &n);
   if (!buf) return;
-  fwrite(buf, 1, n, stdout);
-  if (buf[n - 1] != '\n') fputc('\n', stdout);
-  fflush(stdout);
-  buildLogCapture(buf, n); /* relay stderr tidak melihat output ini */
+  if (n > 0) {
+    cmdsWarnAcc += cmdsCountWarnings(buf, n);
+    if (buildLogActive() && unitOk) {
+      /* Log = true (keputusan O2): output mentah pindah ke build.log —
+         report menggantinya dengan baris WARN ringkas berwarna, sehingga
+         bukan duplikasi; `satria log` memperlihatkan detail penuh. */
+      cmdsEmitWarnLines(buf, n);
+    } else {
+      /* Log mati, atau unit GAGAL: cetak UTUH — error butuh konteks penuh
+         (baris source, note) di terminal. */
+      fwrite(buf, 1, n, stdout);
+      if (buf[n - 1] != '\n') fputc('\n', stdout);
+    }
+    fflush(stdout);
+    buildLogCapture(buf, n); /* relay stderr tidak melihat output ini */
+  }
   free(buf);
 }
 
@@ -243,11 +354,11 @@ bool cmdsBuildLibraryEx(const Config *c, const List *srcs, bool linkPathLibs) {
     char target[MAX_PATH * 2];
     if (c->libStatic) {
       cmdsLibStaticPath(c, target, sizeof(target));
-      printf("%s Library : %s (up-to-date)\n", repPrefix(), target);
+      buildReportAddLibrary(target, REP_CACHED, fsFileSize(target));
     }
     if (c->libShared) {
       cmdsLibSharedPath(c, target, sizeof(target));
-      printf("%s Library : %s (up-to-date)\n", repPrefix(), target);
+      buildReportAddLibrary(target, REP_CACHED, fsFileSize(target));
     }
     return true;
   }
@@ -276,7 +387,7 @@ bool cmdsBuildLibraryEx(const Config *c, const List *srcs, bool linkPathLibs) {
   if (c->libStatic) {
     cmdsLibStaticPath(c, target, sizeof(target));
     if (staticUpToDate) {
-      printf("%s Library : %s (up-to-date)\n", repPrefix(), target);
+      buildReportAddLibrary(target, REP_CACHED, fsFileSize(target));
     } else {
       size_t n = 64;
       for (int i = 0; i < objs.count; i++)
@@ -290,8 +401,8 @@ bool cmdsBuildLibraryEx(const Config *c, const List *srcs, bool linkPathLibs) {
         strcat(cmd, " ");
         strcat(cmd, objs.items[i]);
       }
-      printf("%s Library : %s\n", repPrefix(), target);
       staticDone = runCmd(cmd);
+      if (staticDone) buildReportAddLibrary(target, REP_BUILT, fsFileSize(target));
       if (!staticDone) fprintf(stderr, "satria: static library command: %s\n", cmd);
       free(cmd);
       if (!staticDone) fprintf(stderr, "satria: static library build failed\n");
@@ -301,7 +412,7 @@ bool cmdsBuildLibraryEx(const Config *c, const List *srcs, bool linkPathLibs) {
   if (c->libShared) {
     cmdsLibSharedPath(c, target, sizeof(target));
     if (sharedUpToDate) {
-      printf("%s Library : %s (up-to-date)\n", repPrefix(), target);
+      buildReportAddLibrary(target, REP_CACHED, fsFileSize(target));
       listFree(&objs);
       return staticDone; /* .so dilewati; hasil .a tetap dihormati */
     }
@@ -360,8 +471,8 @@ bool cmdsBuildLibraryEx(const Config *c, const List *srcs, bool linkPathLibs) {
         }
       }
     }
-    printf("%s Library : %s\n", repPrefix(), target);
     sharedDone = runCmd(cmd);
+    if (sharedDone) buildReportAddLibrary(target, REP_BUILT, fsFileSize(target));
     if (!sharedDone) fprintf(stderr, "satria: shared library command: %s\n", cmd);
     free(cmd);
     if (!sharedDone) fprintf(stderr, "satria: shared library build failed\n");

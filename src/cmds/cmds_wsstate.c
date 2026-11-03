@@ -17,6 +17,7 @@
  *   D <mtime_ns> 0 <path>      folder header: penambahan/penghapusan mengubah mtime-nya
  *   X 0 0 <path>               path yang tidak ada saat disimpan (harus tetap tidak ada)
  */
+#include "../log/build_report.h" /* buildReportActive: blok lama per proyek dijaga */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -504,6 +505,7 @@ static bool wsFastStateValidLib(const char *buildfilePath, const char *cwd) {
     libCacheMetaFree(&m);
     return false;
   }
+  if (!buildReportActive()) { /* report merender blok artefak (Execution summary) */
   for (int i = 0; i < m.nlibs; i++)
     printf("%s Library : %s (up-to-date)\n", repPrefix(), m.libs[i]);
   printf("\n%s Summary :\n", repPrefix());
@@ -517,6 +519,7 @@ static bool wsFastStateValidLib(const char *buildfilePath, const char *cwd) {
   printf("    Compiled : 0\n");
   printf("    Skipped  : %d\n", m.skipped);
   printf("    Status   : Success\n");
+  }
   libCacheMetaFree(&m);
   return true;
 }
@@ -570,6 +573,7 @@ bool wsFastStateValid(const char *buildfilePath, bool libOnly) {
     return false;
   }
 
+  if (!buildReportActive()) { /* report merender blok artefak (Execution summary) */
   /* Output no-op: sama dengan jalur single project. */
   if (!libOnly) {
     printf("%s Build with cached state (fingerprint unchanged)\n", repPrefix());
@@ -595,6 +599,7 @@ bool wsFastStateValid(const char *buildfilePath, bool libOnly) {
   printf("    Compiled : 0\n");
   printf("    Skipped  : %d\n", skipped);
   printf("    Status   : Success\n");
+  }
   listFree(&libs);
   return true;
 }

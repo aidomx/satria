@@ -18,6 +18,10 @@ bool startupVisible(bool quiet);
 
 /* Mulai satu run startup: bila visible, cetak "startup :". Wajib dipanggil
  * sebelum startupPhase/startupPhaseEnd. */
+/* Bullet baris fase: ">" (single, default) atau "*" (workspace). */
+void startupBullet(const char *b);
+/* true bila blok startup benar-benar dicetak ke terminal (untuk pemisah). */
+bool startupShown(void);
 void startupBegin(bool visible);
 
 /* Mulai fase baru; fase sebelumnya otomatis selesai (done). */

@@ -18,12 +18,13 @@ satria profile <ctx>     Measure operation costs (see: help profile)
 satria trace [opts] -- <args>  Trace file access via LD_PRELOAD (see: help trace)
 satria -w                Build all projects in workspace (Buildfile.ws)
 satria -w <name>         Build <name> and its dependencies
+satria -w <name> --with-cdeps  ...plus its cdeps providers (see: help workspace)
 satria -w release -- name=<p>[,key=value]  Package one release
 satria watch [--full]   Monitor a background build (see: help watch)
 satria -w watch [--full]  Same for a workspace background build
 satria help              Show this help
 satria help <topic>      Show topic help
-satria version           Show version
+satria version           Show version (alias: satria --version)
 satria self-upgrade      Upgrade satria itself
 satria self-uninstall    Remove satria and global state (requires confirmation)
 
@@ -161,6 +162,11 @@ Workspace commands (Buildfile.ws)
 
 satria -w                Build (and release) every declared project
 satria -w <name>         Build <name> and its dependency closure
+satria -w <name> --with-cdeps
+                       Same, also pulling in <name>'s cdeps providers
+                       (projects whose headers/libraries it consumes);
+                       off by default — plain -w <name> never builds
+                       cdeps providers, it only reuses them if present
 satria -w clean          Clean the entire workspace
 satria -w release -- name=<p>[,key=value]
                        Package one release to dist/release/<name>/

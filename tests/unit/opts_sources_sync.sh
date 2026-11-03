@@ -59,7 +59,7 @@ cp -r "$SRC/." "$W/" || exit 2
 printf "flags = MMD, MP\n" >> "$W/Buildfile.ws"
 cd "$W" || exit 2
 run() { "$SAT" -w >"$W/out.txt" 2>&1; return $?; }
-valid() { grep -q "Nothing to build" "$W/out.txt" && grep -q "Cache valid:" "$W/out.txt"; }
+valid() { grep -q "Nothing to build" "$W/out.txt" && grep -q "Cache valid *:" "$W/out.txt"; }
 
 run; check "ws: cold build" $?
 sleep 1 # hindari racy terhadap run pertama

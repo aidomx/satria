@@ -2,6 +2,7 @@
  * Bagian dari modul workspace (src/workspace/). Lihat ws_internal.h.
  */
 #include "ws_internal.h"
+#include "../log/build_report.h" /* blok # Execution (design/build_report.md) */
 #include "../prof/prof.h" /* profMark: audit overhead */
 #include "../background.h" /* bgProgress: progres watcher (design/background.md) */
 
@@ -50,11 +51,12 @@ int wsRunProject(const WsModel *m, const char *name, const char *cmd, int jobs,
     return rc;
   }
 
-  /* Label fase: proyek kemasan (output.binary = false) fase 1-nya ARSIP. */
+  /* Label fase: proyek kemasan (output.binary = false) fase 1-nya ARSIP.
+     Format lama `| Project :` / `| Fase :` diganti blok `# Execution` +
+     `> Nama` (design/build_report.md): fase library mencetak `> Nama` +
+     compile line; fase binary meng-upsert (tanpa cetak ulang). */
   const char *passLabel = "binary";
   if (libOnly) passLabel = wsProjectArchiveOnly(p) ? "archive" : "library";
-  printf("\n%s Project : %s\n", repPrefix(), name);
-  printf("%s Fase    : %s\n", repPrefix(), passLabel);
   bgProgress(1, "Project: %s (%s)", name, passLabel); /* watcher §3B */
 
   /* Reuse the phase configuration for the build: Config disusun sekali di sini
@@ -81,6 +83,28 @@ int wsRunProject(const WsModel *m, const char *name, const char *cmd, int jobs,
   snprintf(bfLabel, sizeof(bfLabel), "Buildfile.ws:%s", name);
   if (wsFastStateValid(bfLabel, libOnly)) {
     wsLogFastOk[idx] = true;
+    /* Artefak cached proyek fast-hit: catat ke # Execution summary (design §2)
+       hanya bila path output bisa diresolusi dari config. Tanpa blok # Execution
+       (tidak ada aktivitas compile). */
+    if (buildReportActive() && configReady) {
+      if (libOnly) {
+        if (c.libRequested) {
+          char lp[MAX_PATH * 2];
+          if (c.libStatic) {
+            cmdsLibStaticPath(&c, lp, sizeof(lp));
+            buildReportAddLibrary(lp, REP_CACHED, fsFileSize(lp));
+          }
+          if (c.libShared) {
+            cmdsLibSharedPath(&c, lp, sizeof(lp));
+            buildReportAddLibrary(lp, REP_CACHED, fsFileSize(lp));
+          }
+        }
+      } else if (c.binary) {
+        char target[MAX_PATH * 2];
+        snprintf(target, sizeof(target), "%s/%s", c.outBinaryDir, c.outBinaryName);
+        buildReportAddBinary(target, REP_CACHED, fsFileSize(target));
+      }
+    }
     cmdsStateSetWsProject("");
     return 0;
   }
@@ -103,6 +127,13 @@ int wsRunProject(const WsModel *m, const char *name, const char *cmd, int jobs,
     cmdsStateSetWsProject("");
     return 0;
   }
+
+  /* Blok # Execution: cetak `> Nama` utk proyek ini (baru -> cetak; fase
+     binary -> upsert tanpa cetak ulang). Setelah seluruh jalur awal kembali
+     (fast-state / skip) agar proyek tanpa aktivitas compile tidak memblok.
+     Proyek ARSIP-ONLY dilewati: tercatat pada bagian # Archive (step 2),
+     bukan sebagai blok proyek di # Execution (design §5/§7). */
+  if (buildReportActive() && !wsProjectArchiveOnly(p)) buildReportProject(name);
 
   int rc = cmdsBuildPassRun(jobs, c, bfLabel, libOnly);
   if (rc != 0) cmdsStatMemoReset(); /* build gagal: output mungkin berubah sebagian */

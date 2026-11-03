@@ -83,6 +83,7 @@ bool wsModelLoad(const char *wsDir, WsModel *m, const char **wsNameOut,
     /* Spawn: child tidak punya TTY dan induk langsung keluar — startup cukup
        direkam (bgStartupRecord di jalur spawn), tidak dicetak di terminal. */
     startupBegin(spawnPending ? false : startupVisible(wsGuardQuiet));
+    startupBullet("*"); /* mode workspace: baris fase berawalan "*" */
     wsStartupPrepare(wsDir);
     startupPhase("discovery");
   }

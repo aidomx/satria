@@ -65,9 +65,8 @@ double nowSeconds(void);
 
 /* ==================== Laporan build (design/build_report.md) ==================== */
 
-/* Prefix baris laporan build: "|" bila terminal mendukung UTF-8, ">"
-   sebagai fallback ASCII. Deteksi sekali per proses: LC_ALL -> LC_CTYPE
-   -> LANG; Windows menambah cek codepage konsol (CP_UTF8). */
+/* Prefix baris laporan build: selalu "*" (sama untuk single dan workspace).
+   Tidak lagi bergantung pada locale atau codepage konsol. */
 const char *repPrefix(void);
 
 #endif /* SATRIA_V0_1_0_UTIL_H */

@@ -14,7 +14,7 @@ export NO_COLOR=1
 
 pass=0; fail=0
 check() { if [ "$2" -eq 0 ]; then pass=$((pass+1)); echo "PASS  $1"; else fail=$((fail+1)); echo "FAIL  $1"; fi; }
-hit_ws() { grep -q "Nothing to build" "$1" && grep -q "Cache valid:" "$1"; }
+hit_ws() { grep -q "Nothing to build" "$1" && grep -q "Cache valid *:" "$1"; }
 ostamp() { stat -c '%y' .satria/opts.cache; }
 
 # ============================ MODE WORKSPACE ============================
@@ -63,7 +63,7 @@ run() { "$SAT" >"$S/out.txt" 2>&1; return $?; }
 run; check "single: cold build" $?
 a=$(ostamp); run; b=$(ostamp)
 [ "$a" = "$b" ]; check "single: no-op dasar (opts tak tertulis)" $?
-grep -q "Cache valid: .satria/caches/fingerprint.cache" "$S/out.txt"
+grep -q "Cache valid *: .satria/caches/fingerprint.cache" "$S/out.txt"
 check "single: pesan no-op 'Nothing to build' (paralel workspace)" $?
 pt=$(grep -ac '^P ' .satria/opts.cache); pm=$(grep -acE '^P [0-9a-f]{16} [0-9a-f]{16} [0-9]+ [0-9]+$' .satria/opts.cache)
 [ "$pt" -gt 0 ] && [ "$pm" -eq "$pt" ]; check "single: P opts.cache bermetadata ($pm/$pt)" $?

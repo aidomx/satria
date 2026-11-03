@@ -13,6 +13,7 @@
 
 #include "../portability.h"
 #include "../util.h"
+#include "../log/build_report.h"
 #include "pack.h"
 #include "../cache/artifact.h" /* daftarkan paket/checksum ke artifact.cache (§9) */
 #include "../cmds/cmds_internal.h"
@@ -182,14 +183,14 @@ static bool packChecksumApply(const Config *c, const char *artifactPath) {
   artifactCacheAdd(sumPath); /* checksum = artefak tanpa kode C (§9) */
   int64_t artM = fsMTimeNs(artifactPath), sumM = fsMTimeNs(sumPath);
   if (artM >= 0 && sumM >= artM) {
-    printf("%s Checksum: %s (up-to-date)\n", repPrefix(), sumPath);
+    buildReportAddRelease(sumPath, REP_CACHED, -1); /* checksum: tanpa ukuran */
     return true;
   }
   if (!packWriteSha256(artifactPath)) {
     fprintf(stderr, "satria: pack: gagal menulis %s\n", sumPath);
     return false;
   }
-  printf("%s Checksum: %s\n", repPrefix(), sumPath);
+  buildReportAddRelease(sumPath, REP_BUILT, -1);
   return true;
 }
 
@@ -253,12 +254,11 @@ bool packRun(const Config *c) {
 
     int64_t artM = fsMTimeNs(a.path);
     if (newest >= 0 && artM >= newest) {
-      printf("%s Package : %s (up-to-date)\n", repPrefix(), a.path);
+      buildReportAddRelease(a.path, REP_CACHED, fsFileSize(a.path));
     } else if (!packBuildTar(c, &a)) {
       return false;
     } else {
-      long long sz = fsFileSize(a.path);
-      printf("%s Package : %s (%.1fKB)\n", repPrefix(), a.path, sz > 0 ? (double)sz / 1024.0 : 0);
+      buildReportAddRelease(a.path, REP_BUILT, fsFileSize(a.path));
       g_packRebuilt = true;
     }
     artifactCacheAdd(a.path);
@@ -276,12 +276,11 @@ bool packRun(const Config *c) {
 
     int64_t artM = fsMTimeNs(a.path);
     if (newest >= 0 && artM >= newest) {
-      printf("%s Package : %s (up-to-date)\n", repPrefix(), a.path);
+      buildReportAddRelease(a.path, REP_CACHED, fsFileSize(a.path));
     } else if (!packBuildDeb(c, &a)) {
       return false;
     } else {
-      long long sz = fsFileSize(a.path);
-      printf("%s Package : %s (%.1fKB)\n", repPrefix(), a.path, sz > 0 ? (double)sz / 1024.0 : 0);
+      buildReportAddRelease(a.path, REP_BUILT, fsFileSize(a.path));
       g_packRebuilt = true;
     }
     artifactCacheAdd(a.path);

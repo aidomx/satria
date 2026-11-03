@@ -37,6 +37,7 @@ bool wsCompdbRefresh(const WsModel *m) {
 
   bool ok = true;
   int cnt = 0;
+  bool toolchainSet = false;
   for (int i = 0; i < n && ok; i++) {
     cfgH[i] = wsLogCfgHash(m, i);
     if (!wsBuildConfig(m, i, &cfgs[i]) || !resolveCompiler(&cfgs[i])) {
@@ -44,6 +45,18 @@ bool wsCompdbRefresh(const WsModel *m) {
               m->projects[i].name);
       ok = false;
       break;
+    }
+    /* Toolchain global header Build Report (design/build_report.md §6): pakai
+       config proyek pertama yang sah. Bila antar-proyek berbeda, tetap satu
+       baris representatif (per-proyek = penyempurnaan lanjut). Tanpa-opsi
+       bila report tak aktif (query `compdb -g`). */
+    if (!toolchainSet) {
+      char *wf = warningFlags(&cfgs[i]);
+      char tc[512];
+      snprintf(tc, sizeof(tc), "%s %s-std=%s", cfgs[i].cc, wf ? wf : "", cfgs[i].std);
+      buildReportSetToolchain(tc);
+      free(wf);
+      toolchainSet = true;
     }
     /* CompDB hanya mewakili proyek yang mengompilasi source; proyek
        kemasan (output.binary = false) & compdb=false tidak berkontribusi. */
@@ -69,12 +82,18 @@ bool wsCompdbRefresh(const WsModel *m) {
   uint64_t fp = 0;
   if (ok && cnt > 0) {
     fp = compdbMultiFingerprint(cps, sps, cnt);
-    /* Keputusan (b): hash CompDB tercatat identik + file ada -> tidak
-       ditulis ulang (tanpa render, tanpa sentuh disk). */
-    if (fp && fsFileExists("compile_commands.json") && wsLogCompdbFp() == fp)
-      printf("%s CompDB  : compile_commands.json unchanged (workspace)\n", repPrefix());
-    else
-      writeCompdbMulti(cps, sps, cnt);
+    /* Status CompDB eksplisit untuk header report (design §6): unchanged bila
+       hash tercatat cocok, selain itu hasil writeCompdbMulti. Tanpa-opsi bila
+       report tak aktif (query `compdb -g` tetap cetak live). */
+    RepCompdb st;
+    if (fp && fsFileExists("compile_commands.json") && wsLogCompdbFp() == fp) {
+      st = REP_COMPDB_UNCHANGED;
+      if (!buildReportActive())
+        printf("%s CompDB  : compile_commands.json unchanged (workspace)\n", repPrefix());
+    } else {
+      st = writeCompdbMulti(cps, sps, cnt);
+    }
+    buildReportSetCompdb(st, NULL);
   }
 
   if (ok) wsLogWrite(m, cfgH, srcH, fp);

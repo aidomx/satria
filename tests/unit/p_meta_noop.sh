@@ -32,7 +32,7 @@ else
   fail=$((fail + 1))
   echo "FAIL  $1"
 fi; }
-hit_ws() { grep -q "Nothing to build" "$1" && grep -q "Cache valid:" "$1"; }
+hit_ws() { grep -q "Nothing to build" "$1" && grep -q "Cache valid *:" "$1"; }
 fast() {
   SATRIA_CACHE_TRACE=1 "$SAT" -w > "$1" 2>&1
   grep -q "P-fast hit" "$1"
@@ -172,7 +172,7 @@ printf 'new archive input\n' > rupamod/new-input.rp
 SATRIA_CACHE_TRACE=1 "$SAT" -w > da1 2>&1
 ! hit_ws da1
 check "ws: file baru di direktori archive menolak no-op" $?
-grep -Eq 'Fase[[:space:]]*: archive' da1
+grep -Eq 'rupa_modules\.tar \([^)]*built\)' da1
 check "ws: file baru menjalankan fase archive" $?
 
 echo "---"

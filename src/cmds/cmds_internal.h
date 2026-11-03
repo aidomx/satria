@@ -54,11 +54,29 @@ bool cmdsRunParallelJobs(const Config *c, const char *inc, const char *wf, const
                          int *outFailed, int *outInterrupted, bool quiet, bool *okOut);
 
 /*
- * Cetak output compiler yang ditangkap (procCaptureTake) ke stdout — UTUH
- * setelah baris progress, sehingga urutan terjaga dan blok tidak bisa
- * tercampur job lain — lalu salin ke build.log bila relay log aktif.
+ * Cetak output compiler yang ditangkap (procCaptureTake) — dipanggil SETELAH
+ * baris progress sehingga urutan terjaga dan blok tidak bisa tercampur job
+ * lain — lalu salin ke build.log bila relay log aktif. Diagnostic
+ * `warning:` (GCC/Clang) dan `warning C####:` (MSVC) di buffer dihitung ke
+ * akumulator warning pass (cmdsWarningsTake).
+ *
+ * unitOk = unit compile ini SUKSES. Dengan log = true (buildLogActive),
+ * output mentah TIDAK dicetak: warning tampil sebagai baris WARN ringkas
+ * berwarna (design/build_report.md §5 — warna compiler hilang lewat pipe
+ * saat log aktif), dan detail penuh pindah ke build.log untuk `satria log`.
+ * Unit GAGAL tetap mencetak mentah: error butuh konteks penuh di terminal.
+ * Dengan log = false: cetak UTUH seperti sebelumnya (tanpa baris WARN).
  */
-void cmdsEmitCapture(ProcHandle *h);
+void cmdsEmitCapture(ProcHandle *h, bool unitOk);
+
+/* Baris "WARN <diagnostic>" dari buffer capture yang SAMA dengan hitungan
+   warning (bukan scan build.log) — lihat cmdsEmitCapture. Dipanggil hanya
+   saat log aktif. */
+void cmdsEmitWarnLines(const char *buf, size_t n);
+
+/* Ambil (dan reset) akumulator warning pass berjalan — dipanggil cmds_pass
+   setelah fase compile, hasilnya masuk CmdsPassTail -> counts laporan. */
+int cmdsWarningsTake(void);
 
 /* Terbitkan build/version.h dari .satria-version (root project). */
 bool cmdsEmitVersionHeader(const Config *c, bool *changed);
@@ -120,7 +138,9 @@ bool cmdsEmptyDir(const char *dir, int *removed);
  * Dipanggil wsCmdBuild sebelum tiap pass proyek; "" = kembali ke mode single.
  */
 void cmdsStateSetWsProject(const char *name); /* "" / NULL = clear */
-const char *cmdsStateWsProject(void);         /* NULL bila mode single */
+const char *cmdsStateWsProject(void);
+bool fastReportPut(void);     /* salin report.blob ke fingerprint.cache (single) */
+bool fastReportRestore(void); /* pulihkan report.blob dari fingerprint.cache */         /* NULL bila mode single */
 void cmdsStatePath(char *out, size_t n, const char *leaf);
 /* mkdirs induk path state (.satria atau .satria/workspace) sebelum tulis. */
 void cmdsStateMkdirFor(const char *path);
@@ -371,6 +391,7 @@ typedef struct {
   char obj[MAX_PATH];
   CmdsBuildFingerprint currentFp;
   int compiled, skipped;
+  int warnings; /* diagnostic warning fase compile pass ini (capture buffer) */
   bool objectsChanged;
   bool sourceSetChanged, linkConfigChanged;
   int64_t maxObjM;

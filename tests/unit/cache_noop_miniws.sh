@@ -46,7 +46,7 @@ run() {
   SATRIA_CACHE_NOOP=1 "$SAT" -w > "$W/out.txt" 2>&1
   return $?
 }
-valid() { grep -q "Nothing to build" "$W/out.txt" && grep -q "Cache valid:" "$W/out.txt"; }
+valid() { grep -q "Nothing to build" "$W/out.txt" && grep -q "Cache valid *:" "$W/out.txt"; }
 
 run
 check "cold build berhasil" $?
@@ -59,11 +59,11 @@ valid
 check "no-op memakai cache (pesan cache valid)" $?
 
 "$SAT" -w > "$W/out_off.txt" 2>&1
-grep -q "Cache valid:" "$W/out_off.txt"
+grep -q "Cache valid *:" "$W/out_off.txt"
 check "tanpa flag: jalur cache aktif (default on)" $?
 
 SATRIA_CACHE_NOOP=0 "$SAT" -w > "$W/out_off.txt" 2>&1
-! grep -q "Cache valid:" "$W/out_off.txt"
+! grep -q "Cache valid *:" "$W/out_off.txt"
 check "SATRIA_CACHE_NOOP=0: jalur lama, tidak memakai cache" $?
 
 # touch: isi sama -> tetap valid

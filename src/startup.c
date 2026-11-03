@@ -9,6 +9,7 @@
 
 static bool g_visible = false;     /* run startup ini terlihat di terminal */
 static const char *g_phase = NULL; /* fase yang sedang berjalan (belum selesai) */
+static const char *g_bullet = "*"; /* "*" untuk single dan workspace (sama dengan Build Report) */
 
 /* Rekaman baris startup (lihat startup.h): selalu diisi, terminal atau tidak,
    supaya `satria watch` bisa me-replay blok startup run background. */
@@ -26,14 +27,17 @@ static void recAdd(const char *s) {
 
 bool startupVisible(bool quiet) { return !quiet && termIsTTY(); }
 
+void startupBullet(const char *b) { g_bullet = b ? b : "*"; }
+bool startupShown(void) { return g_visible; }
+
 void startupBegin(bool visible) {
   g_visible = visible;
   g_phase = NULL;
   g_recLen = 0;
   g_rec[0] = '\0';
-  recAdd("startup :\n");
+  recAdd("startup\n-------\n");
   if (g_visible) {
-    fprintf(stderr, "startup :\n");
+    fprintf(stderr, "startup\n-------\n");
     fflush(stderr);
   }
 }
@@ -41,7 +45,7 @@ void startupBegin(bool visible) {
 static void startupFinish(bool ok) {
   if (!g_phase) return;
   char line[256];
-  snprintf(line, sizeof(line), "> %s: %s\n", g_phase, ok ? "done" : "failed");
+  snprintf(line, sizeof(line), "%s %s: %s\n", g_bullet, g_phase, ok ? "done" : "failed");
   recAdd(line);
   if (g_visible) {
     fputs(line, stderr);

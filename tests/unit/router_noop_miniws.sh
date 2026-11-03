@@ -15,7 +15,7 @@ sleep 1 # hindari racy terhadap build pertama
 pass=0; fail=0
 check() { if [ "$2" -eq 0 ]; then pass=$((pass+1)); echo "PASS  $1"; else fail=$((fail+1)); echo "FAIL  $1"; fi; }
 run() { "$SAT" -w >"$W/out.txt" 2>&1; return $?; }
-valid() { grep -q "Nothing to build" "$W/out.txt" && grep -q "Cache valid:" "$W/out.txt"; }
+valid() { grep -q "Nothing to build" "$W/out.txt" && grep -q "Cache valid *:" "$W/out.txt"; }
 
 run; check "cold build berhasil" $?
 grep -q " fingerprint$" .satria/opts.cache; check "router tercatat di opts.cache setelah build" $?

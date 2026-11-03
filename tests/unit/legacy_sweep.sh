@@ -15,7 +15,7 @@ export NO_COLOR=1
 
 pass=0; fail=0
 check() { if [ "$2" -eq 0 ]; then pass=$((pass+1)); echo "PASS  $1"; else fail=$((fail+1)); echo "FAIL  $1"; fi; }
-hit_ws() { grep -q "Nothing to build" "$1" && grep -q "Cache valid:" "$1"; }
+hit_ws() { grep -q "Nothing to build" "$1" && grep -q "Cache valid *:" "$1"; }
 
 # Tanam sampah legacy + penanda current. Args: $1 = folder .satria workspace-nya
 plant() {

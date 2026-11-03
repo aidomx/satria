@@ -543,3 +543,43 @@ void cmdsFastStateSave(const Config *c, const List *srcs, const char *target,
   free(buf);
 }
 
+/* Salinan report.blob di fingerprint.cache (mode single). Dipulihkan saat
+   blob hilang, sehingga replay tetap sama dengan build terakhir. */
+static uint64_t fastReportFile(void) { return csHash("report.blob"); }
+
+bool fastReportPut(void) {
+  char *buf = NULL;
+  size_t len = 0;
+  if (!reportBlobRead(&buf, &len)) return false;
+  size_t el = 0;
+  char *esc = fastSnapEscape(buf, len, &el);
+  free(buf);
+  if (!esc) return false;
+  CsStore *st = csOpen(BUILD_FP_CACHE);
+  bool ok = false;
+  if (st) {
+    CsEntry e = {cmdsCacheProjAddr(), fastReportFile(), 0, 0, (long long)len, esc};
+    ok = csPut(st, &e) && csCommit(st);
+    csClose(st);
+  }
+  free(esc);
+  return ok;
+}
+
+bool fastReportRestore(void) {
+  CsStore *st = csOpen(BUILD_FP_CACHE);
+  if (!st) return false;
+  CsEntry e;
+  bool ok = false;
+  if (csGet(st, cmdsCacheProjAddr(), fastReportFile(), &e) && e.payload && *e.payload) {
+    size_t n = 0;
+    char *u = fastSnapUnescape(e.payload, strlen(e.payload), &n);
+    if (u) {
+      ok = reportBlobRestore(u, n);
+      free(u);
+    }
+  }
+  csClose(st);
+  return ok;
+}
+

@@ -342,10 +342,10 @@ Output startup berbentuk blok dengan header `startup :`, lalu satu baris per fas
 
 ```text
 startup :
-> discovery: done
-> resolving dependencies: done
-> indexing sources: done
-> preparing execution: done
+* discovery: done
+* resolving dependencies: done
+* indexing sources: done
+* preparing execution: done
 ```
 
 - Hanya muncul saat cold startup (`startup.state` belum ada). No-op dan perubahan Buildfile.ws tidak mencetak apa pun.

@@ -6,6 +6,7 @@
    TIDAK berubah: stdout di-tee (terminal tetap menerima salinan yang sama). */
 #ifndef SATRIA_REPORT_BLOB_H
 #define SATRIA_REPORT_BLOB_H
+#include <stddef.h>
 #include <stdbool.h>
 /* Jalur cache untuk baris "> Cache valid: ..." di blok STATUS. Default
    .satria/caches/state.cache (single); workspace menyetel WS_CACHE_FP. */
@@ -22,3 +23,9 @@ void reportBlobShow(void);
 /* true bila report.blob tersimpan dan berisi (ringkasan siap ditampilkan). */
 bool reportBlobHas(void);
 #endif
+
+/* Salin isi report.blob (free *buf oleh pemanggil). false bila tak ada. */
+bool reportBlobRead(char **buf, size_t *len);
+/* Pulihkan report.blob dari salinan state (atomik). */
+bool reportBlobRestore(const char *buf, size_t len);
+

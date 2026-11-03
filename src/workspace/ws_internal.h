@@ -79,6 +79,9 @@ typedef struct {
      proyek (rupa <-> ruka) sah; dua fase build yang menyelesaikannya.
      Dipakai untuk memperluas build selektif `-w <nama>`. */
   List libDeps[WS_MAX_PROJECTS];
+  /* Grup cdeps level atas (design/cdeps_group.md): "<nomor baris>\t<nilai>",
+     diekspansi ke relasi per proyek setelah parse selesai. */
+  List cdepsGroups;
   /* Stage fase release: klarifikasi run CLI di sini bila ada. */
   char releaseStage[MAX_PATH];
 } WsModel;
@@ -98,6 +101,11 @@ typedef struct {
    distamp di wsCacheSave agar tak ada baris P polos yang tersisa). */
 #define WS_COMPDB_GLOBAL "__satria_compdb__"
 #define WS_CACHE_SOURCES ".satria/sources.cache"
+/* Penanda cakupan fingerprint: ditulis "full" HANYA oleh simpan penuh
+   (semua proyek model tercatat). Simpan selektif pada workspace tanpa
+   simpanan sebelumnya membuat fp parsial dan TIDAK menulis penanda ini —
+   lihat wsCacheCoverage / wsCacheSaveBody. */
+#define WS_FP_COVER ".satria/caches/fp.cover"
 
 typedef struct {
   uint64_t key;
@@ -126,9 +134,12 @@ typedef struct {
 /* ---- prototipe lintas-modul ---- */
 int workspaceEnumerate(const char *wsDir, int *count, const char **projectNames, int maxProjects);
 const char *workspaceFileName(void);
-int workspaceRun(const char *cmd, int jobs, const char *only, const char *releaseSel);
+int workspaceRun(const char *cmd, int jobs, const char *only, const char *releaseSel,
+                 bool withCdeps);
 void wsAddCommon(WsModel *m, const char *key, const char *value);
 void wsApplyCdeps(const WsModel *m, const WsProject *p, Config *c);
+/* Kumpulkan nama provider cdeps proyek `idx` ke `out` (caller listFree). */
+void wsCdepsProviders(const WsModel *m, int idx, List *out);
 bool wsBuildConfig(const WsModel *m, int idx, Config *c);
 int wsBuildWorklist(const WsModel *m, const unsigned char *needed, WsWork *work);
 bool wsCacheEnabled(void);
@@ -136,14 +147,41 @@ bool wsCacheLoadMap(WsCacheMap *m);
 const WsCachePath *wsCacheMapFind(const WsCacheMap *m, uint64_t key);
 void wsCacheMapFree(WsCacheMap *m);
 /* Gate no-op workspace: router -> artefak -> P-fast (metadata peta path)
-   -> stamp grup per proyek -> pemeriksaan penuh fingerprint. */
-bool wsCacheNoopValid(const WsModel *m);
+   -> stamp grup per proyek -> pemeriksaan penuh fingerprint.
+   `need` = proyek yang WAJIB punya stempel grup (NULL = semua proyek).
+   Selektif mengirim closure: proyek di luar closure yang belum pernah
+   dibangun tidak membatalkan no-op selektif; penuh mewajibkan semuanya,
+   sehingga fp parsial (build selektif di workspace dingin) menolak run
+   penuh sampai semua proyek tercatat. */
+bool wsCacheNoopValid(const WsModel *m, const unsigned char *need);
+/* Cakupan fingerprint saat ini: NONE = fingerprint.cache belum ada;
+   PARTIAL = ada tapi tidak semua proyek tercatat (fp.cover bukan "full");
+   FULL = semua proyek tercatat (pembuktian: walk penuh sah / simpan penuh). */
+typedef enum { WS_COV_NONE = 0, WS_COV_PARTIAL, WS_COV_FULL } WsCoverage;
+WsCoverage wsCacheCoverage(void);
+/* Tulis/hapus fp.cover. full=true hanya sah setelah simpan penuh sukses
+   atau walk penuh no-op yang sah (bukti cakupan penuh). */
+void wsCacheCoverWrite(bool full);
 void wsCacheSave(const WsModel *m, const char *wsName);
+/* Varian selektif (design/build_report.md O1 — merge per proyek): simpan HANYA
+   entri proyek pada `onlyIdx` (closure build selektif); entri proyek lain
+   dipertahankan dari simpanan sebelumnya sehingga no-op penuh berikutnya bisa
+   HIT tanpa run penuh tambahan. Tanpa simpanan sebelumnya, fingerprint BARU
+   dibuat TERBATAS (hanya closure — fp.cover tidak ditulis), jadi gerbang tetap
+   menolak run penuh sampai semua proyek tercatat lewat build selektif. */
+void wsCacheSaveSel(const WsModel *m, const char *wsName, const int *onlyIdx,
+                    int onlyN);
 long long wsCacheStampNs(const struct stat *sb);
 bool wsCleanRootOutputs(const char *wsDir);
 bool wsCompdbRefresh(const WsModel *m);
 WsProject *wsEnsureProject(WsModel *m, const char *name);
 void wsExpandLibDeps(const WsModel *m, unsigned char *needed);
+/* `--with-cdeps`: perluas closure selektif dengan provider cdeps (fixpoint,
+   aman untuk cdeps sirkular bade<->core). Return true bila ada proyek baru
+   ditandai — pemanggil mengulang bersama wsExpandLibDeps sampai stabil. */
+bool wsExpandCdeps(const WsModel *m, unsigned char *needed);
+/* Ekspansi grup cdeps level atas (design/cdeps_group.md). false = error (sudah dicetak). */
+bool wsExpandCdepsGroups(WsModel *m, const char *file);
 int wsFindProject(const WsModel *m, const char *name);
 bool wsIsEngineSection(const char *seg);
 bool wsIsRelPath(const char *item);

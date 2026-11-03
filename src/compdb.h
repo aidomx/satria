@@ -6,9 +6,12 @@
 
 #include "config.h"
 #include "util.h"
+#include "log/build_report.h" /* RepCompdb: status return writeCompdb */
 
 bool compdbEnabled(const Config *c);
-void writeCompdb(const Config *c, List *srcs);
+/* Kembalikan status CompDB eksplisit (design/build_report.md §6) tanpa
+   mengubah keputusan cache. Caller (jalur build) menyimpannya ke report. */
+RepCompdb writeCompdb(const Config *c, List *srcs);
 
 /*
  * writeCompdbMulti — merged workspace: beberapa (Config, srcs) dirender
@@ -16,7 +19,7 @@ void writeCompdb(const Config *c, List *srcs);
  * workspace. Skip-write bila fingerprint gabungan cocok cache — no-op
  * diam tanpa sentuh disk (design/workspace_v1.md §No-op dan CompDB).
  */
-void writeCompdbMulti(const Config *const *cfgs, List *const *srcs, int count);
+RepCompdb writeCompdbMulti(const Config *const *cfgs, List *const *srcs, int count);
 
 /* Fingerprint konten merged (hash gabungan seluruh entri) — dipakai
    workspace_log untuk keputusan skip-write TANPA merender file. */

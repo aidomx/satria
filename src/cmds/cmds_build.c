@@ -6,6 +6,7 @@
 #include "../commands.h"
 #include "../cache/artifact.h"
 #include "../log/build_log.h"
+#include "../log/build_report.h"
 #include "../log/report_blob.h"
 
 #include <stdio.h>
@@ -151,6 +152,29 @@ bool envOff(const char *name) {
    Dedup object pakai linear search: objCount kecil dan objectPathFor
    deterministik, jadi O(n^2) kecil ini masih jauh lebih murah daripada
    stat ganda pada FS lambat. */
+/* Sumber yang SEHARUSNYA punya .d: proyek meminta -MMD/-MD lewat flags, bukan
+   MSVC, dan berekstensi C/C++/Obj-C. Single-project tanpa flag itu tidak pernah
+   menulis .d, jadi .d absen di sana adalah keadaan normal, bukan rusak. */
+static bool statFlagsWantDotD(const Config *c) {
+  for (int i = 0; i < c->flags.count; i++) {
+    const char *f = c->flags.items[i];
+    if (strcmp(f, "MMD") == 0 || strcmp(f, "-MMD") == 0 ||
+        strcmp(f, "MD") == 0 || strcmp(f, "-MD") == 0)
+      return true;
+  }
+  return false;
+}
+
+static bool statSrcHasDotD(const Config *c, const char *src) {
+  if (compilerIsMSVC(c) || !statFlagsWantDotD(c)) return false;
+  static const char *srcExt[] = {".c", ".C", ".cc", ".cpp", ".cxx", ".m", ".mm"};
+  const char *dot = strrchr(src, '.');
+  if (!dot) return false;
+  for (size_t i = 0; i < sizeof(srcExt) / sizeof(srcExt[0]); i++)
+    if (strcmp(dot, srcExt[i]) == 0) return true;
+  return false;
+}
+
 void statPlanBuild(StatPlan *p, const Config *c, const List *srcs) {
   int n = srcs->count;
   p->count = n;
@@ -195,6 +219,15 @@ void statPlanBuild(StatPlan *p, const Config *c, const List *srcs) {
       if (p->obsObj) {
         int64_t om = -1;
         memoStampNsSize(objPath, &om, &sz); /* object: lewat memo (dibuang saat compile) */
+        /* .d hilang untuk sumber ber-.d: object diperlakukan basi (seperti object
+           hilang) agar compile ulang menulis ulang .d. Tanpa ini .d tak pernah
+           pulih dan catatan noop tidak pernah valid lagi. */
+        if (om >= 0 && statSrcHasDotD(c, src)) {
+          char dp[MAX_PATH * 2];
+          int64_t dm = -1;
+          long long dsz = 0;
+          if (dotDPathFor(c, src, dp, sizeof(dp)) && !memoStampNsSize(dp, &dm, &dsz)) om = -1;
+        }
         p->objM[slot] = om;
       } else {
         p->objM[slot] = -99; /* belum distat — konsumen WAJIB stat sendiri */
@@ -240,19 +273,32 @@ int cmdBuildEx(int jobs, const char *buildfilePath, bool libOnly) {
   /* Detail laporan run (design/startup.md §10): tee stdout sejak awal; disimpan
      ke .satria/report.blob bila build sukses, dibuang bila gagal. */
   reportBlobBegin();
+  buildReportBegin(); /* laporan aktif: dirender setelah pass (design/build_report.md) */
 
   Config c = configDefaults();
   startupPhase("loading configuration");
   if (!loadConfig(&c, buildfilePath)) {
     startupPhaseEnd(false);
     reportBlobFinish(false);
+    buildReportRelease();
     return 1;
   }
   startupPhase("preparing execution"); /* fase load selesai: done dicetak di sini */
   if (!resolveCompiler(&c)) {
     startupPhaseEnd(false);
     reportBlobFinish(false);
+    buildReportRelease();
     return 1;
+  }
+
+  /* Toolchain efektif untuk header Build Report — format sama dengan baris
+     "Build with" lama (warningFlags diakhiri spasi oleh joinFlags). */
+  {
+    char *wf = warningFlags(&c);
+    char tc[512];
+    snprintf(tc, sizeof(tc), "%s %s-std=%s", c.cc, wf ? wf : "", c.std);
+    buildReportSetToolchain(tc);
+    free(wf);
   }
 
   profMark("startup+config");
@@ -266,12 +312,14 @@ int cmdBuildEx(int jobs, const char *buildfilePath, bool libOnly) {
     startupPhaseEnd(false);
     fprintf(stderr, "satria: root '%s' is not a directory\n", c.root);
     reportBlobFinish(false);
+    buildReportRelease();
     return 1;
   }
   if (!fsSetCwd(c.root)) {
     startupPhaseEnd(false);
     fprintf(stderr, "satria: cannot enter root '%s'\n", c.root);
     reportBlobFinish(false);
+    buildReportRelease();
     return 1;
   }
   startupPhaseEnd(true);
@@ -280,8 +328,11 @@ int cmdBuildEx(int jobs, const char *buildfilePath, bool libOnly) {
   if (logging) buildLogBegin();
   int result = cmdsBuildPassRun(jobs, c, buildfilePath, libOnly);
   if (logging) buildLogEnd(result);
-  reportBlobFinish(result == 0);        /* sukses: jadikan report.blob; gagal: tahan yang lama */
+  buildReportFinish(result == 0); /* render Build Report (live stream compile dipertahankan) */
+  /* sukses: jadikan report.blob dan salin ke state (pulih bila file hilang) */
+  if (reportBlobFinish(result == 0) && result == 0) fastReportPut();
   if (result == 0) artifactCacheSave(); /* metadata artefak (design/startup.md §9) */
+  buildReportRelease(); /* record dipakai utk kondensasi blob — lepas di sini */
   return result;
 }
 

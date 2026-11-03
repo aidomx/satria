@@ -8,6 +8,7 @@
 #include "../commands.h"
 #include "../cache/artifact.h"
 #include "../log/build_log.h"
+#include "../log/build_report.h"
 #include "../log/report_blob.h"
 
 #include <stdio.h>
@@ -53,6 +54,7 @@ int cmdsBuildPassFinish(CmdsPassTail *t) {
   CmdsBuildFingerprint currentFp = t->currentFp;
   int compiled = t->compiled;
   int skipped = t->skipped;
+  int warnings = t->warnings;
   bool objectsChanged = t->objectsChanged;
   bool sourceSetChanged = t->sourceSetChanged;
   bool linkConfigChanged = t->linkConfigChanged;
@@ -94,21 +96,8 @@ int cmdsBuildPassFinish(CmdsPassTail *t) {
     /* State fase library (miniws): no-op pass 1 berikutnya dilewati total.
        target "" = proyek tanpa library — direkam sebagai "-". */
     if (!wsModeActive()) cmdsFastStateSave(&c, &srcs, "", buildfilePath, true);
-    printf("\n%s Summary :\n", repPrefix());
-    if (c.libRequested) {
-      char libp[MAX_PATH * 2];
-      if (c.libStatic) {
-        cmdsLibStaticPath(&c, libp, sizeof(libp));
-        printf("    Library  : %s\n", libp);
-      }
-      if (c.libShared) {
-        cmdsLibSharedPath(&c, libp, sizeof(libp));
-        printf("    Library  : %s\n", libp);
-      }
-    }
-    printf("    Compiled : %d\n", compiled);
-    printf("    Skipped  : %d\n", skipped);
-    printf("    Status   : Success\n");
+    /* Library & hitungan masuk Build Report (design/build_report.md). */
+    buildReportProjectCounts(compiled, skipped, warnings);
     free(inc);
     free(wf);
     profReport();
@@ -169,6 +158,8 @@ int cmdsBuildPassFinish(CmdsPassTail *t) {
   }
 
   if (!linkNeeded) {
+    /* Baris live ini dipertahankan oleh desain §7 ("Linking: ... (up-to-date)
+       dicetak"); status `cached` dicatat terpisah pada Build Report. */
     printf("%s Linking : %s (up-to-date)\n", repPrefix(), target);
     /* Library bisa jadi masih perlu dibangun (baru diaktifkan di
        Buildfile / terhapus manual) meski binary sudah up-to-date. */
@@ -208,14 +199,12 @@ int cmdsBuildPassFinish(CmdsPassTail *t) {
       statPlanFree(&plan);
       return 1;
     }
-    printf("\n%s Summary :\n", repPrefix());
-    long long sizeBytes = fsFileSize(target);
-    double sizeKb = sizeBytes > 0 ? (double)sizeBytes / 1024.0 : 0;
-    printf("    Target   : %s\n", target);
-    printf("    Size     : %.1fKB\n", sizeKb);
-    printf("    Compiled : %d\n", compiled);
-    printf("    Skipped  : %d\n", skipped);
-    printf("    Status   : Success\n");
+    /* Workspace: fase binary TIDAK mencetak hitungan (design §5 — angka fast-
+       tail `0 compiled, N skipped` bukan compile pass kedua). Hitungan berasal
+       dari fase library; tanpa ini runner paralel mencetak blok ganda karena
+       child fork tidak mewarisi catatan hasCounts milik induk. */
+    if (!wsModeActive()) buildReportProjectCounts(compiled, skipped, warnings);
+    buildReportAddBinary(target, REP_CACHED, fsFileSize(target));
     if (!fastSaved && !wsModeActive()) cmdsFastStateSave(&c, &srcs, target, buildfilePath, false);
     return 0;
   }
@@ -315,7 +304,6 @@ int cmdsBuildPassFinish(CmdsPassTail *t) {
     }
     movedOld = true;
   }
-  printf("%s Linking : %s/%s\n", repPrefix(), c.outBinaryDir, c.outBinaryName);
   bgProgress(95, "Linking: %s/%s", c.outBinaryDir, c.outBinaryName); /* §3B */
   bool linked = runCmd(cmd);
   profMark("link");
@@ -381,15 +369,10 @@ int cmdsBuildPassFinish(CmdsPassTail *t) {
   }
   profReport();
 
-  long long sizeBytes = fsFileSize(target);
-  double sizeKb = sizeBytes > 0 ? (double)sizeBytes / 1024.0 : 0;
-
-  printf("\n%s Summary :\n", repPrefix());
-  printf("    Target   : %s\n", target);
-  printf("    Size     : %.1fKB\n", sizeKb);
-  printf("    Compiled : %d\n", compiled);
-  printf("    Skipped  : %d\n", skipped);
-  printf("    Status   : Success\n");
+  /* Lihat catatan jalur up-to-date: fase binary workspace tidak mengulang
+     hitungan fase library. */
+  if (!wsModeActive()) buildReportProjectCounts(compiled, skipped, warnings);
+  buildReportAddBinary(target, REP_LINKED, fsFileSize(target));
   if (!fastSaved && !wsModeActive()) cmdsFastStateSave(&c, &srcs, target, buildfilePath, false);
   statPlanFree(&plan);
   return 0;

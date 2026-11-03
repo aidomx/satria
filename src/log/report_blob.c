@@ -13,12 +13,18 @@
        Binaries   : 2 linked
        Status     : Success
 
+   Agregat dihitung dari record EKSPLISIT build report (buildReportAgg) —
+   parser teks rbCondense lama dihapus (design §9: "Hapus agregasi berbasis
+   parsing teks setelah record eksplisit tersedia"). Konsekuensinya ringkasan
+   mengikuti format Build Report yang memang dicetak run itu.
+
    Pada no-op file diputar ulang (reportBlobShow): blok STATUS di dalamnya
    adalah pesan no-op — seragam di kedua mode. Workspace menyetel jalur cache
    lewat reportBlobCachePath(WS_CACHE_FP); single-project memakai default
    fingerprint.cache. POSIX saja — Windows dilewati (tanpa tee; sama seperti relay
    build.log). */
 #include "report_blob.h"
+#include "build_report.h"    /* buildReportAgg — agregat eksplisit (§9) */
 #include "../portability.h" /* fsRenameReplace */
 #include "../util.h"        /* mkdirs */
 #include <stdio.h>
@@ -36,7 +42,7 @@
 static int rbActive = 0;
 static char rbCache[256] = ".satria/caches/fingerprint.cache";
 #ifndef _WIN32
-static struct timespec rbT0;
+static double rbT0ms; /* portMonoMs: monotonic portabel (ms) */
 #endif
 
 void reportBlobCachePath(const char *p) {
@@ -72,158 +78,34 @@ static void rbRelayLoop(int rd, int term, int file) {
 }
 #endif
 
-/* ---- Kondensasi agregat (design/startup.md §10) ----
-   Keluaran mentah run SUKSES diringkas menjadi satu blok STATUS + satu blok
-   LAST BUILD SUMMARY lintas proyek, dihitung PER BLOK ringkasan (aman untuk
-   mode single yang tanpa baris "Fase"):
-     - Archive : -> Archives; Target : -> Binaries;
-     - Library : -> statis (.a) / bersama (.so) — dibuang bila blok punya
-       Target (fase binary hanya mencetak "up-to-date").
-     - Status  : Success bila semua blok Success.
-   Baris progres per file, "Build with", "Embedded", "Linking", dan CompDB
-   dibuang — no-op menampilkan ringkasan padat, bukan keluaran basi rinci. */
-typedef struct {
-  int nArch, nLibStatic, nLibShared, nBin, nBinUp;
-  int blocks, bad;
-} RbAgg;
-
-typedef struct {
-  int libStatic, libShared, hasArchive, hasTarget, hasStatus, statusOk;
-} RbBlk;
-
-#ifndef _WIN32 /* helper kondensasi: hanya dipakai rbCondense (POSIX) */
-static void rbBlkReset(RbBlk *b) {
-  b->libStatic = b->libShared = b->hasArchive = b->hasTarget = b->hasStatus = b->statusOk = 0;
-}
-
-static void rbBlkFlush(RbBlk *b, RbAgg *a) {
-  if (b->hasStatus || b->hasArchive || b->hasTarget || b->libStatic || b->libShared) {
-    a->blocks++;
-    if (!b->hasStatus || !b->statusOk) a->bad++;
-    if (b->hasArchive)
-      a->nArch++;
-    else if (b->hasTarget) {
-      /* binary dihitung saat parse lapangan "    Target" — lihat rbCondense
-         (phase-run workspace tidak mencetak baris live Linking) */
-    } else { /* blok fase library: baris "up-to-date" binary tidak dihitung */
-      a->nLibStatic += b->libStatic;
-      a->nLibShared += b->libShared;
-    }
-  }
-  rbBlkReset(b);
-}
-
-static void rbCopy(char *dst, size_t n, const char *src) {
-  snprintf(dst, n, "%.*s", (int)(n - 1), src);
-}
-
-static bool rbHasSuffix(const char *s, const char *suf) {
-  size_t n = strlen(s), m = strlen(suf);
-  return n >= m && strcmp(s + n - m, suf) == 0;
-}
-
-/* Baris lapangan laporan memakai repPrefix(): "> " (UTF-8) atau "| "
-   (non-UTF-8) — keduanya diterima. Mengembalikan nilai sesudah ":" pada
-   baris yang diawali <prefix> <key>, NULL bila bukan lapangan itu. */
-static const char *rbRepField(const char *line, const char *key) {
-  if ((line[0] != '>' && line[0] != '|') || line[1] != ' ') return NULL;
-  const char *p = line + 2;
-  size_t kl = strlen(key);
-  if (strncmp(p, key, kl) != 0) return NULL;
-  p += kl;
-  while (*p == ' ')
-    p++;
-  if (*p != ':') return NULL;
-  p++;
-  while (*p == ' ')
-    p++;
-  return p;
-}
-
-#endif
+/* ---- Kondensasi dari record eksplisit (design/build_report.md §9) ----
+   Tidak ada parsing teks: agregat datang dari buildReportAgg(). Panggil
+   hanya bila build report aktif (pemilik lifecycle: cmdBuildEx / wsRunCore
+   memanggil buildReportBegin sebelum reportBlobBegin). */
 #ifndef _WIN32
-static void rbCondense(const char *in, FILE *out, RbAgg *a, double secs) {
-  FILE *f = fopen(in, "r");
-  if (!f) return;
-  char line[4096];
-  RbBlk b;
-  rbBlkReset(&b);
-  /* Status link terakhir sejak awal bagian (Project/Fase): false = link
-     nyata, true = "(up-to-date)". Phase-run workspace MENCETAK "    Target"
-     pada link nyata TANPA baris live "Linking", jadi binary dihitung dari
-     lapangan Target yang TANPA penanda up-to-date — bukan dari baris live
-     (yang juga bergantung prefix "> "/"| " tergantung locale). */
-  bool linkUp = false;
-  while (fgets(line, sizeof(line), f)) {
-    size_t n = strlen(line);
-    while (n && (line[n - 1] == '\n' || line[n - 1] == '\r'))
-      line[--n] = '\0';
-    const char *fld;
-    if ((fld = rbRepField(line, "Project")) != NULL || (fld = rbRepField(line, "Fase")) != NULL) {
-      rbBlkFlush(&b, a);
-      linkUp = false; /* bagian baru: status link di-reset */
-    } else if ((fld = rbRepField(line, "Summary")) != NULL) {
-      (void)fld;
-      rbBlkFlush(&b, a);
-    } else if ((fld = rbRepField(line, "Linking")) != NULL) {
-      /* rekam status: "(up-to-date)" -> link TIDAK dihitung nanti */
-      linkUp = strstr(fld, "(up-to-date)") != NULL;
-    } else if (strncmp(line, "    ", 4) == 0) {
-      const char *k = line + 4;
-      const char *v = strchr(k, ':');
-      if (!v) continue;
-      char key[32];
-      size_t kl = (size_t)(v - k);
-      while (kl && k[kl - 1] == ' ')
-        kl--;
-      if (kl >= sizeof(key)) continue;
-      memcpy(key, k, kl);
-      key[kl] = '\0';
-      v++;
-      while (*v == ' ')
-        v++;
-      char val[256];
-      rbCopy(val, sizeof(val), v);
-      char *up = strstr(val, " ("); /* buang "(up-to-date)" dsb. */
-      if (up) *up = '\0';
-      if (strcmp(key, "Status") == 0) {
-        b.hasStatus = 1;
-        b.statusOk = strcmp(v, "Success") == 0;
-      } else if (strcmp(key, "Library") == 0) {
-        if (rbHasSuffix(val, ".a"))
-          b.libStatic++;
-        else if (rbHasSuffix(val, ".so"))
-          b.libShared++;
-      } else if (strcmp(key, "Archive") == 0) {
-        b.hasArchive = 1;
-      } else if (strcmp(key, "Target") == 0) {
-        b.hasTarget = 1;
-        /* binary yang di-link di run ini vs. binary yang sudah up-to-date */
-        if (linkUp) a->nBinUp++;
-        else a->nBin++;
-      }
-    }
-  }
-  fclose(f);
-  rbBlkFlush(&b, a);
-  int libs = a->nLibStatic + a->nLibShared;
-  fprintf(out, "STATUS\n");
-  fprintf(out, "  > Nothing to build\n");
-  fprintf(out, "  > Cache valid: %s\n", rbCache);
+static bool rbCondenseReport(FILE *out, double secs) {
+  int nArch = 0, nLibStatic = 0, nLibShared = 0, nBin = 0, nBinUp = 0;
+  if (!buildReportAgg(&nArch, &nLibStatic, &nLibShared, &nBin, &nBinUp))
+    return false;
+  int libs = nLibStatic + nLibShared;
+  fprintf(out, "STATUS\n------\n");
+  fprintf(out, "Build        : Nothing to build\n");
+  fprintf(out, "Cache valid  : %s\n", rbCache);
   fprintf(out, "\n");
   {
     time_t now = time(NULL);
     char when[32];
     strftime(when, sizeof(when), "%Y-%m-%d %H:%M", localtime(&now));
-    fprintf(out, "LAST BUILD SUMMARY\n");
-    fprintf(out, "  %s   : %s\n", "Datetime", when);
+    fprintf(out, "LAST BUILD SUMMARY\n------------------\n");
+    fprintf(out, "Datetime   : %s\n", when);
   }
-  fprintf(out, "  Total time : %.2fs\n", secs);
-  fprintf(out, "  Archives   : %d created\n", a->nArch);
-  fprintf(out, "  Libraries  : %d generated (%d static, %d shared)\n", libs, a->nLibStatic,
-          a->nLibShared);
-  fprintf(out, "  Binaries   : %d linked, %d up-to-date\n", a->nBin, a->nBinUp);
-  fprintf(out, "  Status     : %s\n", (a->blocks && !a->bad) ? "Success" : "Failed");
+  fprintf(out, "Total time : %.2fs\n", secs);
+  fprintf(out, "Archives   : %d created\n", nArch);
+  fprintf(out, "Libraries  : %d generated (%d static, %d shared)\n", libs,
+          nLibStatic, nLibShared);
+  fprintf(out, "Binaries   : %d linked, %d up-to-date\n", nBin, nBinUp);
+  fprintf(out, "Status     : Success\n"); /* file hanya ditulis bila run sukses */
+  return true;
 }
 #endif
 
@@ -235,7 +117,7 @@ void reportBlobBegin(void) {
   mkdirs(".satria");
   remove(RB_TMP);
   fflush(stdout);
-  clock_gettime(CLOCK_MONOTONIC, &rbT0); /* Total time di LAST BUILD SUMMARY */
+  rbT0ms = portMonoMs(); /* Total time di LAST BUILD SUMMARY */
   int p[2];
   if (pipe(p) != 0) return;
   int orig = dup(STDOUT_FILENO);
@@ -301,26 +183,24 @@ bool reportBlobFinish(bool save) {
   if (save) {
     struct stat sb;
     if (stat(RB_TMP, &sb) == 0 && sb.st_size > 0) {
-      struct timespec t1;
-      clock_gettime(CLOCK_MONOTONIC, &t1);
-      double secs = (double)(t1.tv_sec - rbT0.tv_sec) + (double)(t1.tv_nsec - rbT0.tv_nsec) / 1e9;
-      /* Simpan ringkasan terstruktur, bukan keluaran mentah (§10). */
+      double secs = (portMonoMs() - rbT0ms) / 1000.0;
+      /* Simpan ringkasan terstruktur dari record eksplisit (§9). */
       char sum[sizeof(RB_TMP) + 8];
       snprintf(sum, sizeof(sum), "%s.sum", RB_TMP);
+      bool wrote = false;
       FILE *o = fopen(sum, "w");
       if (o) {
-        RbAgg agg = {0};
-        rbCondense(RB_TMP, o, &agg, secs);
-        bool ok = (fclose(o) == 0) && agg.blocks > 0; /* tanpa blok: laporan lama dipertahankan */
-        if (ok && fsRenameReplace(sum, RB_FILE)) {
-          remove(RB_TMP);
-          return true;
-        }
+        wrote = rbCondenseReport(o, secs);
+        if (fclose(o) != 0) wrote = false;
+      }
+      if (wrote && fsRenameReplace(sum, RB_FILE)) {
+        remove(RB_TMP);
+        return true;
       }
       remove(sum);
     }
   }
-  remove(RB_TMP); /* run gagal / kosong: laporan lama dipertahankan */
+  remove(RB_TMP); /* run gagal / kosong / report tak aktif: laporan lama dipertahankan */
 #endif
   return false;
 }
@@ -344,4 +224,34 @@ void reportBlobShow(void) {
 bool reportBlobHas(void) {
   struct stat sb;
   return stat(RB_FILE, &sb) == 0 && sb.st_size > 0;
+}
+
+/* Salin isi report.blob (untuk disimpan ke state). false bila tak ada/kosong. */
+bool reportBlobRead(char **buf, size_t *len) {
+  FILE *f = fopen(RB_FILE, "rb");
+  if (!f) return false;
+  if (fseek(f, 0, SEEK_END) != 0) { fclose(f); return false; }
+  long n = ftell(f);
+  if (n <= 0 || fseek(f, 0, SEEK_SET) != 0) { fclose(f); return false; }
+  char *b = malloc((size_t)n + 1);
+  if (!b) { fclose(f); return false; }
+  size_t got = fread(b, 1, (size_t)n, f);
+  fclose(f);
+  if (got == 0) { free(b); return false; }
+  b[got] = '\0';
+  *buf = b;
+  *len = got;
+  return true;
+}
+
+/* Pulihkan report.blob dari salinan di state: tulis tmp lalu rename (atomik). */
+bool reportBlobRestore(const char *buf, size_t len) {
+  if (!buf || len == 0) return false;
+  FILE *f = fopen(RB_TMP, "wb");
+  if (!f) return false;
+  bool ok = fwrite(buf, 1, len, f) == len;
+  ok = (fclose(f) == 0) && ok;
+  if (ok && fsRenameReplace(RB_TMP, RB_FILE)) return true;
+  remove(RB_TMP);
+  return false;
 }

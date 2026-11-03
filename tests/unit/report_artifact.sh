@@ -15,7 +15,7 @@ export NO_COLOR=1
 
 pass=0; fail=0
 check() { if [ "$2" -eq 0 ]; then pass=$((pass+1)); echo "PASS  $1"; else fail=$((fail+1)); echo "FAIL  $1"; fi; }
-hit_ws() { grep -q "Nothing to build" "$1" && grep -q "Cache valid:" "$1"; }
+hit_ws() { grep -q "Nothing to build" "$1" && grep -q "Cache valid *:" "$1"; }
 
 # ===================== workspace miniws: report.blob =====================
 W=$(mktemp -d /tmp/rpt_ws_XXXX)
@@ -25,7 +25,7 @@ cd "$W" || exit 2
 "$SAT" -w > c.txt 2>&1; check "miniws: cold build" $?
 [ -s .satria/report.blob ]; check "miniws: report.blob terbentuk dan tidak kosong" $?
 grep -q "Status     : Success" .satria/report.blob; check "miniws: report.blob berisi detail laporan" $?
-grep -q "^STATUS$" .satria/report.blob && grep -q "Cache valid: .satria/caches/fingerprint.cache" .satria/report.blob
+grep -q "^STATUS$" .satria/report.blob && grep -q "Cache valid *: .satria/caches/fingerprint.cache" .satria/report.blob
 check "miniws: report.blob blok STATUS (format §10)" $?
 grep -q "^LAST BUILD SUMMARY$" .satria/report.blob && grep -q "Total time : " .satria/report.blob
 grep -q "Libraries  : [0-9]* generated" .satria/report.blob && grep -q "Binaries   : [0-9]* linked" .satria/report.blob
@@ -78,7 +78,8 @@ hit_ws rc3.txt; check "release: no-op pulih setelah artefak terbangun" $?
 echo "perubahan-test" >> core/src/cmd.txt
 "$SAT" -w > rc4.txt 2>&1
 ! hit_ws rc4.txt; check "release: edit input release membatalkan no-op" $?
-grep -q "Package" rc4.txt; check "release: fase release berjalan ulang" $?
+grep -q "# Release" rc4.txt && grep -Eq 'rupa-v[0-9.]+\.tar\.gz \([^)]*built\)' rc4.txt
+check "release: fase release berjalan ulang (# Release built)" $?
 "$SAT" -w > rc5.txt 2>&1
 hit_ws rc5.txt; check "release: no-op pulih setelah input sinkron" $?
 

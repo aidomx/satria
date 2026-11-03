@@ -36,7 +36,7 @@ echo "== workspace (background = true di Buildfile.ws) =="
 check "spawn: rc=0 (berhasil memulai)" $?
 ! grep -q "Project :" out.txt
 check "spawn: induk tidak menjalankan build sendiri" $?
-! grep -q "startup :" out.txt
+! grep -q "^startup$" out.txt
 check "spawn: blok startup TIDAK dicetak di terminal" $?
 [ -f .satria/workspace.pid ]
 check "spawn: PID tertulis (.satria/workspace.pid)" $?
@@ -52,7 +52,7 @@ sleep 1
 cont_bg .satria/workspace.pid
 wait $wp
 check "watch: rc=0 setelah build sukses" $?
-grep -q "startup :" watch.txt && grep -q "discovery" watch.txt
+grep -q "^startup$" watch.txt && grep -q "discovery" watch.txt
 check "watch: me-replay blok startup" $?
 grep -q "> progress :" watch.txt
 check "watch: menampilkan progres" $?
@@ -80,7 +80,7 @@ check "watch --full setelah selesai: ditolak (rc=1)" $?
 printf '\n/* perubahan uji background */\n' >> bade/src/bade.c
 "$SAT" -w > warm.txt 2>&1
 check "run warm: rc=0 (spawn)" $?
-! grep -q "startup :" warm.txt
+! grep -q "^startup$" warm.txt
 check "run warm: tetap tanpa blok startup" $?
 [ ! -f .satria/background.startup ]
 check "run warm: rekaman startup lama dibuang" $?
@@ -131,7 +131,7 @@ cd "$S" || exit 2
 
 "$SAT" > s_out.txt 2>&1
 check "single: spawn rc=0" $?
-! grep -q "startup :" s_out.txt
+! grep -q "^startup$" s_out.txt
 check "single: blok startup TIDAK dicetak" $?
 [ -s .satria/background.startup ] && grep -q "loading configuration" .satria/background.startup
 check "single: startup direkam (cold)" $?
@@ -146,7 +146,7 @@ sleep 1
 cont_bg .satria/build.pid
 wait $sw
 check "single: watch rc=0 setelah sukses" $?
-grep -q "startup :" s_watch.txt
+grep -q "^startup$" s_watch.txt
 check "single: watch me-replay startup" $?
 grep -q "> status : success" s_watch.txt
 check "single: watch mencetak status success" $?

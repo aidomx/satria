@@ -6,7 +6,10 @@
 #include "../cmds/cmds_internal.h" /* cmdsLegacyStateSweep: pembersihan state lama */
 #include "../cache/router.h" /* optsSourcesRouteSync: sinkron sources <-> opts */
 #include "../log/report_blob.h" /* detail laporan no-op (design/startup.md §10) */
+#include "../log/build_report.h" /* Build Report workspace (design/build_report.md) */
 #include "../log/build_log.h"
+#include "../cache/state_blob.h" /* fallback no-op: baca ws.state per proyek */
+#include <time.h>
 
 bool workspaceFileExists(void);
 
@@ -115,6 +118,38 @@ static void wsWarnSelectiveDivergence(const WsModel *m,
   }
 }
 
+/* Peringatan D (pre-flight): provider cdeps di LUAR closure build selektif
+   dengan library yang belum ada — link hampir pasti gagal. Sarankan opsi
+   perbaikan (build penuh / --with-cdeps). Hanya bila file library provider
+   benar-benar hilang; provider prebuilt yang sudah ada tidak memicu apa pun.
+   Warning-only: tidak mengubah worklist maupun keputusan cache. */
+static void wsWarnMissingCdepsLibs(const WsModel *m, const unsigned char *needed,
+                                   const char *target) {
+  bool warned[WS_MAX_PROJECTS] = {0};
+  for (int i = 0; i < m->projectCount; i++) {
+    if (!needed[i]) continue;
+    List providers = {0};
+    wsCdepsProviders(m, i, &providers);
+    for (int j = 0; j < providers.count; j++) {
+      int pi = wsFindProject(m, providers.items[j]);
+      if (pi < 0 || needed[pi] || warned[pi]) continue;
+      char libPath[WS_LINE_LEN];
+      if (!wsLibraryValue(m, &m->projects[i], providers.items[j], libPath,
+                          sizeof(libPath)))
+        continue;
+      if (fsFileExists(libPath)) continue;
+      warned[pi] = 1;
+      fprintf(stderr,
+              "satria: warning: '%s' links against '%s' through cdeps, but '%s' is not in "
+              "this selective build and %s does not exist.\n"
+              "satria: warning: run 'satria -w' (full) or 'satria -w %s --with-cdeps' to "
+              "build cdeps providers too.\n",
+              m->projects[i].name, providers.items[j], providers.items[j], libPath, target);
+    }
+    listFree(&providers);
+  }
+}
+
 /*
  * workspace — implementasi mode `use workspace` (Buildfile.ws; nama lama
  * Buildfile.workspace masih diterima bila file baru tidak ada).
@@ -142,7 +177,108 @@ static void wsWarnSelectiveDivergence(const WsModel *m,
  * ada) — berarti relatif root workspace. Urutan build dari depends_on
  * (topological sort), bukan urutan `projects =`.
  */
-static int wsRunCore(const char *cmd, int jobs, const char *only, const char *releaseSel) {
+/* Salinan report.blob di state.cache (proyek pseudo "__report__"). Dipulihkan
+   saat blob hilang, sehingga replay sama dengan build workspace terakhir. */
+#define WS_REPORT_STATE_PROJ "__report__"
+
+static bool wsReportStatePut(void) {
+  char *buf = NULL;
+  size_t len = 0;
+  if (!reportBlobRead(&buf, &len)) return false;
+  bool ok = stateBlobPut(WS_REPORT_STATE_PROJ, "report.blob", buf, len);
+  free(buf);
+  return ok;
+}
+
+static bool wsReportStateRestore(void) {
+  char *buf = NULL;
+  size_t len = 0;
+  if (!stateBlobGet(WS_REPORT_STATE_PROJ, "report.blob", &buf, &len)) return false;
+  bool ok = reportBlobRestore(buf, len);
+  free(buf);
+  return ok;
+}
+
+/* Layout no-op berkelompok (design 9a/9b): hanya dipakai bila tidak ada salinan
+   report. sel == NULL: seluruh workspace; bila tidak, hanya proyek ber-sel[i].
+   Artefak diambil dari ws.state per proyek (META target, LIB), ukuran lewat memo
+   stat yang sudah tervalidasi gerbang. False bila tidak ada state sama sekali. */
+#define WS_NOOP_MAX 96
+static void wsNoopGroupPrint(const char *prefix, char paths[][WS_PATH_LEN], int n) {
+  int width = 0, cnt = 0;
+  for (int i = 0; i < n; i++) {
+    if (!paths[i][0]) continue;
+    const char *slash = strrchr(paths[i], '/');
+    const char *base = slash ? slash + 1 : paths[i];
+    int dl = (int)(slash ? (slash - paths[i]) + 1 : 0);
+    char dir[WS_PATH_LEN];
+    snprintf(dir, sizeof(dir), "%.*s", dl, paths[i]);
+    if (strcmp(dir, prefix) != 0) continue;
+    int bl = (int)strlen(base);
+    if (bl > width) width = bl;
+    cnt++;
+  }
+  if (cnt == 0) return;
+  printf("> %s\n", prefix);
+  for (int i = 0; i < n; i++) {
+    if (!paths[i][0]) continue;
+    const char *slash = strrchr(paths[i], '/');
+    const char *base = slash ? slash + 1 : paths[i];
+    int dl = (int)(slash ? (slash - paths[i]) + 1 : 0);
+    char dir[WS_PATH_LEN];
+    snprintf(dir, sizeof(dir), "%.*s", dl, paths[i]);
+    if (strcmp(dir, prefix) != 0) continue;
+    int64_t mt = -1;
+    long long sz = -1;
+    cmdsStatCached(paths[i], &mt, &sz);
+    printf("* %-*s (%.1fKB, cached)\n", width, base,
+           sz > 0 ? (double)sz / 1024.0 : 0);
+  }
+  printf("\n");
+}
+
+static bool wsNoopGroupedPrint(const WsModel *m, const unsigned char *sel, double t0ms) {
+  char paths[WS_NOOP_MAX][WS_PATH_LEN];
+  int nPaths = 0, found = 0;
+  for (int i = 0; i < m->projectCount; i++) {
+    if (sel && !sel[i]) continue;
+    char *tb = NULL;
+    size_t tn = 0, tp = 0;
+    if (!stateBlobGet(m->projects[i].name, "ws.state", &tb, &tn)) continue;
+    char line[MAX_PATH * 6];
+    bool gotMeta = false;
+    if (stateBufGets(tb, tn, &tp, line, sizeof(line))) { /* baris magic + cwd */
+      while (stateBufGets(tb, tn, &tp, line, sizeof(line))) {
+        int cnt = 0;
+        char tgt[WS_PATH_LEN] = "", lib[WS_PATH_LEN] = "";
+        if (!gotMeta && sscanf(line, "META %d %" WS_SCAN "s", &cnt, tgt) == 2) {
+          gotMeta = true;
+          if (strcmp(tgt, "-") != 0 && nPaths < WS_NOOP_MAX)
+            snprintf(paths[nPaths++], WS_PATH_LEN, "%s", tgt);
+        } else if (gotMeta && sscanf(line, "LIB %" WS_SCAN "s", lib) == 1 &&
+                   nPaths < WS_NOOP_MAX) {
+          snprintf(paths[nPaths++], WS_PATH_LEN, "%s", lib);
+        }
+      }
+    }
+    free(tb);
+    if (gotMeta) found++;
+  }
+  if (!found) return false;
+  double secs = (portMonoMs() - t0ms) / 1000.0;
+  printf("Build report\n-------------\n");
+  printf("* Build with cached state (fingerprint unchanged)\n\n");
+  printf("# Execution summary\n");
+  wsNoopGroupPrint("lib/", paths, nPaths);
+  wsNoopGroupPrint("bin/", paths, nPaths);
+  printf("# Summary\n");
+  printf("Total time : %.2fs\n", secs);
+  printf("Status     : Success\n");
+  return true;
+}
+
+static int wsRunCore(const char *cmd, int jobs, const char *only, const char *releaseSel,
+                     bool withCdeps) {
   profMark("ws-entry"); /* profil: pisahkan startup vs model-load */
   char wsDir[MAX_PATH];
   if (!fsGetCwd(wsDir, sizeof(wsDir))) {
@@ -282,8 +418,25 @@ static int wsRunCore(const char *cmd, int jobs, const char *only, const char *re
        (library.<os> = <nama proyek>) — transitif; siklus library sah dan
        tidak membuat loop ini macet (fixpoint sederhana). */
     wsExpandLibDeps(&m, needed);
+    /* Opt-in `--with-cdeps`: tarik juga provider cdeps (mis. -w bade ->
+       core). Fixpoint bergantian dengan libDeps — provider yang ditarik
+       mungkin punya depends_on/library sendiri. Tanpa flag: tidak ada
+       perubahan (kontrak lama terjaga). */
+    if (withCdeps && only && *only) {
+      bool grew;
+      do {
+        grew = wsExpandCdeps(&m, needed);
+        if (grew) wsExpandLibDeps(&m, needed);
+      } while (grew);
+    }
     if (strcmp(cmd, "build") == 0 && only && *only)
       wsWarnSelectiveDivergence(&m, needed, only);
+    /* Peringatan D (pre-flight): provider cdeps di LUAR closure dengan
+       library yang belum ada — link hampir pasti gagal; sarankan opsi
+       perbaikannya. Hanya bila file library benar-benar hilang (provider
+       prebuilt yang sudah ada tidak perlu ditarik). */
+    if (strcmp(cmd, "build") == 0 && only && *only)
+      wsWarnMissingCdepsLibs(&m, needed, only);
   } else {
     for (int i = 0; i < m.projectCount; i++)
       needed[i] = 1;
@@ -313,9 +466,12 @@ static int wsRunCore(const char *cmd, int jobs, const char *only, const char *re
      input release divalidasi lewat .satria/artifact.cache (design/startup.md
      §9); perubahan membatalkan no-op dan memicu ulang fase release. Status
      (SATRIA_STATUS) mengikuti hasil validasi yang sama. */
-  if (strcmp(cmd, "build") == 0 && wsCacheEnabled() && !(only && *only) &&
-      !(releaseSel && *releaseSel)) {
-    bool hit = wsCacheNoopValid(&m);
+  if (strcmp(cmd, "build") == 0 && wsCacheEnabled() && !(releaseSel && *releaseSel)) {
+    double gateT0 = portMonoMs(); /* Total time fallback no-op */
+    /* Penuh: semua proyek wajib punya stempel; selektif: closure `needed`
+       saja — proyek luar yang belum pernah dibangun tidak membatalkan
+       no-op selektif (fp parsial dari build selektif pertama). */
+    bool hit = wsCacheNoopValid(&m, (only && *only) ? needed : NULL);
     profMark("ws-gate"); /* profil: validasi no-op (map+stat+wajib-hash) */
     const char *rs = getenv("SATRIA_STATUS");
     if (rs && *rs && strcmp(rs, "0") != 0)
@@ -324,10 +480,13 @@ static int wsRunCore(const char *cmd, int jobs, const char *only, const char *re
       /* Detail laporan (§10): putar laporan tersimpan — blok STATUS di
          dalamnya adalah pesan no-op (seragam kedua mode). Tanpa laporan:
          pesan no-op dicetak mandiri. */
-      if (reportBlobHas())
-        reportBlobShow();
-      else
-        printf("STATUS\n  > Nothing to build\n  > Cache valid: %s\n", WS_CACHE_FP);
+      bool sel = only && *only;
+      if (!reportBlobHas()) wsReportStateRestore(); /* blob hilang -> pulihkan dari state */
+      if (!sel && reportBlobHas()) {
+        reportBlobShow(); /* no-op penuh: replay laporan tersimpan (format lama) */
+      } else if (!wsNoopGroupedPrint(&m, sel ? needed : NULL, gateT0)) {
+        printf("STATUS\n------\nBuild        : Nothing to build\nCache valid  : %s\n", WS_CACHE_FP);
+      }
       profMark("ws-gateshow"); /* profil: putar/tulis ringkasan no-op */
       wsModelFree(&m);
       return 0;
@@ -358,6 +517,20 @@ static int wsRunCore(const char *cmd, int jobs, const char *only, const char *re
   if (strcmp(cmd, "build") == 0) {
     reportBlobCachePath(WS_CACHE_FP);
     reportBlobBegin();
+    buildReportBegin(); /* laporan workspace: header + blok # Execution per proyek */
+    /* Peringatan kecil pada header (design §5): build selektif pada workspace
+       yang belum pernah dibangun penuh — fingerprint tidak ada / parsial —
+       bisa menghasilkan output yang tidak sinkron dengan proyek lain
+       (mis. link butuh library provider yang belum dibangun). */
+    if (only && *only) {
+      WsCoverage cov = wsCacheCoverage();
+      if (cov != WS_COV_FULL) {
+        char note[320];
+        snprintf(note, sizeof(note), "Workspace %s — %s may be out of sync",
+                 cov == WS_COV_NONE ? "never built" : "not fully built", only);
+        buildReportSetHeaderNote(note);
+      }
+    }
     profMark("ws-reportbegin"); /* profil */
   }
 
@@ -374,12 +547,17 @@ static int wsRunCore(const char *cmd, int jobs, const char *only, const char *re
     /* CompDB harus tersedia meskipun kompilasi/link gagal. */
     profMark("ws-compdb-pre"); /* profil */
     if (!wsCompdbRefresh(&m)) {
+      buildReportRelease();
       reportBlobFinish(false);
       wsModeSet(false);
       wsModelFree(&m);
       return 1;
     }
     profMark("ws-compdb"); /* profil */
+    /* Header + pembuka # Execution sekali untuk SELURUH workspace (design §3:
+       header tidak diulang per proyek). Toolchain/CompDB sudah diset di
+       wsCompdbRefresh; blok > Nama dicetak per proyek saat FASE 1/2. */
+    buildReportRenderHeader();
     /* FASE 1 — library pass: tiap proyek mengkompilasi source-nya dan
        mengemas lib<name>.a/.so TANPA link binary. SELURUH worklist
        diserahkan ke penjadwal siap-dep (wsRunBatch): anak diluncurkan
@@ -430,7 +608,19 @@ static int wsRunCore(const char *cmd, int jobs, const char *only, const char *re
      simpan cache; clean -> cache dibiarkan, validasi berikutnya yang menilai. */
   if (strcmp(cmd, "build") == 0 && rc == 0) {
     profMark("ws-save-pre"); /* profil */
-    if (!selectiveBuild && wsCacheEnabled()) wsCacheSave(&m, wsName);
+    if (wsCacheEnabled()) {
+      if (selectiveBuild) {
+        /* Merge per proyek (O1): simpan hanya closure — proyek lain
+           dipertahankan dari simpanan, sehingga no-op penuh berikutnya HIT
+           tanpa run penuh tambahan. */
+        int cidx[WS_MAX_PROJECTS];
+        int cn = 0;
+        for (int i = 0; i < wcount; i++) cidx[cn++] = work[i].idx;
+        wsCacheSaveSel(&m, wsName, cidx, cn);
+      } else {
+        wsCacheSave(&m, wsName);
+      }
+    }
     profMark("ws-cachesave"); /* profil */
     /* Sinkron dua arah sources <-> opts: run sukses bisa menulis ulang
        sources.cache (re-walk srcSave di fase mana pun, merge P wsCacheSave)
@@ -447,9 +637,15 @@ static int wsRunCore(const char *cmd, int jobs, const char *only, const char *re
     wsCleanTouched = false;
   }
 
-  /* Tutup tangkapan laporan: sukses -> report.blob; gagal -> tahan lama.
+  /* Tutup laporan: render tail (# Execution summary + # Release + # Summary),
+     lalu tutup tangkapan blob. Sukses -> report.blob; gagal -> tahan lama.
      (Tanpa-opsi bila Begin tak dipanggil — cmd selain build.) */
-  if (strcmp(cmd, "build") == 0) reportBlobFinish(rc == 0);
+  if (strcmp(cmd, "build") == 0) {
+    buildReportFinish(rc == 0);
+    if (reportBlobFinish(rc == 0) && rc == 0)
+      wsReportStatePut(); /* salin ke state: pulih bila blob hilang */
+    buildReportRelease();
+  }
   profMark("ws-report"); /* profil */
 
   wsModelFree(&m);
@@ -459,7 +655,8 @@ static int wsRunCore(const char *cmd, int jobs, const char *only, const char *re
 /* Entri mode workspace: jalankan inti, lalu tulis state yang masih pending ke
    caches/state.cache sekali (atomik). Kegagalan tulis = cache dilewati, bukan
    kegagalan build. */
-int workspaceRun(const char *cmd, int jobs, const char *only, const char *releaseSel) {
+int workspaceRun(const char *cmd, int jobs, const char *only, const char *releaseSel,
+                 bool withCdeps) {
   wsBuildLogActive = false;
   /* Gerbang background (design/background.md §4): tolak build ganda
      (§4.1) dan blok clean (§4.4) selama build background berjalan. Child
@@ -472,7 +669,7 @@ int workspaceRun(const char *cmd, int jobs, const char *only, const char *releas
   } else {
     bgChildBegin(BG_WS);
   }
-  int rc = wsRunCore(cmd, jobs, only, releaseSel);
+  int rc = wsRunCore(cmd, jobs, only, releaseSel, withCdeps);
   if (bgIsChild()) bgChildFinish(rc == 0); /* §4.3: status lalu hapus PID */
   if (!stateBlobFlush())
     fprintf(stderr, "satria: peringatan: state workspace tidak tertulis (cache dilewati)\n");

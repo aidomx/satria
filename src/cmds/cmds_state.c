@@ -242,6 +242,7 @@ static void fastStateWriteFrom(const FastState *s) {
 }
 
 bool cmdsFastStateValid(const char *buildfilePath, bool libOnly) {
+  double noopT0 = portMonoMs(); /* Total time fallback no-op */
   cmdsStatMemoSetCwd(); /* memo stat pindah ke cmds_statmemo.c */
   /* Router (opts.cache) dibaca lebih dulu: cache yang dirutekan hilang /
      kosong -> batal cepat tanpa memuat snapshot fast-state. */
@@ -314,64 +315,47 @@ bool cmdsFastStateValid(const char *buildfilePath, bool libOnly) {
     }
   }
   if (ok && s.phase != 1 && reportBlobHas()) {
-    /* No-op binary: putar laporan tersimpan (design §10) — blok STATUS di
-       dalamnya adalah pesan no-op. Tanpa laporan tersimpan -> jalur di bawah. */
+    /* No-op binary dengan laporan tersimpan: putar blob (format lama). */
     reportBlobShow();
-  } else if (ok) {
-    if (s.phase == 1) {
-      /* Fase library: tidak ada link binary — lapor status library saja. */
-      if (s.libRequested) {
-        if (s.libStaticPath[0])
-          printf("%s Library : %s%s\n", repPrefix(), s.libStaticPath,
-                 s.libStaticUp ? " (up-to-date)" : "");
-        if (s.libSharedPath[0])
-          printf("%s Library : %s%s\n", repPrefix(), s.libSharedPath,
-                 s.libSharedUp ? " (up-to-date)" : "");
-      }
-    } else {
-      printf("%s Build with cached state (fingerprint unchanged)\n", repPrefix());
-      printf("%s Linking : %s (up-to-date)\n", repPrefix(), s.target);
-      if (s.libRequested) {
-        if (s.libStaticPath[0])
-          printf("%s Library : %s%s\n", repPrefix(), s.libStaticPath,
-                 s.libStaticUp ? " (up-to-date)" : "");
-        if (s.libSharedPath[0])
-          printf("%s Library : %s%s\n", repPrefix(), s.libSharedPath,
-                 s.libSharedUp ? " (up-to-date)" : "");
-      }
+  } else if (ok && s.phase == 1) {
+    /* Fase library (format lama, tidak berubah). */
+    if (s.libRequested) {
+      if (s.libStaticPath[0])
+        printf("%s Library : %s%s\n", repPrefix(), s.libStaticPath,
+               s.libStaticUp ? " (up-to-date)" : "");
+      if (s.libSharedPath[0])
+        printf("%s Library : %s%s\n", repPrefix(), s.libSharedPath,
+               s.libSharedUp ? " (up-to-date)" : "");
     }
     printf("\n%s Summary :\n", repPrefix());
-    if (s.phase == 1) {
-      if (s.libRequested) {
-        if (s.libStaticPath[0])
-          printf("    Library  : %s (%.1fKB)\n", s.libStaticPath,
-                 s.libStaticSize > 0 ? (double)s.libStaticSize / 1024.0 : 0);
-        if (s.libSharedPath[0])
-          printf("    Library  : %s (%.1fKB)\n", s.libSharedPath,
-                 s.libSharedSize > 0 ? (double)s.libSharedSize / 1024.0 : 0);
-      }
-    } else {
-      printf("    Target   : %s\n", s.target);
-      printf("    Size     : %.1fKB\n", s.targetSize > 0 ? (double)s.targetSize / 1024.0 : 0);
-      if (s.libRequested) {
-        if (s.libStaticPath[0])
-          printf("    Library  : %s (%.1fKB)\n", s.libStaticPath,
-                 s.libStaticSize > 0 ? (double)s.libStaticSize / 1024.0 : 0);
-        if (s.libSharedPath[0])
-          printf("    Library  : %s (%.1fKB)\n", s.libSharedPath,
-                 s.libSharedSize > 0 ? (double)s.libSharedSize / 1024.0 : 0);
-      }
+    if (s.libRequested) {
+      if (s.libStaticPath[0])
+        printf("    Library  : %s (%.1fKB)\n", s.libStaticPath,
+               s.libStaticSize > 0 ? (double)s.libStaticSize / 1024.0 : 0);
+      if (s.libSharedPath[0])
+        printf("    Library  : %s (%.1fKB)\n", s.libSharedPath,
+               s.libSharedSize > 0 ? (double)s.libSharedSize / 1024.0 : 0);
     }
     printf("    Compiled : %d\n", s.compiled);
     printf("    Skipped  : %d\n", s.skipped);
     printf("    Status   : Success\n");
-    /* No-op single menutup dengan pesan yang sama dengan workspace (§10):
-       putar laporan tersimpan (STATUS = pesan no-op) atau cetak mandiri. */
-    if (s.phase != 1) {
-      if (reportBlobHas())
-        reportBlobShow();
-      else
-        printf("STATUS\n  > Nothing to build\n  > Cache valid: %s\n", BUILD_FP_CACHE);
+  } else if (ok) {
+    /* No-op binary tanpa blob: pulihkan report.blob dari salinan di state
+       (replay sama dengan build terakhir). Bila tak ada salinan: layout
+       fallback gabungan (design 9a). */
+    if (fastReportRestore()) {
+      reportBlobShow();
+    } else {
+      double noopSecs = (portMonoMs() - noopT0) / 1000.0;
+      printf("Build report\n------------\n");
+      printf("* Build with cached state (fingerprint unchanged)\n");
+      printf("* 0 compiled, %d skipped\n", s.compiled + s.skipped);
+      printf("* %s (%.1fKB, cached)\n", s.target,
+             s.targetSize > 0 ? (double)s.targetSize / 1024.0 : 0);
+      printf("\n# Summary\n");
+      printf("Total time  : %.2fs\n", noopSecs);
+      printf("Status      : Success\n");
+      printf("Cache valid : %s\n", BUILD_FP_CACHE);
     }
   }
   if (ok && patched) fastStateWriteFrom(&s); /* PATCH sentuh: perbarui stamp */

@@ -7,6 +7,7 @@
 #include "../commands.h"
 #include "../cache/artifact.h"
 #include "../log/build_log.h"
+#include "../log/build_report.h"
 #include "../log/report_blob.h"
 
 #include <stdio.h>
@@ -165,21 +166,33 @@ int cmdsBuildPassRun(int jobs, Config c, const char *buildfilePath, bool libOnly
     mkdirs(c.outBuildDir);
     bool anyRebuilt = false;
     if (!buildEmbeddedArchivesEx(&c, &anyRebuilt)) return 1;
-    printf("\n%s Summary :\n", repPrefix());
+    /* Format lama `Summary :` hanya saat Build Report TIDAK aktif. Saat aktif,
+       arsip tercatat pada bagian # Archive (step 2) — jangan bocor ke dalam
+       blok # Execution. Deteksi entri missing tetap berjalan (gagal tetap 1). */
+    bool repActive = buildReportActive();
+    if (!repActive) printf("\n%s Summary :\n", repPrefix());
     bool anyMissing = false;
     for (int i = 0; i < c.embCount; i++) {
       if (!c.emb[i].enable) continue;
       bool have = fsFileExists(c.emb[i].archivePath);
-      printf("    Archive  : %s%s\n", c.emb[i].archivePath, have ? "" : " (missing)");
+      if (!repActive) printf("    Archive  : %s%s\n", c.emb[i].archivePath, have ? "" : " (missing)");
       if (!have) anyMissing = true; /* entri hilang = build gagal, bukan sukses sunyi*/
     }
     if (anyMissing) {
-      fprintf(stderr, "satria: build failed: entri embedded hilang (lihat '(missing)' di atas)\n");
+      fprintf(stderr, "satria: build failed: entri embedded hilang%s\n",
+              repActive ? "" : " (lihat '(missing)' di atas)");
       return 1;
     }
     /* No-op: tidak ada arsip yang dibangun ulang (design/build_report.md). */
-    if (!anyRebuilt) printf("    Skipped  : true\n");
-    printf("    Status   : Success\n");
+    if (!anyRebuilt && !repActive) printf("    Skipped  : true\n");
+    if (!repActive) printf("    Status   : Success\n");
+    /* Proyek arsip-only single-project: header dirender di sini (arsip sudah
+       terekam di atas). Mode workspace: header sudah dirender wsRunCore —
+       tanpa-opsi. CompDB tidak relevan tanpa kompilasi. */
+    if (repActive && !wsModeActive()) {
+      buildReportSetCompdb(REP_COMPDB_UNKNOWN, "not applicable (archive-only)");
+      buildReportRenderHeader();
+    }
     return 0;
   }
 
@@ -194,13 +207,18 @@ int cmdsBuildPassRun(int jobs, Config c, const char *buildfilePath, bool libOnly
     if (!buildEmbeddedArchivesEx(&c, NULL)) return 1;
     if (!emitEmbeddedSource(&c, NULL)) return 1;
     if (!emitEmbeddedHeader(&c, &embHeaderChanged)) return 1;
-    for (int i = 0; i < c.embCount; i++) {
-      const EmbeddedEntry *e = &c.emb[i];
-      if (!e->enable) continue;
-      if (e->usePrebuilt)
-        printf("%s Embedded: %s (file: %s)\n", repPrefix(), e->name, e->archivePath);
-      else if (fsFileExists(e->archivePath))
-        printf("%s Embedded: %s (archive: %s)\n", repPrefix(), e->name, e->archivePath);
+    /* Baris `| Embedded:` format lama hanya saat report TIDAK aktif — saat
+       aktif arsip tercatat pada # Archive (step 2), jangan bocor ke blok
+       # Execution. Catatan "Embedded config changed" TETAP dicetak (note). */
+    if (!buildReportActive()) {
+      for (int i = 0; i < c.embCount; i++) {
+        const EmbeddedEntry *e = &c.emb[i];
+        if (!e->enable) continue;
+        if (e->usePrebuilt)
+          printf("%s Embedded: %s (file: %s)\n", repPrefix(), e->name, e->archivePath);
+        else if (fsFileExists(e->archivePath))
+          printf("%s Embedded: %s (archive: %s)\n", repPrefix(), e->name, e->archivePath);
+      }
     }
     profMark("embed");
   }
@@ -240,6 +258,7 @@ int cmdsBuildPassRun(int jobs, Config c, const char *buildfilePath, bool libOnly
     bool vchanged = true;
     fastTail = wsPhaseObjectChangeGet(&vchanged) && !vchanged;
   }
+  if (fastTail) cmdsWarningsTake(); /* buang sisa akumulator pass library */
   StatPlan plan;
   statPlanInit(&plan);
   if (!fastTail) statPlanBuild(&plan, &c, &srcs);
@@ -265,17 +284,22 @@ int cmdsBuildPassRun(int jobs, Config c, const char *buildfilePath, bool libOnly
   bool compileConfigChanged = !haveBuildFp || previousFp.compile != currentFp.compile;
   bool sourceSetChanged = !haveBuildFp || previousFp.sources != currentFp.sources;
   bool linkConfigChanged = !haveBuildFp || previousFp.link != currentFp.link;
-  if (!haveBuildFp)
-    printf("%s Fingerprint: state build tidak terbaca; semua object dikompilasi ulang\n", repPrefix());
+  {
+    /* Alasan rebuild menjadi baris "Fingerprint" pada header Build Report
+       (desain: satu catatan perwakilan, bukan tumpukan baris live). */
+    const char *fpNote = NULL;
+    if (!haveBuildFp)
+      fpNote = "state build tidak terbaca; semua object dikompilasi ulang";
+    else if (compileConfigChanged)
+      fpNote = "compile configuration changed; rebuilding objects";
+    else if (sourceSetChanged)
+      fpNote = "source set changed; refreshing link inputs";
+    else if (linkConfigChanged)
+      fpNote = "link configuration changed; relinking";
+    if (fpNote) buildReportSetFingerprint(fpNote);
+  }
 
   profMark("fingerprint");
-
-  if (haveBuildFp && compileConfigChanged)
-    printf("%s Fingerprint: compile configuration changed; rebuilding objects\n", repPrefix());
-  if (haveBuildFp && sourceSetChanged)
-    printf("%s Fingerprint: source set changed; refreshing link inputs\n", repPrefix());
-  if (haveBuildFp && linkConfigChanged)
-    printf("%s Fingerprint: link configuration changed; relinking\n", repPrefix());
 
   mkdirs(c.outBuildDir);
   mkdirs(c.outBinaryDir);
@@ -288,15 +312,30 @@ int cmdsBuildPassRun(int jobs, Config c, const char *buildfilePath, bool libOnly
      berubah, atau set source berubah. Perubahan isi source/header tidak
      mengubah command compile. */
   profMark("pre-compdb");
-  if (compdbEnabled(&c) && !wsModeActive()) {
-    /* Mode workspace: CompDB ditulis terpusat oleh jalur workspace (satu
-       compile_commands.json mewakili SELURUH workspace) — pass per proyek
-       tidak menulis apa pun (design/workspace_v1.md §No-op dan CompDB). */
-    bool compdbMissing = !fsFileExists("compile_commands.json");
-    if (compdbMissing || !haveBuildFp || compileConfigChanged || sourceSetChanged)
-      writeCompdb(&c, &srcs);
+  if (!wsModeActive()) {
+    /* Status CompDB eksplisit untuk header Build Report (design/build_report.md
+       §6): refreshed/unchanged/restored/failed dari return writeCompdb; disabled
+       bila output.compileCommands = false; skipped bila command list tidak
+       berubah (fungsi memang tidak dipanggil — jangan mengklaim unchanged).
+       Mode workspace ditulis terpusat oleh jalur workspace (bukan di sini). */
+    RepCompdb compdbSt;
+    if (!compdbEnabled(&c))
+      compdbSt = REP_COMPDB_DISABLED;
+    else {
+      bool compdbMissing = !fsFileExists("compile_commands.json");
+      if (compdbMissing || !haveBuildFp || compileConfigChanged || sourceSetChanged)
+        compdbSt = writeCompdb(&c, &srcs);
+      else
+        compdbSt = REP_COMPDB_SKIPPED; /* command list tidak berubah */
+    }
+    buildReportSetCompdb(compdbSt, NULL);
   }
   profMark("compdb");
+
+  /* Render header + pembuka # Execution SEBELUM compile — HANYA single-project.
+     Workspace merender header sekali di wsRunCore (sebelum FASE 1); di sini
+     cukup set status CompDB (di atas) tanpa membuka blok baru per proyek. */
+  if (!wsModeActive()) buildReportRenderHeader();
 
   /* Terbitkan build/version.h sebelum kompilasi agar konsumen melihat
      versi yang benar; perubahan memaksa kompilasi ulang total. embedded.h
@@ -308,11 +347,14 @@ int cmdsBuildPassRun(int jobs, Config c, const char *buildfilePath, bool libOnly
     statPlanFree(&plan);
     return 1;
   }
+  /* Proyek tunggal: blok # Execution tanpa header >. Workspace sudah memanggil
+     buildReportProject(nama) di wsRunProject — jangan membuat proyek kosong. */
+  if (!wsModeActive()) buildReportProject("");
   if (embHeaderChanged || verHeaderChanged) {
     if (verHeaderChanged)
-      printf("%s Version : .satria-version changed, recompiling all sources\n", repPrefix());
+      buildReportNote(".satria-version changed -> recompiling all sources");
     else
-      printf("%s Embedded: config changed, recompiling all sources\n", repPrefix());
+      buildReportNote("Embedded config changed -> recompiling all sources");
     for (int i = 0; i < srcs.count; i++) {
       if (!objectPathFor(&c, srcs.items[i], obj, sizeof(obj))) continue;
       /* Hanya hapus bila object memang ada menurut plan stat (sudah dihitung
@@ -328,7 +370,8 @@ int cmdsBuildPassRun(int jobs, Config c, const char *buildfilePath, bool libOnly
     }
   }
 
-  printf("%s Build with %s %s-std=%s\n", repPrefix(), c.cc, wf, c.std);
+  /* "Build with" lama kini menjadi baris "Toolchain" pada header Build Report
+     (diset di cmds_build.c setelah resolveCompiler) — tidak dicetak live. */
 
   int total = 0, compiled = 0, skipped = 0, failed = 0, interrupted = 0;
 
@@ -355,6 +398,7 @@ int cmdsBuildPassRun(int jobs, Config c, const char *buildfilePath, bool libOnly
   /* Warna warning compiler: hanya saat output ke terminal dan build.log mati
      (relay build.log membaca stderr; ANSI tidak boleh masuk log). */
   compileSetDiagColor(diagColorWanted() && !c.logEnabled);
+  cmdsWarningsTake(); /* reset akumulator warning sejak run sebelumnya */
   int headerStale = 0, headerTouched = 0;
   /* mtime object terbesar & apakah ada object yang hilang — dikumpulkan di
      sini agar keputusan link (no-op) tidak men-stat ulang semua object. */
@@ -439,10 +483,13 @@ int cmdsBuildPassRun(int jobs, Config c, const char *buildfilePath, bool libOnly
       const char *src = pending.items[i];
       if (!objectPathFor(&c, src, obj, sizeof(obj))) continue;
 
-      /* Serial (satu job): output compiler langsung ke terminal / relay build.log,
-         tanpa capture. Tidak ada job lain, jadi tidak ada interleaving. */
+      /* Serial (satu job): output compiler ditangkap (ProcHandle) lalu
+         dicetak UTUH setelah baris progress — sama seperti jalur paralel,
+         sehingga warning bisa dihitung dari buffer yang sama (design §5).
+         Urutan terjaga: satu job, satu printf utuh per baris. */
       double start = nowSeconds();
-      bool ok = compileLibraryOne(&c, inc, wf, src, obj, NULL);
+      ProcHandle cap;
+      bool ok = compileLibraryOne(&c, inc, wf, src, obj, &cap);
       pendingOk[i] = ok;
       double dt = nowSeconds() - start;
 
@@ -453,15 +500,20 @@ int cmdsBuildPassRun(int jobs, Config c, const char *buildfilePath, bool libOnly
         interrupted++;
         if (ok || c.progressErrorAlways)
           printf("[%3d/%3d] %-4s %5.2fs  %s\n", compiled, total, "INT", dt, src);
+        cmdsEmitCapture(&cap, false); /* interrupted: tampil mentah (butuh konteks) */
         break;
       }
       if (!ok) failed++;
       if (ok || c.progressErrorAlways)
         printf("[%3d/%3d] %-4s %5.2fs  %s\n", compiled, total, ok ? "OK" : "FAIL", dt, src);
+      cmdsEmitCapture(&cap, ok); /* log=true: WARN + build.log; log=false: utuh */
       bgProgress(5 + (compiled * 80) / total, "Compiling: %s", src); /* §3B */
     }
   }
   profMark("compile");
+  /* Warning pass ini dari buffer capture (jalur paralel & serial) — masuk
+     hitungan blok proyek (design §5), bukan dihitung ulang dari build.log. */
+  int warnings = cmdsWarningsTake();
 
   if (interrupted > 0) {
     /* Ctrl+C: kemajuan dipertahankan seperti build gagal (lihat buildSavePartial).
@@ -532,6 +584,7 @@ int cmdsBuildPassRun(int jobs, Config c, const char *buildfilePath, bool libOnly
   t.currentFp = currentFp;
   t.compiled = compiled;
   t.skipped = skipped;
+  t.warnings = warnings;
   t.objectsChanged = objectsChanged;
   t.sourceSetChanged = sourceSetChanged;
   t.linkConfigChanged = linkConfigChanged;

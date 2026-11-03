@@ -5,6 +5,7 @@
  */
 #include "embed.h"
 #include "cmds/cmds_internal.h"
+#include "log/build_report.h" /* status per entri arsip (design §4) */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -127,6 +128,12 @@ bool buildEmbeddedArchivesEx(const Config *c, bool *anyRebuilt) {
     bool rebuilt = false;
     if (!buildEmbeddedArchiveEntryEx(&c->emb[i], &rebuilt)) return false;
     if (rebuilt) any = true;
+    /* Status per entri dicatat di titik keputusan (design §4): built setelah
+       rename sukses, cached untuk prebuilt/fresh. Ukuran = satu stat per
+       arsip yang memang ditampilkan; dilewati bila report tidak aktif. */
+    if (buildReportActive())
+      buildReportAddArchive(c->emb[i].archivePath, rebuilt ? REP_BUILT : REP_CACHED,
+                            fsFileSize(c->emb[i].archivePath));
   }
   if (anyRebuilt) *anyRebuilt = any;
   return true;

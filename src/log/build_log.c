@@ -1,4 +1,5 @@
 #include "build_log.h"
+#include <stdbool.h>
 #include <stdio.h>
 #ifndef _WIN32
 #include <signal.h>
@@ -132,9 +133,11 @@ void buildLogCapture(const char *buf, size_t n) {
   /* log_active diwarisi anak workspace dari induk (buildLogBegin dipanggil
      sebelum fork batch) — gate-nya identik dengan relay stderr. */
   if (!buf || !n || !log_active) return;
+  /* Tahap 1: ada baris diagnostik? Syarat pembuatan file (startup.md §3) —
+     build.log hanya dibuat saat ada warning/error. */
+  bool any = false;
   size_t i = 0;
-  FILE *out = NULL;
-  while (i < n) {
+  while (!any && i < n) {
     size_t eol = i;
     while (eol < n && buf[eol] != '\n') eol++;
     size_t len = eol - i + (eol < n ? 1 : 0); /* sertakan \n bila ada */
@@ -143,18 +146,29 @@ void buildLogCapture(const char *buf, size_t n) {
     char line[8192];
     memcpy(line, buf + i, chk);
     line[chk] = '\0';
-    if (diagnostic(line)) {
-      if (!out) {
-        mkdir(".satria", 0777);
-        out = fopen(".satria/build.log", "a");
-      }
-      if (out) fwrite(buf + i, 1, len, out);
-    }
+    if (diagnostic(line)) any = true;
     i += len;
   }
-  if (out) fclose(out);
+  if (!any) return;
+  /* Tahap 2: tulis SELURUH buffer. Dengan log = true output mentah tidak
+     lagi dicetak ke report (ganti baris WARN — keputusan O2), jadi detail
+     penuh (baris konteks source, note) harus ada di build.log untuk
+     `satria log`. */
+  mkdir(".satria", 0777);
+  FILE *out = fopen(".satria/build.log", "a");
+  if (!out) return;
+  fwrite(buf, 1, n, out);
+  fclose(out);
 #else
   (void)buf;
   (void)n;
+#endif
+}
+
+int buildLogActive(void) {
+#ifdef _WIN32
+  return 0; /* relay POSIX tidak dibangun di Windows (lihat atas file) */
+#else
+  return log_active;
 #endif
 }

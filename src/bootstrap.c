@@ -67,7 +67,7 @@ static bool parseJobsArg(const char *inlineVal, bool hasInline, int *outJobs, co
 /* Kata yang berarti command (bukan nama proyek) setelah `-w`. */
 static bool bootstrapIsCommandWord(const char *s) {
   static const char *const kCommands[] = {
-    "build", "clean", "init", "help", "version", "release", "watch", "log", "trace",
+    "build", "clean", "init", "help", "version", "--version", "release", "watch", "log", "trace",
   };
   for (size_t k = 0; k < sizeof(kCommands) / sizeof(kCommands[0]); k++)
     if (strcmp(s, kCommands[k]) == 0) return true;
@@ -213,6 +213,16 @@ int bootstrapParse(int argc, const char *argv[], Bootstrap *bs) {
       continue;
     }
 
+    /* `--with-cdeps` (opt-in, hanya -w): build selektif ikut menarik
+       provider cdeps — `-w bade` bisa membangun `core` bila bade menautkan
+       library core. Default TIDAK berubah: tanpa flag, cdeps tetap bukan
+       instruksi build (lihat catatan di wsTopoSort). Divalidasi setelah
+       loop agar urutan token bebas. */
+    if (strcmp(a, "--with-cdeps") == 0) {
+      bs->ws_with_cdeps = true;
+      continue;
+    }
+
     if (!cmd) {
       cmd = a;
       /* `profile` diagnostik berdiri sendiri (design/profile.md): SEMUA
@@ -260,7 +270,7 @@ int bootstrapParse(int argc, const char *argv[], Bootstrap *bs) {
       bs->cmd = CMD_LOG;
     } else if (strcmp(cmd, "watch") == 0) {
       bs->cmd = CMD_WATCH;
-    } else if (strcmp(cmd, "version") == 0) {
+    } else if (strcmp(cmd, "version") == 0 || strcmp(cmd, "--version") == 0) {
       bs->cmd = CMD_VERSION;
     } else {
       fprintf(stderr, "satria: unknown command %s\n\n", cmd);
@@ -269,6 +279,10 @@ int bootstrapParse(int argc, const char *argv[], Bootstrap *bs) {
     }
   }
 
+  if (bs->ws_with_cdeps && !bs->want_workspace) {
+    fprintf(stderr, "satria: --with-cdeps requires -w (workspace mode)\n");
+    return 2;
+  }
   if (bs->jobs < 1) bs->jobs = cpuCount(); /* tanpa -j: paralel sebanyak core */
   bs->have_f = haveF;
   bs->cmd_token = cmd;
