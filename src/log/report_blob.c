@@ -41,9 +41,7 @@
 
 static int rbActive = 0;
 static char rbCache[256] = ".satria/caches/fingerprint.cache";
-#ifndef _WIN32
 static double rbT0ms; /* portMonoMs: monotonic portabel (ms) */
-#endif
 
 void reportBlobCachePath(const char *p) {
   if (p && *p) snprintf(rbCache, sizeof(rbCache), "%s", p);
@@ -82,7 +80,6 @@ static void rbRelayLoop(int rd, int term, int file) {
    Tidak ada parsing teks: agregat datang dari buildReportAgg(). Panggil
    hanya bila build report aktif (pemilik lifecycle: cmdBuildEx / wsRunCore
    memanggil buildReportBegin sebelum reportBlobBegin). */
-#ifndef _WIN32
 static bool rbCondenseReport(FILE *out, double secs) {
   int nArch = 0, nLibStatic = 0, nLibShared = 0, nBin = 0, nBinUp = 0;
   if (!buildReportAgg(&nArch, &nLibStatic, &nLibShared, &nBin, &nBinUp))
@@ -107,12 +104,31 @@ static bool rbCondenseReport(FILE *out, double secs) {
   fprintf(out, "Status     : Success\n"); /* file hanya ditulis bila run sukses */
   return true;
 }
-#endif
+
+/* Tulis ringkasan dari record ke .sum lalu ganti report.blob (atomik).
+   Dipakai POSIX dan Windows; tidak bergantung pada output yang ditangkap. */
+static bool rbSaveSummary(double secs) {
+  char sum[sizeof(RB_TMP) + 8];
+  snprintf(sum, sizeof(sum), "%s.sum", RB_TMP);
+  bool wrote = false;
+  FILE *o = fopen(sum, "w");
+  if (o) {
+    wrote = rbCondenseReport(o, secs);
+    if (fclose(o) != 0) wrote = false;
+  }
+  if (wrote && fsRenameReplace(sum, RB_FILE)) return true;
+  remove(sum);
+  return false;
+}
 
 void reportBlobBegin(void) {
   if (rbActive) return;
 #ifdef _WIN32
-  return; /* tanpa tee di Windows: report.blob tidak ditulis (lihat build_log) */
+  /* Windows tanpa tee: blob dibentuk dari record saat Finish (lihat rbSaveSummary). */
+  mkdirs(".satria");
+  rbT0ms = portMonoMs();
+  rbActive = 1;
+  return;
 #else
   mkdirs(".satria");
   remove(RB_TMP);
@@ -168,7 +184,10 @@ void reportBlobBegin(void) {
 
 bool reportBlobFinish(bool save) {
 #ifdef _WIN32
-  (void)save;
+  if (!rbActive) return false;
+  rbActive = 0;
+  if (!save) return false; /* run gagal: report.blob lama dipertahankan */
+  return rbSaveSummary((portMonoMs() - rbT0ms) / 1000.0);
 #else
   if (!rbActive) return false;
   fflush(stdout);
@@ -184,20 +203,11 @@ bool reportBlobFinish(bool save) {
     struct stat sb;
     if (stat(RB_TMP, &sb) == 0 && sb.st_size > 0) {
       double secs = (portMonoMs() - rbT0ms) / 1000.0;
-      /* Simpan ringkasan terstruktur dari record eksplisit (§9). */
-      char sum[sizeof(RB_TMP) + 8];
-      snprintf(sum, sizeof(sum), "%s.sum", RB_TMP);
-      bool wrote = false;
-      FILE *o = fopen(sum, "w");
-      if (o) {
-        wrote = rbCondenseReport(o, secs);
-        if (fclose(o) != 0) wrote = false;
-      }
-      if (wrote && fsRenameReplace(sum, RB_FILE)) {
+      /* Ringkasan dari record eksplisit (9), lihat rbSaveSummary. */
+      if (rbSaveSummary(secs)) {
         remove(RB_TMP);
         return true;
       }
-      remove(sum);
     }
   }
   remove(RB_TMP); /* run gagal / kosong / report tak aktif: laporan lama dipertahankan */
