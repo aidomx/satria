@@ -80,7 +80,7 @@ static char *semCopyRead(const char *rel, size_t *outLen) {
     if (outLen) *outLen = n;
     return b;
   }
-  char cp[MAX_PATH + 64];
+  char cp[SATRIA_MAX_PATH + 64];
   cmdsStatePath(cp, sizeof(cp), rel);
   return readWhole(cp, outLen);
 }
@@ -88,7 +88,7 @@ static char *semCopyRead(const char *rel, size_t *outLen) {
 static bool semCopyWrite(const char *rel, const char *data, size_t n) {
   const char *wsp = cmdsStateWsProject();
   if (wsp) return stateBlobPut(wsp, rel, data, n);
-  char cp[MAX_PATH + 64];
+  char cp[SATRIA_MAX_PATH + 64];
   cmdsStatePath(cp, sizeof(cp), rel);
   cmdsStateMkdirFor(cp);
   FILE *f = fopen(cp, "wb");

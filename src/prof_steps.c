@@ -105,7 +105,7 @@ bool profExpandTilde(const char *in, char *out, size_t n) {
 /* Path relatif -> absolut terhadap cwd pemanggil (target profile boleh
    relatif; hasilnya dinormalkan ke '/'). */
 bool profAbsPath(const char *in, char *out, size_t n) {
-  char tilde[MAX_PATH * 3];
+  char tilde[SATRIA_MAX_PATH * 3];
   if (profExpandTilde(in, tilde, sizeof(tilde))) in = tilde;
   bool abs = in[0] == '/';
 #ifdef _WIN32
@@ -116,7 +116,7 @@ bool profAbsPath(const char *in, char *out, size_t n) {
     if (strlen(in) >= n) return false; /* terpotong = target yang salah */
     copyStr(out, n, in);
   } else {
-    char cwd[MAX_PATH * 3];
+    char cwd[SATRIA_MAX_PATH * 3];
     if (!fsGetCwd(cwd, sizeof(cwd))) return false;
     int w = snprintf(out, n, "%s/%s", cwd, in);
     if (w < 0 || (size_t)w >= n) return false; /* terpotong = path absolut salah */
@@ -217,7 +217,7 @@ static int compressStep(ProfCtx *p, const char *tarPath) {
     fprintf(stderr, "satria: profile: '%s' tidak ditemukan di PATH\n", tool);
     return 1;
   }
-  char outPath[MAX_PATH * 2 + 32];
+  char outPath[SATRIA_MAX_PATH * 2 + 32];
   snprintf(outPath, sizeof(outPath), "%s/profile.tar.%s", p->tmp, profCompName(p->comp));
   size_t n = strlen(tarPath) + strlen(outPath) + strlen(tool) + 32;
   char *cmd = malloc(n);
@@ -243,7 +243,7 @@ static int compressStep(ProfCtx *p, const char *tarPath) {
 int profRunArchive(ProfCtx *p) {
   measureInput(p);
 
-  char tarPath[MAX_PATH * 2 + 32];
+  char tarPath[SATRIA_MAX_PATH * 2 + 32];
   snprintf(tarPath, sizeof(tarPath), "%s/profile.tar", p->tmp);
   int rc = tarStep(p, tarPath);
   if (rc != 0) return rc;
@@ -255,7 +255,7 @@ int profRunArchive(ProfCtx *p) {
    sudah dilakukan di cmdProfile sebelum fase mana pun jalan. */
 int profRunEmbed(ProfCtx *p) {
   uint64_t inBytes = 0;
-  char tarPath[MAX_PATH * 2 + 32] = "";
+  char tarPath[SATRIA_MAX_PATH * 2 + 32] = "";
 
   if (p->dirIsFile) {
     /* Arsip jadi: input embed apa adanya. */
@@ -272,7 +272,7 @@ int profRunEmbed(ProfCtx *p) {
     inBytes = profSizeOf(tarPath);
   }
 
-  char objPath[MAX_PATH * 2 + 32];
+  char objPath[SATRIA_MAX_PATH * 2 + 32];
   snprintf(objPath, sizeof(objPath), "%s/profile.o", p->tmp);
   size_t n = strlen(objPath) + strlen(tarPath) + 64;
   char *cmd = malloc(n);
@@ -331,13 +331,13 @@ int profRunLibrary(ProfCtx *p) {
       rc = 1;
     } else {
 #ifdef _WIN32
-      char outPath[MAX_PATH * 2 + 32];
+      char outPath[SATRIA_MAX_PATH * 2 + 32];
       snprintf(outPath, sizeof(outPath), "%s/profile.lib", p->tmp);
       size_t n = strlen(outPath) + 32 + (size_t)objs.count * 8;
       char *cmd = malloc(n);
       if (cmd) snprintf(cmd, n, "lib /nologo /OUT:%s", outPath);
 #else
-      char outPath[MAX_PATH * 2 + 32];
+      char outPath[SATRIA_MAX_PATH * 2 + 32];
       snprintf(outPath, sizeof(outPath), "%s/libprofile.a", p->tmp);
       size_t n = strlen(outPath) + 16;
       for (int i = 0; i < objs.count; i++)
@@ -368,7 +368,7 @@ int profRunLibrary(ProfCtx *p) {
   if (rc == 0 && p->libShared) {
     /* Link shared memakai cc dari Buildfile proyek (sumber flag nyata);
        tanpa Buildfile, cc tidak diketahui — tolak, jangan mengarang. */
-    char bf[MAX_PATH * 2 + 16];
+    char bf[SATRIA_MAX_PATH * 2 + 16];
     snprintf(bf, sizeof(bf), "%s/Buildfile", p->dir);
     if (!fsFileExists(bf)) {
       fprintf(stderr,
@@ -383,7 +383,7 @@ int profRunLibrary(ProfCtx *p) {
         rc = 1;
       } else {
         p->compiler = c.cc;
-        char outPath[MAX_PATH * 2 + 32];
+        char outPath[SATRIA_MAX_PATH * 2 + 32];
         snprintf(outPath, sizeof(outPath), "%s/libprofile.so", p->tmp);
         size_t n = strlen(c.cc) + strlen(outPath) + 24;
         for (int i = 0; i < objs.count; i++)

@@ -97,7 +97,7 @@ static void ncConsumeArg(NcCompile *cc, const char *a) {
   if (strncmp(a, "-I", 2) == 0 && a[2]) {
     /* tandai bahwa dir ini sudah relatif cwd — ncParseCompile tidak
        menjalankan ncFixPath kedua kali untuk include */
-    char marked[MAX_PATH * 2];
+    char marked[SATRIA_MAX_PATH * 2];
     snprintf(marked, sizeof(marked), "\x01%s", a + 2);
     ncAdd(&cc->includes, marked);
     return;
@@ -140,7 +140,7 @@ bool ncParseCompile(char *cmd, NcCompile *cc, const char *ninjaDir) {
     } else if (tok[0] == '-' && tok[1] == 'M') {
       /* -MD/-MMD/-MP: dep-file flag tanpa argumen — abaikan */
     } else if (tok[0] == '-' && tok[1] != ' ') {
-      char fixed[MAX_PATH * 2];
+      char fixed[SATRIA_MAX_PATH * 2];
       ncFixIncludeTok(tok, ninjaDir, false, fixed, sizeof(fixed));
       ncConsumeArg(cc, fixed);
     } else if (tok[0] != '$') {

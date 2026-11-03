@@ -107,12 +107,12 @@ int64_t packPathMTimeNs(const char *path) { return fsMTimeNs(path); }
 int64_t packNewestInput(const Config *c) {
   int64_t newest = -1;
   for (int i = 0; i < c->pack.files.count; i++) {
-    char src[MAX_PATH * 2], dst[MAX_PATH * 2];
+    char src[SATRIA_MAX_PATH * 2], dst[SATRIA_MAX_PATH * 2];
     if (!packEntryParts(c->pack.files.items[i], src, sizeof(src),
                         dst, sizeof(dst))) continue;
     /* Fallback .exe (bin/satria -> bin/satria.exe di Windows) agar relink
        binary tetap memicu kemasan ulang. */
-    char eff[MAX_PATH * 2];
+    char eff[SATRIA_MAX_PATH * 2];
     if (!packResolveSource(src, eff, sizeof(eff))) continue;
     if (fsFileExists(eff)) {
       int64_t m = fsMTimeNs(eff);
@@ -178,7 +178,7 @@ static bool packChecksumApply(const Config *c, const char *artifactPath) {
       fprintf(stderr, "satria: pack: checksum '%s' tidak dikenal (sha256)\n", c->pack.checksum);
     return true;
   }
-  char sumPath[MAX_PATH * 2 + 8];
+  char sumPath[SATRIA_MAX_PATH * 2 + 8];
   snprintf(sumPath, sizeof(sumPath), "%s.sha256", artifactPath);
   artifactCacheAdd(sumPath); /* checksum = artefak tanpa kode C (§9) */
   int64_t artM = fsMTimeNs(artifactPath), sumM = fsMTimeNs(sumPath);
@@ -215,13 +215,13 @@ bool packRun(const Config *c) {
      bukan diam-diam memaketkan sisanya. packResolveSource menoleransi
      entri portabel tanpa .exe (bin/satria -> bin/satria.exe di Windows). */
   for (int i = 0; i < c->pack.files.count; i++) {
-    char src[MAX_PATH * 2], dst[MAX_PATH * 2];
+    char src[SATRIA_MAX_PATH * 2], dst[SATRIA_MAX_PATH * 2];
     if (!packEntryParts(c->pack.files.items[i], src, sizeof(src),
                         dst, sizeof(dst))) {
       fprintf(stderr, "satria: pack: mapping '%s' tidak valid\n", c->pack.files.items[i]);
       return false;
     }
-    char eff[MAX_PATH * 2];
+    char eff[SATRIA_MAX_PATH * 2];
     if (!packResolveSource(src, eff, sizeof(eff))) {
       fprintf(stderr, "satria: pack: '%s' tidak ditemukan\n", src);
       return false;
@@ -240,7 +240,7 @@ bool packRun(const Config *c) {
   int64_t newest = packNewestInput(c);
   bool wantDeb = strcmp(c->pack.format, "deb") == 0;
 
-  char tarPath[MAX_PATH * 2];
+  char tarPath[SATRIA_MAX_PATH * 2];
   packTemplate(c, c->pack.output, tarPath, sizeof(tarPath));
   bool outputIsDeb = endsWith(tarPath, ".deb");
 

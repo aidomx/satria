@@ -113,7 +113,7 @@ void cmdsLibSharedPath(const Config *c, char *out, size_t n) {
  * build di-interupsi Ctrl+C.
  */
 typedef struct {
-  char src[MAX_PATH]; /* source yang dikompilasi slot ini */
+  char src[SATRIA_MAX_PATH]; /* source yang dikompilasi slot ini */
   double start;       /* untuk durasi per job */
   int idx;            /* indeks source di srcs (untuk okOut) */
 } JobSlot;
@@ -175,7 +175,7 @@ bool cmdsRunParallelJobs(const Config *c, const char *inc, const char *wf, const
     if (okOut) okOut[slots[w].idx] = fin->ok;
     {
       /* Compile paralel: compiler menulis ulang object & .d -> buang memo. */
-      char objF[MAX_PATH * 2], dF[MAX_PATH * 2];
+      char objF[SATRIA_MAX_PATH * 2], dF[SATRIA_MAX_PATH * 2];
       if (objectPathFor(c, slots[w].src, objF, sizeof(objF))) cmdsStatMemoForget(objF);
       if (dotDPathFor(c, slots[w].src, dF, sizeof(dF))) cmdsStatMemoForget(dF);
     }
@@ -351,7 +351,7 @@ bool cmdsBuildLibraryEx(const Config *c, const List *srcs, bool linkPathLibs) {
   bool staticUpToDate = !c->libStatic || cmdsLibVariantUpToDate(c, true, srcs);
   bool sharedUpToDate = !c->libShared || cmdsLibVariantUpToDate(c, false, srcs);
   if (staticUpToDate && sharedUpToDate) {
-    char target[MAX_PATH * 2];
+    char target[SATRIA_MAX_PATH * 2];
     if (c->libStatic) {
       cmdsLibStaticPath(c, target, sizeof(target));
       buildReportAddLibrary(target, REP_CACHED, fsFileSize(target));
@@ -364,7 +364,7 @@ bool cmdsBuildLibraryEx(const Config *c, const List *srcs, bool linkPathLibs) {
   }
 
   List objs = {0};
-  char obj[MAX_PATH];
+  char obj[SATRIA_MAX_PATH];
   for (int i = 0; i < srcs->count; i++) {
     /* exclude: source tidak ikut DIKEMAS ke library (mis. main.c milik
        binary) — tetap dikompilasi untuk executable. Object embed kini
@@ -382,7 +382,7 @@ bool cmdsBuildLibraryEx(const Config *c, const List *srcs, bool linkPathLibs) {
   mkdirs(c->outLibDir);
 
   bool staticDone = true, sharedDone = true;
-  char target[MAX_PATH * 2];
+  char target[SATRIA_MAX_PATH * 2];
 
   if (c->libStatic) {
     cmdsLibStaticPath(c, target, sizeof(target));
@@ -486,8 +486,8 @@ bool cmdsBuildLibraryEx(const Config *c, const List *srcs, bool linkPathLibs) {
    daripada seluruh object inputnya — varian itu boleh dilewati. Dipakai
    per varian di cmdsBuildLibrary: menghapus .so saja tidak meng-rebuild .a. */
 bool cmdsLibVariantUpToDate(const Config *c, bool isStatic, const List *srcs) {
-  char obj[MAX_PATH];
-  char target[MAX_PATH * 2];
+  char obj[SATRIA_MAX_PATH];
+  char target[SATRIA_MAX_PATH * 2];
 
   if (isStatic)
     cmdsLibStaticPath(c, target, sizeof(target));
@@ -537,7 +537,7 @@ bool cmdsEmitVersionHeader(const Config *c, bool *changed) {
            "#define SATRIA_VERSION_EMBEDDED \"%s\"\n",
            s);
 
-  char path[MAX_PATH + 16];
+  char path[SATRIA_MAX_PATH + 16];
   snprintf(path, sizeof(path), "%s/version.h", c->outBuildDir);
   mkparent(path);
 

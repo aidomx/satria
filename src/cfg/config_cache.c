@@ -69,7 +69,7 @@ static bool cacheReadList(FILE *fp, List *l) {
   uint32_t count = 0;
   if (!cacheReadU32(fp, &count) || count > INT_MAX) return false;
   for (uint32_t i = 0; i < count; i++) {
-    char item[MAX_PATH * 2];
+    char item[SATRIA_MAX_PATH * 2];
     if (!cacheReadString(fp, item, sizeof(item))) return false;
     if (!listAdd(l, item)) return false;
   }
@@ -288,7 +288,7 @@ void cfgCacheSave(const Config *c, const char *path, const char *cachePath) {
   long long size = fsFileSize(path);
   if (mtimeNs < 0 || size < 0) return;
 
-  char parent[MAX_PATH];
+  char parent[SATRIA_MAX_PATH];
   snprintf(parent, sizeof(parent), "%s", cachePath);
   char *slash = strrchr(parent, '/');
 #ifdef _WIN32
@@ -300,7 +300,7 @@ void cfgCacheSave(const Config *c, const char *path, const char *cachePath) {
     mkdirs(parent);
   }
 
-  char tmp[MAX_PATH + 32];
+  char tmp[SATRIA_MAX_PATH + 32];
   snprintf(tmp, sizeof(tmp), "%s.tmp", cachePath);
   FILE *fp = fopen(tmp, "wb");
   if (!fp) return;

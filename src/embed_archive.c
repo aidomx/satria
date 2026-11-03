@@ -47,7 +47,7 @@ static bool buildEmbeddedArchiveEntryEx(const EmbeddedEntry *e, bool *rebuilt) {
      arsip ditulis, sehingga arsip selalu tampak basi di run berikutnya. .satria
      tidak pernah masuk walk freshness. */
   mkdirs(".satria");
-  char tmpArchive[MAX_PATH * 2 + 32];
+  char tmpArchive[SATRIA_MAX_PATH * 2 + 32];
   snprintf(tmpArchive, sizeof(tmpArchive), ".satria/embed-%s.tmp", e->name);
   fsRemoveFile(tmpArchive);
   bool ok;
@@ -67,7 +67,7 @@ static bool buildEmbeddedArchiveEntryEx(const EmbeddedEntry *e, bool *rebuilt) {
        lagi melekat pada hasil). */
     listSort(&files);
 
-    char listFile[MAX_PATH * 2 + 32];
+    char listFile[SATRIA_MAX_PATH * 2 + 32];
     snprintf(listFile, sizeof(listFile), ".satria/embed-%s.list", e->name);
     FILE *lf = fopen(listFile, "w");
     if (!lf) {
@@ -75,7 +75,7 @@ static bool buildEmbeddedArchiveEntryEx(const EmbeddedEntry *e, bool *rebuilt) {
       return false;
     }
 
-    char rel[MAX_PATH * 2];
+    char rel[SATRIA_MAX_PATH * 2];
     for (int i = 0; i < files.count; i++) {
       const char *path = files.items[i];
       embRelPath(e, path, rel, sizeof(rel));

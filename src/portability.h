@@ -69,7 +69,7 @@ typedef struct {
   /* Tangkapan output child (procStartCapture / compileOne bercap): path file
      sementara berisi stdout+stderr child; "" = tanpa tangkapan. Ambil isinya
      dengan procCaptureTake setelah proses selesai. */
-  char capPath[MAX_PATH];
+  char capPath[SATRIA_MAX_PATH];
 } ProcHandle;
 
 bool procStart(const char *cmd, ProcHandle *out);

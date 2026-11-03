@@ -184,7 +184,7 @@ char *depReadWhole(const char *path, size_t *outLen) {
 static bool resolveInclude(const DepCache *dc, const char *fromPath, const char *name, bool quoted,
                            char *out, size_t n) {
   if (quoted) {
-    char dir[MAX_PATH];
+    char dir[SATRIA_MAX_PATH];
     snprintf(dir, sizeof(dir), "%s", fromPath);
     char *slash = strrchr(dir, '/');
     if (slash)
@@ -282,14 +282,14 @@ static void parseNode(DepCache *dc, int idx) {
           while (*q && *q != close)
             q++;
           if (*q == close && q > s) {
-            char name[MAX_PATH];
+            char name[SATRIA_MAX_PATH];
             size_t nl = (size_t)(q - s);
             if (nl < sizeof(name)) {
               memcpy(name, s, nl);
               name[nl] = '\0';
-              /* dir + '/' + name bisa sampai ~2*MAX_PATH — buffer diperbesar
+              /* dir + '/' + name bisa sampai ~2*SATRIA_MAX_PATH — buffer diperbesar
                  agar depJoinPath tidak pernah memotong (-Wformat-truncation). */
-              char resolved[MAX_PATH * 2];
+              char resolved[SATRIA_MAX_PATH * 2];
               if (resolveInclude(dc, fromPath, name, quoted, resolved, sizeof(resolved))) {
                 int kid = depNodeGet(dc, resolved);
                 if (kid >= 0) depKidAdd(&dc->nodes[idx], kid);

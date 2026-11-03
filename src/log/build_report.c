@@ -14,7 +14,7 @@
    flush worklist lalu merender) — urutan keluaran serial & paralel identik. */
 #include "build_report.h"
 #include "../startup.h" /* startupShown: pemisah startup -> Build Report */
-#include "../util.h" /* List, listAdd, listFree, copyStr, nowSeconds, MAX_PATH */
+#include "../util.h" /* List, listAdd, listFree, copyStr, nowSeconds, SATRIA_MAX_PATH */
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -24,7 +24,7 @@
 /* ---- Model ---- */
 
 typedef struct {
-  char path[MAX_PATH];
+  char path[SATRIA_MAX_PATH];
   RepArtStatus st;
   long long size; /* < 0 = tanpa ukuran (mis. checksum) */
   bool printed;   /* baris sudah keluar (hindari dobel lintas render) */
@@ -361,7 +361,7 @@ void buildReportImport(const char *path) {
   if (!R.active || !path || !*path) return;
   FILE *f = fopen(path, "r");
   if (!f) return;
-  char line[MAX_PATH + 64];
+  char line[SATRIA_MAX_PATH + 64];
   while (fgets(line, sizeof(line), f)) {
     size_t n = strlen(line);
     while (n && (line[n - 1] == '\n' || line[n - 1] == '\r')) line[--n] = '\0';

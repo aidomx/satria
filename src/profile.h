@@ -5,7 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "util.h" /* MAX_PATH — field ProfCtx */
+#include "util.h" /* SATRIA_MAX_PATH — field ProfCtx */
 
 /*
  * profile — `satria profile <context> [key=value ...] [--report <file>]`
@@ -53,14 +53,14 @@ typedef struct {
   const char *type;          /* "archive" | "embed" | "library" | "binary" |
                              "project" | "workspace" */
   const char *target;        /* value context apa adanya (untuk header) */
-  char dir[MAX_PATH * 2];    /* target absolut (dir, atau file utk embed) */
+  char dir[SATRIA_MAX_PATH * 2];    /* target absolut (dir, atau file utk embed) */
   bool dirIsFile;            /* embed=<file> arsip jadi */
   bool doTar;                /* archive: selalu tar dulu; false = tak valid */
   CompBackend comp;          /* archive: COMP_NONE = with=tar */
   bool libStatic, libShared; /* library: backend ar / gcc -shared */
   int jobs;                  /* binary/project: paralel (default jumlah core) */
   int repeat;                /* --repeat N: ulangi sesi (default 1) */
-  char tmp[MAX_PATH * 2];    /* direktori kerja sementara */
+  char tmp[SATRIA_MAX_PATH * 2];    /* direktori kerja sementara */
   const char *compiler;      /* utk laporan rinci; NULL = n/a */
   const char *reportFile;    /* --report <file> (opsi global) */
   /* metrik input */

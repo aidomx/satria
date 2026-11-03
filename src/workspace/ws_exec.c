@@ -89,7 +89,7 @@ int wsRunProject(const WsModel *m, const char *name, const char *cmd, int jobs,
     if (buildReportActive() && configReady) {
       if (libOnly) {
         if (c.libRequested) {
-          char lp[MAX_PATH * 2];
+          char lp[SATRIA_MAX_PATH * 2];
           if (c.libStatic) {
             cmdsLibStaticPath(&c, lp, sizeof(lp));
             buildReportAddLibrary(lp, REP_CACHED, fsFileSize(lp));
@@ -100,7 +100,7 @@ int wsRunProject(const WsModel *m, const char *name, const char *cmd, int jobs,
           }
         }
       } else if (c.binary) {
-        char target[MAX_PATH * 2];
+        char target[SATRIA_MAX_PATH * 2];
         snprintf(target, sizeof(target), "%s/%s", c.outBinaryDir, c.outBinaryName);
         buildReportAddBinary(target, REP_CACHED, fsFileSize(target));
       }

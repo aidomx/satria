@@ -441,8 +441,8 @@ int cmdInteractiveInit(void) {
      membatalkan scaffold - tidak ada yang ditimpa, tidak ada parsial. */
   {
     const char *srcName = langCpp ? "main.cpp" : "main.c";
-    char p[MAX_PATH * 2];
-    char conflictPath[MAX_PATH * 2] = "";
+    char p[SATRIA_MAX_PATH * 2];
+    char conflictPath[SATRIA_MAX_PATH * 2] = "";
     snprintf(p, sizeof(p), "%s/src/%s", name, srcName);
     if (fsFileExists(p)) copyStr(conflictPath, sizeof(conflictPath), p);
     if (!conflictPath[0] && wantInclude) {
@@ -541,7 +541,7 @@ int cmdInteractiveInit(void) {
   /* Scaffold. */
   printf("\n");
   {
-    char psrc[MAX_PATH * 2], pb[MAX_PATH * 2], phdr[MAX_PATH * 2];
+    char psrc[SATRIA_MAX_PATH * 2], pb[SATRIA_MAX_PATH * 2], phdr[SATRIA_MAX_PATH * 2];
     mkdirs(name);
     snprintf(psrc, sizeof(psrc), "%s/src", name);
     mkdirs(psrc);
@@ -564,7 +564,7 @@ int cmdInteractiveInit(void) {
     /* Anggota workspace: folder <nama>/ + src/main.c (tanpa Buildfile —
        proyek workspace memakai Buildfile hasil sintesis satria). */
     for (int i = 1; i < nn; i++) {
-      char msrc[MAX_PATH * 2], mdir[MAX_PATH * 2], mbody[512];
+      char msrc[SATRIA_MAX_PATH * 2], mdir[SATRIA_MAX_PATH * 2], mbody[512];
       mkdirs(names[i]);
       snprintf(mdir, sizeof(mdir), "%s/src", names[i]);
       mkdirs(mdir);

@@ -41,7 +41,7 @@ typedef struct {
   char name[128];            /* default: output.binaryName */
   char version[64];          /* default "0.0.0" */
   List files;                /* file/folder yang masuk paket */
-  char output[MAX_PATH * 2]; /* template: {name} {version} {os} {arch} */
+  char output[SATRIA_MAX_PATH * 2]; /* template: {name} {version} {os} {arch} */
   List excludes;             /* pack.exclude/release.exclude: pola/path yang
                               * diabaikan saat walk folder (pencocokan suffix
                               * & segmen, lihat packStageEntries) */
@@ -50,15 +50,15 @@ typedef struct {
   char format[16];           /* "" = tar; deb menambah artefak .deb */
   char debMaintainer[192];
   char debDescription[512];
-  char debInstallPrefix[MAX_PATH];
+  char debInstallPrefix[SATRIA_MAX_PATH];
   char debArchitecture[32];  /* kosong = otomatis dari arsitektur host */
 } PackConfig;
 
 typedef struct {
   char name[EMBED_NAME_LEN]; /* entry key; uppercase jadi prefix macro */
   bool enable;
-  char src[MAX_PATH];     /* direktori yang diarsipkan */
-  char extract[MAX_PATH]; /* direktori ekstraksi saat runtime (boleh kosong) */
+  char src[SATRIA_MAX_PATH];     /* direktori yang diarsipkan */
+  char extract[SATRIA_MAX_PATH]; /* direktori ekstraksi saat runtime (boleh kosong) */
   char pattern[128];      /* pola scan freshness, default ".rp" tidak generik */
   List excludes;          /* pola/path yang dikeluarkan dari archive */
   char archiveDir[EMBED_PATH_LEN];
@@ -73,7 +73,7 @@ typedef struct {
    * <file>. <src> boleh kosong dalam mode ini.
    */
   bool usePrebuilt;
-  char prebuiltPath[MAX_PATH];
+  char prebuiltPath[SATRIA_MAX_PATH];
 
   /* Override prefix macro EMBED_<N>_ (embedded.<n>.variable). */
   char variable[EMBED_NAME_LEN];
@@ -85,8 +85,8 @@ typedef struct {
   char type[32];
 
   /* diturunkan di configFinalizeEntry */
-  char archivePath[MAX_PATH + 192]; /* <archiveDir>/<n>[.tar.<ext>] */
-  char objectPath[MAX_PATH + 64];   /* <buildDir>/<n>.o */
+  char archivePath[SATRIA_MAX_PATH + 192]; /* <archiveDir>/<n>[.tar.<ext>] */
+  char objectPath[SATRIA_MAX_PATH + 64];   /* <buildDir>/<n>.o */
 } EmbeddedEntry;
 
 /*
@@ -109,12 +109,12 @@ typedef enum {
 } SfxTarget;
 
 typedef struct {
-  char root[MAX_PATH];
+  char root[SATRIA_MAX_PATH];
   /* Root proyek anggota workspace (mis. "bade"); kosong = single-project.
      Hanya basis perhitungan path sumber/object. Sengaja TIDAK memengaruhi
      `root` (yang berarti cwd untuk cmdBuildEx/profile), dan tidak
      diserialisasi cache: konfigurasi workspace dibangun di memori. */
-  char projRoot[MAX_PATH];
+  char projRoot[SATRIA_MAX_PATH];
 
   List sources;
   List flags;
@@ -208,8 +208,8 @@ typedef struct {
   bool binary;
 
   char outBinaryName[128];
-  char outBinaryDir[MAX_PATH];
-  char outBuildDir[MAX_PATH];
+  char outBinaryDir[SATRIA_MAX_PATH];
+  char outBuildDir[SATRIA_MAX_PATH];
   char outCompileCommands[16]; /* "true" | "false" | "auto" */
 
   /*
@@ -226,7 +226,7 @@ typedef struct {
   bool libStatic;
   bool libShared;
   char outLibName[128];
-  char outLibDir[MAX_PATH];
+  char outLibDir[SATRIA_MAX_PATH];
 
   /*
    * pack: pengemasan artefak (Buildfile: pack; lihat PackConfig di atas).

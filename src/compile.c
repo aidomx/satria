@@ -262,7 +262,7 @@ bool objectPathFor(const Config *c, const char *src, char *out, size_t n) {
       /* Entri sources berupa FILE (mis. `sources = main.c` hasil `satria
          -xf` untuk build.ninja flat): object = nama file tanpa ekstensi
          langsung di bawah build dir. */
-      char rel[MAX_PATH];
+      char rel[SATRIA_MAX_PATH];
       snprintf(rel, sizeof(rel), "%s", src);
       char *dot = strrchr(rel, '.');
       if (dot) *dot = '\0';
@@ -271,7 +271,7 @@ bool objectPathFor(const Config *c, const char *src, char *out, size_t n) {
     }
     if (!rest) continue;
 
-    char rel[MAX_PATH];
+    char rel[SATRIA_MAX_PATH];
     snprintf(rel, sizeof(rel), "%s", rest);
     char *dot = strrchr(rel, '.');
     if (dot) *dot = '\0';
@@ -415,10 +415,17 @@ char *compileCmd(const Config *c, const char *inc, const char *wf, const char *s
     char *mtf = tf ? translateFlagsToMsvc(tf) : NULL;
     char *mdf = definesFlags(c); /* sudah sintaks /D untuk MSVC */
     size_t n = strlen(minc) + strlen(mwf) + (mtf ? strlen(mtf) : 0) +
-               (mdf ? strlen(mdf) : 0) + 2 * strlen(src) + strlen(obj) + 128;
+               (mdf ? strlen(mdf) : 0) + 2 * strlen(src) + strlen(obj) + 192;
     char *cmd = malloc(n);
-    snprintf(cmd, n, "cl /nologo %s %s %s %s/std:%s /c %s /Fo%s", mtf ? mtf : "", minc, mwf,
-             mdf ? mdf : "", msvcstd, src, obj);
+    /* /D penyenyap C4996: satria memakai API POSIX (strcat, strcpy, sscanf,
+       strdup, getenv, fopen) yang sama di semua platform; varian _s hanya ada
+       di MSVC dan tidak portabel. Didefinisikan di command line supaya berlaku
+       sebelum header CRT mana pun, termasuk modul yang tidak meng-include
+       header port internal. */
+    snprintf(cmd, n,
+             "cl /nologo /D_CRT_SECURE_NO_WARNINGS /D_CRT_NONSTDC_NO_WARNINGS "
+             "%s %s %s %s/std:%s /c %s /Fo%s",
+             mtf ? mtf : "", minc, mwf, mdf ? mdf : "", msvcstd, src, obj);
     free(minc);
     free(mwf);
     free(mtf);
@@ -472,7 +479,7 @@ bool compileOne(const Config *c, const char *inc, const char *wf, const char *sr
   /* Compiler menulis ulang object & .d: buang stamp memo (berhasil maupun
      gagal) agar pembacaan berikutnya mengambil stat segar. */
   cmdsStatMemoForget(obj);
-  char dpathF[MAX_PATH * 2];
+  char dpathF[SATRIA_MAX_PATH * 2];
   if (dotDPathFor(c, src, dpathF, sizeof(dpathF))) cmdsStatMemoForget(dpathF);
   return ok;
 }

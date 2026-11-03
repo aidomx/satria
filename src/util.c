@@ -125,7 +125,7 @@ void pcloseRB(FILE *fp) {
 /* ==================== Filesystem helpers ==================== */
 
 void mkdirs(const char *path) {
-  char tmp[MAX_PATH];
+  char tmp[SATRIA_MAX_PATH];
   snprintf(tmp, sizeof(tmp), "%s", path);
   for (char *p = tmp + 1; *p; p++) {
     if (*p == '/') {
@@ -138,7 +138,7 @@ void mkdirs(const char *path) {
 }
 
 void mkparent(const char *path) {
-  char tmp[MAX_PATH];
+  char tmp[SATRIA_MAX_PATH];
   snprintf(tmp, sizeof(tmp), "%s", path);
   char *slash = strrchr(tmp, '/');
   if (!slash) return;
@@ -150,10 +150,10 @@ void mkparent(const char *path) {
      proyek, jadi path relatif sama ("build/sub") hanya boleh dilewati
      bila direktori kerja TIDAK berubah — tanpa itu mkdir dilewati di
      proyek berikutnya dan object gagal ditulis ("can't create build/..."). */
-  static char last[MAX_PATH];
-  static char lastCwd[MAX_PATH];
+  static char last[SATRIA_MAX_PATH];
+  static char lastCwd[SATRIA_MAX_PATH];
   if (last[0] && strcmp(last, tmp) == 0) {
-    char cwd[MAX_PATH];
+    char cwd[SATRIA_MAX_PATH];
     if (fsGetCwd(cwd, sizeof(cwd)) && strcmp(lastCwd, cwd) == 0) return;
   }
   mkdirs(tmp);

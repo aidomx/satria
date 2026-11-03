@@ -52,7 +52,7 @@
 
 typedef struct {
   char name[WS_NAME_LEN];
-  char root[MAX_PATH];
+  char root[SATRIA_MAX_PATH];
   List lines; /* baris setting per proyek TANPA prefix projects.<nama>. */
 } WsProject;
 
@@ -83,7 +83,7 @@ typedef struct {
      diekspansi ke relasi per proyek setelah parse selesai. */
   List cdepsGroups;
   /* Stage fase release: klarifikasi run CLI di sini bila ada. */
-  char releaseStage[MAX_PATH];
+  char releaseStage[SATRIA_MAX_PATH];
 } WsModel;
 
 #define WS_STARTUP_MAGIC "SATRIA-STARTUP-1"

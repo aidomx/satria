@@ -28,8 +28,8 @@
    pemanggil melaporkan error memakai path asli. */
 bool packResolveSource(const char *src, char *out, size_t n);
 typedef struct {
-  char path[MAX_PATH * 2]; /* output final, relatif root proyek */
-  char tmp[MAX_PATH * 2];  /* file sementara, direname setelah jadi */
+  char path[SATRIA_MAX_PATH * 2]; /* output final, relatif root proyek */
+  char tmp[SATRIA_MAX_PATH * 2];  /* file sementara, direname setelah jadi */
   bool isDeb;
   char compress[16]; /* gzip|none|xz|bz2 — tarball saja */
 } PackArtifact;

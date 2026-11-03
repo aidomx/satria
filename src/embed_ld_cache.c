@@ -122,8 +122,8 @@ bool ldCacheResolve(const char *exe, char *out, size_t n) {
   while (*p) {
     const char *colon = strchr(p, PATHSepChar);
     size_t len = colon ? (size_t)(colon - p) : strlen(p);
-    if (len > 0 && len < MAX_PATH) {
-      char dir[MAX_PATH];
+    if (len > 0 && len < SATRIA_MAX_PATH) {
+      char dir[SATRIA_MAX_PATH];
       memcpy(dir, p, len);
       dir[len] = '\0';
       int w = snprintf(out, n, "%s/%s", dir, exe);

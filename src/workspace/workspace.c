@@ -245,7 +245,7 @@ static bool wsNoopGroupedPrint(const WsModel *m, const unsigned char *sel, doubl
     char *tb = NULL;
     size_t tn = 0, tp = 0;
     if (!stateBlobGet(m->projects[i].name, "ws.state", &tb, &tn)) continue;
-    char line[MAX_PATH * 6];
+    char line[SATRIA_MAX_PATH * 6];
     bool gotMeta = false;
     if (stateBufGets(tb, tn, &tp, line, sizeof(line))) { /* baris magic + cwd */
       while (stateBufGets(tb, tn, &tp, line, sizeof(line))) {
@@ -280,7 +280,7 @@ static bool wsNoopGroupedPrint(const WsModel *m, const unsigned char *sel, doubl
 static int wsRunCore(const char *cmd, int jobs, const char *only, const char *releaseSel,
                      bool withCdeps) {
   profMark("ws-entry"); /* profil: pisahkan startup vs model-load */
-  char wsDir[MAX_PATH];
+  char wsDir[SATRIA_MAX_PATH];
   if (!fsGetCwd(wsDir, sizeof(wsDir))) {
     fprintf(stderr, "satria: cannot determine current directory\n");
     return 1;

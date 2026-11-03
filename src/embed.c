@@ -75,7 +75,7 @@ static uint64_t embArchiveConfigHash(const EmbeddedEntry *e) {
 }
 
 static bool embArchiveStateMatches(const EmbeddedEntry *e) {
-  char path[MAX_PATH + 96];
+  char path[SATRIA_MAX_PATH + 96];
   snprintf(path, sizeof(path), "%s.archive", e->objectPath);
   FILE *fp = fopen(path, "rb");
   if (!fp) return false;
@@ -86,7 +86,7 @@ static bool embArchiveStateMatches(const EmbeddedEntry *e) {
 }
 
 void embArchiveStateSave(const EmbeddedEntry *e) {
-  char path[MAX_PATH + 96];
+  char path[SATRIA_MAX_PATH + 96];
   snprintf(path, sizeof(path), "%s.archive", e->objectPath);
   mkparent(path);
   FILE *fp = fopen(path, "wb");
@@ -129,7 +129,7 @@ static uint64_t embFileHash(const char *path) {
 
 static uint64_t embCacheGrpAddr(const EmbeddedEntry *e) { return csHash(e->archivePath); }
 static uint64_t embCacheEntryAddr(const EmbeddedEntry *e, char kind, const char *path) {
-  char key[MAX_PATH * 4 + 8];
+  char key[SATRIA_MAX_PATH * 4 + 8];
   snprintf(key, sizeof(key), "%s|%c|%s", e->archivePath, kind, path);
   return csHash(key);
 }
@@ -345,7 +345,7 @@ void embEmbedCacheRecord(const EmbeddedEntry *e) {
     csClose(st);
     return; /* arsip hilang sesudah rebuild? jangan catat apa pun */
   }
-  char gpay[MAX_PATH * 2 + 4];
+  char gpay[SATRIA_MAX_PATH * 2 + 4];
   snprintf(gpay, sizeof(gpay), "G %s", e->archivePath);
   CsEntry g = {proj, embCacheGrpAddr(e), embArchiveConfigHash(e), (long long)at, asz, gpay};
   csPut(st, &g);
@@ -355,7 +355,7 @@ void embEmbedCacheRecord(const EmbeddedEntry *e) {
     stateWalkDirCached(e->src, e->pattern, &files);
   else
     stateWalkDirCached(e->src, "", &files);
-  char rel[MAX_PATH * 2];
+  char rel[SATRIA_MAX_PATH * 2];
   for (int i = 0; i < files.count; i++) {
     const char *path = files.items[i];
     embRelPath(e, path, rel, sizeof(rel));
@@ -377,7 +377,7 @@ void embEmbedCacheRecord(const EmbeddedEntry *e) {
      tanpa stamp folder, lompatan cache melewatkan file BARU (walk tidak
      dijalankan). ws: dari cache walk; single: fsListDir rekursif. */
   {
-    char adir[MAX_PATH * 2];
+    char adir[SATRIA_MAX_PATH * 2];
     snprintf(adir, sizeof(adir), "%s", e->archivePath);
     char *slash = strrchr(adir, '/');
     if (slash)
@@ -470,7 +470,7 @@ bool embArchiveFresh(const EmbeddedEntry *e) {
   else
     stateWalkDirCached(e->src, "", &files);
   int64_t newest = 0;
-  char rel[MAX_PATH * 2];
+  char rel[SATRIA_MAX_PATH * 2];
   /* Mode workspace: mtime lewat memo stat (kunci memo butuh cwd proyek ini). */
   if (wsModeActive()) cmdsStatMemoSetCwd();
   for (int i = 0; i < files.count; i++) {
@@ -487,7 +487,7 @@ bool embArchiveFresh(const EmbeddedEntry *e) {
        arsip dibuat ulang (tmp + rename). Folder itu tidak boleh dihitung sebagai
        input, kalau tidak arsip di dalam folder sumber basi oleh dirinya sendiri
        dan dibangun ulang di setiap run. */
-    char adir[MAX_PATH * 2];
+    char adir[SATRIA_MAX_PATH * 2];
     snprintf(adir, sizeof(adir), "%s", e->archivePath);
     char *slash = strrchr(adir, '/');
     if (slash) *slash = '\0';

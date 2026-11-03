@@ -119,7 +119,7 @@ bool wsMemberCwdDetect(char *wsRootOut, size_t wsRootN, char *memberOut, size_t 
       const char *root = m.projects[i].root[0] ? m.projects[i].root : m.projects[i].name;
       /* Buffer muat worst case "probe/root" tanpa potong (bukti statis
          untuk snprintf — tanpa warning format-truncation). */
-      char mem[WS_PATH_LEN + MAX_PATH + 4];
+      char mem[WS_PATH_LEN + SATRIA_MAX_PATH + 4];
 #ifdef _WIN32
       bool absRoot = root[0] == '/' || (root[0] && root[1] == ':');
 #else

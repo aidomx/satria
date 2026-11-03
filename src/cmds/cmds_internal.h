@@ -7,7 +7,7 @@
 
 #include "../config.h" /* Config, List */
 #include "../portability.h" /* ProcHandle — tangkapan output compiler */
-#include "../util.h" /* MAX_PATH — tipe FastState di bawah */
+#include "../util.h" /* SATRIA_MAX_PATH — tipe FastState di bawah */
 
 /* Ukuran buffer path untuk state workspace. WS_SCAN = WS_PATH_LEN - 1 sebagai teks
    lebar sscanf: lebar baca selalu lebih kecil dari buffer tujuan (-Wfortify-source). */
@@ -286,18 +286,18 @@ void wsFastStateSave(struct DepCache *dc, const Config *c, const List *srcs, con
 
 typedef struct {
   char kind;
-  char path[MAX_PATH];
+  char path[SATRIA_MAX_PATH];
   int64_t mtime;
   long long size;
   uint64_t content; /* hash isi (F); 0 = tak terhitung / bukan file */
 } FastStamp;
 
 typedef struct {
-  char cwd[MAX_PATH];
-  char buildfile[MAX_PATH];
+  char cwd[SATRIA_MAX_PATH];
+  char buildfile[SATRIA_MAX_PATH];
   int64_t buildfileMtime;
   long long buildfileSize;
-  char target[MAX_PATH * 2];
+  char target[SATRIA_MAX_PATH * 2];
   int64_t targetMtime;
   long long targetSize;
   int compiled;
@@ -307,8 +307,8 @@ typedef struct {
   FastStamp *stamps;
   /* Ringkasan library: no-op berikutnya tetap menampilkan status lib. */
   bool libRequested, libStaticUp, libSharedUp;
-  char libStaticPath[MAX_PATH * 2];
-  char libSharedPath[MAX_PATH * 2];
+  char libStaticPath[SATRIA_MAX_PATH * 2];
+  char libSharedPath[SATRIA_MAX_PATH * 2];
   long long libStaticSize, libSharedSize;
 } FastState;
 
@@ -347,7 +347,7 @@ typedef struct {
   int64_t *srcM;             /* mtime ns source (<0 = hilang) */
   int *objIdx;               /* -1 = path object gagal; else slot objPath */
   int objCount;              /* jumlah object unik yang distamp */
-  char (*objPath)[MAX_PATH]; /* path object unik */
+  char (*objPath)[SATRIA_MAX_PATH]; /* path object unik */
   int64_t *objM;             /* mtime ns object (<0 = hilang) */
   bool obsObj;               /* D1: objek ikut distamp saat gather */
 } StatPlan;
@@ -388,7 +388,7 @@ typedef struct {
   struct DepCache *deps;
   List pending;
   char *inc, *wf;
-  char obj[MAX_PATH];
+  char obj[SATRIA_MAX_PATH];
   CmdsBuildFingerprint currentFp;
   int compiled, skipped;
   int warnings; /* diagnostic warning fase compile pass ini (capture buffer) */

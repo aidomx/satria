@@ -466,7 +466,7 @@ static void parseLine(Config *c, char *section, char *sub, char *subsub, int *su
 }
 
 bool loadConfigEx(Config *c, const char *path, bool cacheWrite) {
-  char cachePath[MAX_PATH];
+  char cachePath[SATRIA_MAX_PATH];
   cfgCachePathFor(path, cachePath, sizeof(cachePath));
 
   /* Cache validation only stats Buildfile; the Buildfile itself is not opened

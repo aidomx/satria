@@ -183,7 +183,7 @@ void statPlanBuild(StatPlan *p, const Config *c, const List *srcs) {
   p->path = malloc(sizeof(char *) * (size_t)(n + 1));
   p->srcM = malloc(sizeof(int64_t) * (size_t)(n + 1));
   p->objIdx = malloc(sizeof(int) * (size_t)(n + 1));
-  p->objPath = malloc(sizeof(char[MAX_PATH]) * (size_t)(n + 1));
+  p->objPath = malloc(sizeof(char[SATRIA_MAX_PATH]) * (size_t)(n + 1));
   p->objM = malloc(sizeof(int64_t) * (size_t)(n + 1));
   if (!p->path || !p->srcM || !p->objIdx || !p->objPath || !p->objM) {
     statPlanFree(p);
@@ -201,7 +201,7 @@ void statPlanBuild(StatPlan *p, const Config *c, const List *srcs) {
     if (!cmdsStatCached(src, &m, &sz)) fsStampNsSize(src, &m, &sz); /* gagal -> -1, semantik lama */
     p->srcM[i] = m;
 
-    char objPath[MAX_PATH];
+    char objPath[SATRIA_MAX_PATH];
     if (!objectPathFor(c, src, objPath, sizeof(objPath))) {
       p->objIdx[i] = -1;
       continue;
@@ -215,7 +215,7 @@ void statPlanBuild(StatPlan *p, const Config *c, const List *srcs) {
     }
     if (slot < 0) {
       slot = p->objCount;
-      snprintf(p->objPath[slot], MAX_PATH, "%s", objPath);
+      snprintf(p->objPath[slot], SATRIA_MAX_PATH, "%s", objPath);
       if (p->obsObj) {
         int64_t om = -1;
         memoStampNsSize(objPath, &om, &sz); /* object: lewat memo (dibuang saat compile) */
@@ -223,7 +223,7 @@ void statPlanBuild(StatPlan *p, const Config *c, const List *srcs) {
            hilang) agar compile ulang menulis ulang .d. Tanpa ini .d tak pernah
            pulih dan catatan noop tidak pernah valid lagi. */
         if (om >= 0 && statSrcHasDotD(c, src)) {
-          char dp[MAX_PATH * 2];
+          char dp[SATRIA_MAX_PATH * 2];
           int64_t dm = -1;
           long long dsz = 0;
           if (dotDPathFor(c, src, dp, sizeof(dp)) && !memoStampNsSize(dp, &dm, &dsz)) om = -1;
@@ -338,7 +338,7 @@ int cmdBuildEx(int jobs, const char *buildfilePath, bool libOnly) {
 
 /* Pasangan (object, sumber) untuk deteksi tabrakan: diurutkan per object. */
 typedef struct {
-  char obj[MAX_PATH];
+  char obj[SATRIA_MAX_PATH];
   const char *src;
 } ObjEntry;
 
@@ -415,7 +415,7 @@ void cmdsCollectSources(const Config *c, List *out) {
      dan kemasan library seperti source biasa (design/embedded.md §Pipeline).
      Hanya proyek binary: proyek kemasan mengarsipkan, bukan mengcompile. */
   if (c->binary && c->embCount > 0) {
-    char emb[MAX_PATH + 32];
+    char emb[SATRIA_MAX_PATH + 32];
     snprintf(emb, sizeof(emb), "%s/embedded.c", c->outBuildDir);
     bool dup = false;
     for (int i = 0; i < out->count; i++) {

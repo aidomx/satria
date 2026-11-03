@@ -7,10 +7,12 @@
 
 /* ==================== Batas ukuran umum ==================== */
 
-/* MAX_PATH Windows = 260 (windows.h). Definisi kita hanya bila belum ada
-   agar tidak bentrok (C4005) — POSIX memakai 1024 untuk path panjang. */
-#ifndef MAX_PATH
-#define MAX_PATH 1024
+/* Kapasitas buffer path milik satria: 1024 byte di semua platform.
+   JANGAN memakai MAX_PATH: di Windows nama itu milik windows.h (260) dan
+   mendefinisikannya lebih dulu memicu C4005 'macro redefinition' pada tiap
+   modul yang meng-include windows.h setelah header ini. */
+#ifndef SATRIA_MAX_PATH
+#define SATRIA_MAX_PATH 1024
 #endif
 
 /* Daftar string dinamis sederhana (dipakai untuk sources, flags, dst). */

@@ -41,7 +41,7 @@ static StatMemoEntry *statMemo = NULL;
 static size_t statMemoCap = 0, statMemoCount = 0;
 /* cwd saat validasi. Path relatif (mis. "src") berarti direktori berbeda di
    tiap proyek, jadi kunci memo harus menyertakan cwd agar tidak tertukar. */
-static char statMemoCwd[MAX_PATH * 2];
+static char statMemoCwd[SATRIA_MAX_PATH * 2];
 
 static uint64_t statMemoHash(const char *s) {
   uint64_t h = 14695981039346656037ULL;
@@ -72,13 +72,13 @@ static void statMemoRehash(size_t newCap) {
    "..", tanpa menyentuh symlink). Dengan begitu "../library/a.h" dari proyek
    core dan dari proyek bade menjadi satu entri, sehingga tidak di-stat dua kali. */
 static void memoKeyFor(const char *path, char *out, size_t n) {
-  char joined[MAX_PATH * 4];
+  char joined[SATRIA_MAX_PATH * 4];
   if (path[0] == '/' || statMemoCwd[0] == '\0')
     snprintf(joined, sizeof(joined), "%s", path);
   else
     snprintf(joined, sizeof(joined), "%s/%s", statMemoCwd, path);
 
-  char work[MAX_PATH * 4];
+  char work[SATRIA_MAX_PATH * 4];
   snprintf(work, sizeof(work), "%s", joined);
   const char *seg[256];
   int ns = 0;
@@ -113,7 +113,7 @@ static void memoKeyFor(const char *path, char *out, size_t n) {
 }
 
 bool memoStampNsSize(const char *path, int64_t *mtimeNs, long long *size) {
-  char key[MAX_PATH * 4];
+  char key[SATRIA_MAX_PATH * 4];
   memoKeyFor(path, key, sizeof(key));
 
   if (statMemoCap == 0 || (statMemoCount + 1) * 2 > statMemoCap)
@@ -178,7 +178,7 @@ bool cmdsStatCached(const char *path, int64_t *mtimeNs, long long *size) {
    cmdsStatMemoForget, (c) kunci memo (cwd) sudah diset pemanggil. */
 void cmdsStatMemoPut(const char *path, int64_t mtimeNs, long long size) {
   if (!path || !*path || mtimeNs < 0) return;
-  char key[MAX_PATH * 4];
+  char key[SATRIA_MAX_PATH * 4];
   memoKeyFor(path, key, sizeof(key));
   if (statMemoCap == 0 || (statMemoCount + 1) * 2 > statMemoCap)
     statMemoRehash(statMemoCap ? statMemoCap * 2 : 4096);
@@ -281,7 +281,7 @@ void cmdsStatMemoReset(void) {
 /* Buang satu entri memo (kunci = path ternormalisasi, sama seperti insert). */
 void cmdsStatMemoForget(const char *path) {
   if (statMemoCap == 0 || !path) return;
-  char key[MAX_PATH * 4];
+  char key[SATRIA_MAX_PATH * 4];
   memoKeyFor(path, key, sizeof(key));
   /* Tanpa rehash: cukup tandai entri (O(probe)). Lookup berikutnya men-stat
      ulang dan memperbaruinya. Murah dipanggil per object setelah compile. */
@@ -294,7 +294,7 @@ void cmdsStatMemoForget(const char *path) {
 /* Buang semua entri di bawah folder `dir` (relatif cwd), termasuk folder itu. */
 void cmdsStatMemoForgetTree(const char *dir) {
   if (statMemoCap == 0 || !dir) return;
-  char prefix[MAX_PATH * 4];
+  char prefix[SATRIA_MAX_PATH * 4];
   memoKeyFor(dir, prefix, sizeof(prefix));
   size_t pl = strlen(prefix);
   StatMemoEntry *old = statMemo;
@@ -339,7 +339,7 @@ static bool memoIsObjLike(const char *p) {
 
 void cmdsStatMemoForgetOutputs(const char *buildDir, const List *items) {
   if (!statMemoCap) return;
-  char prefix[MAX_PATH * 4] = "";
+  char prefix[SATRIA_MAX_PATH * 4] = "";
   if (buildDir && *buildDir) memoKeyFor(buildDir, prefix, sizeof(prefix));
   size_t pl = strlen(prefix);
   size_t n = 0;
@@ -351,14 +351,14 @@ void cmdsStatMemoForgetOutputs(const char *buildDir, const List *items) {
   for (int i = 0; items && i < items->count; i++) {
     if (items->items[i][0] != 'O') continue;
     if (memoIsObjLike(items->items[i] + 2)) continue; /* .o: dibuang di compile */
-    keys[used] = malloc(MAX_PATH * 4);
+    keys[used] = malloc(SATRIA_MAX_PATH * 4);
     if (!keys[used]) {
       for (size_t j = 0; j < used; j++) free(keys[j]);
       free(keys);
       cmdsStatMemoReset();
       return;
     }
-    memoKeyFor(items->items[i] + 2, keys[used], MAX_PATH * 4);
+    memoKeyFor(items->items[i] + 2, keys[used], SATRIA_MAX_PATH * 4);
     used++;
   }
   if (used > 1) qsort(keys, used, sizeof(*keys), memoKeyCompare);

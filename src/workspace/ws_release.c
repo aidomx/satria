@@ -120,7 +120,7 @@ int wsRelease(WsModel *m, int jobs, const char *wsDir) {
   c.pack.requested = true;
   if (!c.pack.name[0]) {
     /* produk utter: nama folder workspace */
-    char cwd[MAX_PATH];
+    char cwd[SATRIA_MAX_PATH];
     if (fsGetCwd(cwd, sizeof(cwd))) {
       const char *base = strrchr(cwd, '/');
       base = base ? base + 1 : cwd;

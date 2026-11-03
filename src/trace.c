@@ -48,7 +48,7 @@ static bool absJoin(const char *rel, char *out, size_t cap) {
     memcpy(out, rel, strlen(rel) + 1);
     return true;
   }
-  char cwd[MAX_PATH];
+  char cwd[SATRIA_MAX_PATH];
   if (!fsGetCwd(cwd, sizeof(cwd))) return false;
   return joinPath(out, cap, cwd, rel);
 }
@@ -120,9 +120,9 @@ static bool ensureTracer(const char *soOpt, char *so, size_t cap) {
     }
     return true;
   }
-  char dir[MAX_PATH * 2];
+  char dir[SATRIA_MAX_PATH * 2];
   if (!absJoin(".satria/trace", dir, sizeof(dir))) return false;
-  char srcPath[MAX_PATH * 2];
+  char srcPath[SATRIA_MAX_PATH * 2];
   if (!joinPath(srcPath, sizeof(srcPath), dir, TRACE_SRC_NAME)) return false;
   if (!joinPath(so, cap, dir, TRACE_SO_NAME)) return false;
 
@@ -272,25 +272,25 @@ int cmdTrace(const char *const *args, int nargs, const char *argv0) {
     return 2;
   }
 
-  char self[MAX_PATH * 2];
+  char self[SATRIA_MAX_PATH * 2];
   if (!selfExe(argv0, self, sizeof(self))) {
     fprintf(stderr, "satria trace: tidak bisa menentukan path binary satria.\n");
     return 2;
   }
 
-  char so[MAX_PATH * 2];
+  char so[SATRIA_MAX_PATH * 2];
   if (!ensureTracer(soOpt, so, sizeof(so))) return 2;
 
-  char logPath[MAX_PATH * 2];
+  char logPath[SATRIA_MAX_PATH * 2];
   if (outOpt) {
     if (!absJoin(outOpt, logPath, sizeof(logPath))) return 2;
   } else {
-    char dir[MAX_PATH * 2];
+    char dir[SATRIA_MAX_PATH * 2];
     if (!absJoin(".satria/trace", dir, sizeof(dir))) return 2;
     if (!joinPath(logPath, sizeof(logPath), dir, TRACE_LOG_NAME)) return 2;
   }
   /* Pastikan folder log ada, lalu kosongkan log (setiap trace = log baru). */
-  char dirOnly[MAX_PATH * 2];
+  char dirOnly[SATRIA_MAX_PATH * 2];
   snprintf(dirOnly, sizeof(dirOnly), "%s", logPath);
   char *lastSlash = strrchr(dirOnly, '/');
   if (lastSlash && lastSlash != dirOnly) {

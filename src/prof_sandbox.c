@@ -56,7 +56,7 @@ static uint64_t profFnvStr(uint64_t h, const char *s) {
    decide incremental (schema identik, berbeda muatan fase). */
 static int buildSandboxed(ProfCtx *p, const char *passKind) {
   Config c = configDefaults();
-  char bf[MAX_PATH * 2 + 16];
+  char bf[SATRIA_MAX_PATH * 2 + 16];
   snprintf(bf, sizeof(bf), "%s/Buildfile", p->dir);
   bool haveBf = fsFileExists(bf);
 
@@ -94,7 +94,7 @@ static int buildSandboxed(ProfCtx *p, const char *passKind) {
   }
 
   /* Isolasi keluaran ke direktori sementara. */
-  char bdir[MAX_PATH * 2 + 8];
+  char bdir[SATRIA_MAX_PATH * 2 + 8];
   snprintf(bdir, sizeof(bdir), "%s/build", p->tmp);
   copyStr(c.outBuildDir, sizeof(c.outBuildDir), bdir);
   copyStr(c.outBinaryDir, sizeof(c.outBinaryDir), p->tmp);
@@ -148,7 +148,7 @@ static int buildSandboxed(ProfCtx *p, const char *passKind) {
   for (int i = 0; i < c.flags.count; i++)
     fpCompile = profFnvStr(fpCompile, c.flags.items[i]);
   for (int i = 0; i < srcs.count; i++) {
-    char obj[MAX_PATH];
+    char obj[SATRIA_MAX_PATH];
     fpCompile = profFnvStr(fpCompile, srcs.items[i]);
     if (objectPathFor(&c, srcs.items[i], obj, sizeof(obj))) fpCompile = profFnvStr(fpCompile, obj);
   }
@@ -161,7 +161,7 @@ static int buildSandboxed(ProfCtx *p, const char *passKind) {
      no-op run kedua = 0 kompilasi. */
   char *inc = includeFlags(&c);
   char *wf = warningFlags(&c);
-  char obj[MAX_PATH];
+  char obj[SATRIA_MAX_PATH];
   List pending = {0};
   profPhaseBegin("decide");
   {
@@ -182,7 +182,7 @@ static int buildSandboxed(ProfCtx *p, const char *passKind) {
   }
   profPhaseEnd(0, 0);
 
-  char objTmp[MAX_PATH];
+  char objTmp[SATRIA_MAX_PATH];
   int compiled = 0, failed = 0, interrupted = 0;
   profPhaseBegin("compile");
   bool okc =
@@ -201,7 +201,7 @@ static int buildSandboxed(ProfCtx *p, const char *passKind) {
   }
 
   /* Link — pola cmdBuildEx (GNU/Clang; MSVC cabang sendiri). */
-  char target[MAX_PATH * 2];
+  char target[SATRIA_MAX_PATH * 2];
   snprintf(target, sizeof(target), "%s/%s", c.outBinaryDir, c.outBinaryName);
   if (compilerIsMSVC(&c)) {
     /* link.exe tidak menambahkan .exe sendiri pada /OUT tanpa ekstensi —
@@ -335,7 +335,7 @@ int profRunWorkspace(ProfCtx *p) {
     /* hitung biaya ekstat deklaratif proyek: root proyek ada bila
        Buildfile atau .Buildfile sintesis nya ada — tidak membangun apa
        pun. */
-    char projDir[MAX_PATH * 3];
+    char projDir[SATRIA_MAX_PATH * 3];
     snprintf(projDir, sizeof(projDir), "%s/%s", p->dir, names[i]);
     if (!fsDirExists(projDir)) {
       fprintf(stderr, "satria: profile workspace=%s: proyek '%s' bukan direktori\n", p->target,

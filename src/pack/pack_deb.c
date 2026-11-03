@@ -118,17 +118,17 @@ static void debSetFileMode(const char *srcPath, const char *relPath, const char 
    Folder di-walk rekursif (walkDir menghasilkan path file relatif root). */
 static bool debStageData(const Config *c, const char *dataDir, const char *prefixRel) {
   for (int i = 0; i < c->pack.files.count; i++) {
-    char src[MAX_PATH * 2], dstRoot[MAX_PATH * 2];
+    char src[SATRIA_MAX_PATH * 2], dstRoot[SATRIA_MAX_PATH * 2];
     if (!packEntryParts(c->pack.files.items[i], src, sizeof(src), dstRoot, sizeof(dstRoot)))
       return false;
 
     /* Fallback .exe — sama dengan packStageEntries; tanpa ini .deb di
        Windows dibangun tanpa binary secara diam-diam. */
-    char eff[MAX_PATH * 2];
+    char eff[SATRIA_MAX_PATH * 2];
     packResolveSource(src, eff, sizeof(eff));
 
     if (fsFileExists(eff)) {
-      char dest[MAX_PATH * 3];
+      char dest[SATRIA_MAX_PATH * 3];
       snprintf(dest, sizeof(dest), "%s/%s/%s", dataDir, prefixRel, dstRoot);
       mkparent(dest);
       if (!copyFileBytes(eff, dest)) {
@@ -150,14 +150,14 @@ static bool debStageData(const Config *c, const char *dataDir, const char *prefi
       const char *file = files.items[j];
       const char *suffix = file + srcLen;
       if (*suffix == '/') suffix++;
-      char dest[MAX_PATH * 3];
+      char dest[SATRIA_MAX_PATH * 3];
       if (*suffix)
         snprintf(dest, sizeof(dest), "%s/%s/%s/%s", dataDir, prefixRel, dstRoot, suffix);
       else
         snprintf(dest, sizeof(dest), "%s/%s/%s", dataDir, prefixRel, dstRoot);
 
       mkparent(dest);
-      char rel[MAX_PATH * 3];
+      char rel[SATRIA_MAX_PATH * 3];
       if (*suffix) {
         snprintf(rel, sizeof(rel), "%s/%s", dstRoot, suffix);
       } else {

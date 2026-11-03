@@ -36,7 +36,7 @@
 
 static void addKind(List *l, char kind, const char *path) {
   if (!path || !*path) return;
-  char entry[MAX_PATH * 4];
+  char entry[SATRIA_MAX_PATH * 4];
   snprintf(entry, sizeof(entry), "%c %s", kind, path);
   listAdd(l, entry);
 }
@@ -232,7 +232,7 @@ static void fsPrevLoadWsState(FsPrevTable *t, const char *proj) {
   for (size_t i = 0; i < tn; i++)
     if (tb[i] == '\n') lines++;
   fsPrevInit(t, lines);
-  char line[MAX_PATH * 6];
+  char line[SATRIA_MAX_PATH * 6];
   while (stateBufGets(tb, tn, &tp, line, sizeof(line))) {
     char k = 0;
     long long mt = 0, sz = 0;
@@ -540,7 +540,7 @@ bool wsFastStateValid(const char *buildfilePath, bool libOnly) {
   if (!proj || !stateBlobGet(proj, "ws.state", &tb, &tn)) return false;
 
   const char *want = buildfilePath && *buildfilePath ? buildfilePath : "Buildfile";
-  char line[MAX_PATH * 6];
+  char line[SATRIA_MAX_PATH * 6];
   bool ok = stateBufGets(tb, tn, &tp, line, sizeof(line)) != NULL;
   if (ok) {
     char magic[32], scwd[WS_PATH_LEN];

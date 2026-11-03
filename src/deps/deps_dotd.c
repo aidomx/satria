@@ -29,7 +29,7 @@
    idx, pointer diambil ulang SETELAH depNodeGet. */
 static void dotdAddDep(DepCache *dc, int idx, const char *depPath) {
   if (idx < 0 || !depPath || !*depPath) return;
-  char norm[MAX_PATH];
+  char norm[SATRIA_MAX_PATH];
   snprintf(norm, sizeof(norm), "%s", depPath);
   depNormalizePath(norm);
 
@@ -260,7 +260,7 @@ bool depsLoadDotD(DepCache *dc, const char *src) {
   const Config *c = dc->cfg;
   if (!c || c->sources.count == 0) return false;
 
-  char dpath[MAX_PATH * 2];
+  char dpath[SATRIA_MAX_PATH * 2];
   if (!dotDPathFor(c, src, dpath, sizeof(dpath))) return false;
 
   int64_t dm = -1;
@@ -275,7 +275,7 @@ bool depsLoadDotD(DepCache *dc, const char *src) {
   if (dm < 0 || sm < 0 || dm < sm) return false;
 
   /* Salin path source dulu: depNodeGet bisa merealloc dc->nodes. */
-  char srcNorm[MAX_PATH];
+  char srcNorm[SATRIA_MAX_PATH];
   snprintf(srcNorm, sizeof(srcNorm), "%s", src);
   depNormalizePath(srcNorm);
   int idx = depNodeGet(dc, srcNorm);

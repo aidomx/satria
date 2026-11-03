@@ -284,7 +284,7 @@ bool wsBuildConfig(const WsModel *m, int idx, Config *c) {
   /* Konvensi sources/headers berbasis root PROYEK — configFinalize berjalan
      dengan cwd root workspace, jadi defaults disediakan dahulu. */
   if (c->sources.count == 0) {
-    char defSrc[MAX_PATH * 2];
+    char defSrc[SATRIA_MAX_PATH * 2];
     if (strcmp(root, ".") == 0)
       snprintf(defSrc, sizeof(defSrc), "src");
     else
@@ -300,7 +300,7 @@ bool wsBuildConfig(const WsModel *m, int idx, Config *c) {
   }
   bool hdrDeclared = c->headerPublic.count > 0;
   if (!hdrDeclared) {
-    char incDir[MAX_PATH * 2];
+    char incDir[SATRIA_MAX_PATH * 2];
     if (strcmp(root, ".") == 0)
       snprintf(incDir, sizeof(incDir), "include");
     else

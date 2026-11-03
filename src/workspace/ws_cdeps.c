@@ -37,7 +37,7 @@ static void wsProjectHeaderDirs(const WsProject *dep, List *out) {
       if (*item) {
         /* <root>/<item> — relatif root workspace; dibangun manual
            (memcpy) agar gcc -Wformat-truncation tidak menolak path. */
-        char joined[MAX_PATH];
+        char joined[SATRIA_MAX_PATH];
         size_t need = strlen(dep->root) + 1 + strlen(item) + 1;
         if (need > sizeof(joined)) continue;
         char *dst = joined;
@@ -56,7 +56,7 @@ static void wsProjectHeaderDirs(const WsProject *dep, List *out) {
     }
   }
   if (!any) {
-    char joined[MAX_PATH];
+    char joined[SATRIA_MAX_PATH];
     size_t need = strlen(dep->root) + strlen("/include") + 1;
     if (need <= sizeof(joined)) {
       char *dst = joined;

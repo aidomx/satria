@@ -38,9 +38,9 @@ bool packResolveSource(const char *src, char *out, size_t n) {
 }
 
 int64_t packEntryMTimeNs(const char *entry) {
-  char src[MAX_PATH * 2], dst[MAX_PATH * 2];
+  char src[SATRIA_MAX_PATH * 2], dst[SATRIA_MAX_PATH * 2];
   if (!packEntryParts(entry, src, sizeof(src), dst, sizeof(dst))) return -1;
-  char eff[MAX_PATH * 2];
+  char eff[SATRIA_MAX_PATH * 2];
   if (!packResolveSource(src, eff, sizeof(eff))) return -1;
   return fsMTimeNs(eff);
 }
@@ -96,14 +96,14 @@ bool packStageEntries(const Config *c, const char *root) {
   fsRemoveTree(root);
   mkdirs(root);
   for (int i = 0; i < c->pack.files.count; i++) {
-    char src[MAX_PATH * 2], dstRoot[MAX_PATH * 2];
+    char src[SATRIA_MAX_PATH * 2], dstRoot[SATRIA_MAX_PATH * 2];
     if (!packEntryParts(c->pack.files.items[i], src, sizeof(src), dstRoot, sizeof(dstRoot)))
       return false;
     /* Fallback .exe: bin/satria -> bin/satria.exe di host Windows. */
-    char eff[MAX_PATH * 2];
+    char eff[SATRIA_MAX_PATH * 2];
     packResolveSource(src, eff, sizeof(eff));
     if (fsFileExists(eff)) {
-      char dst[MAX_PATH * 3];
+      char dst[SATRIA_MAX_PATH * 3];
       snprintf(dst, sizeof(dst), "%s/%s", root, dstRoot);
       mkparent(dst);
       if (!packCopyFile(eff, dst)) {
@@ -126,7 +126,7 @@ bool packStageEntries(const Config *c, const char *root) {
       /* exclude hanya berlaku pada isi folder yang di-walk (suffix relatif
          terhadap folder sumber), bukan pada entri file eksplisit. */
       if (*suffix && packExcluded(c, suffix)) continue;
-      char dst[MAX_PATH * 3];
+      char dst[SATRIA_MAX_PATH * 3];
       if (*suffix)
         snprintf(dst, sizeof(dst), "%s/%s/%s", root, dstRoot, suffix);
       else

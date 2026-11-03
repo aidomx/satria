@@ -161,7 +161,7 @@ static int cmdSelfUpgrade(int argc, const char *argv0) {
     return 2;
   }
 
-  char tempDir[MAX_PATH], tempFile[MAX_PATH], scriptPath[MAX_PATH];
+  char tempDir[SATRIA_MAX_PATH], tempFile[SATRIA_MAX_PATH], scriptPath[SATRIA_MAX_PATH];
   DWORD tempLen = GetTempPathA((DWORD)sizeof(tempDir), tempDir);
   if (!tempLen || tempLen >= sizeof(tempDir) ||
       !GetTempFileNameA(tempDir, "rbu", 0, tempFile)) {

@@ -49,8 +49,8 @@ bool probeAvailable(const char *exe) {
   while (*p) {
     const char *semi = strchr(p, ';');
     size_t len = semi ? (size_t)(semi - p) : strlen(p);
-    if (len > 0 && len < MAX_PATH) {
-      char dir[MAX_PATH];
+    if (len > 0 && len < SATRIA_MAX_PATH) {
+      char dir[SATRIA_MAX_PATH];
       memcpy(dir, p, len);
       dir[len] = '\0';
       /* buang tanda kutip yang kadang menyelimuti entri PATH Windows */
@@ -62,7 +62,7 @@ bool probeAvailable(const char *exe) {
         }
       }
       for (int s = 0; kSuffixes[s]; s++) {
-        char full[MAX_PATH + 128];
+        char full[SATRIA_MAX_PATH + 128];
         snprintf(full, sizeof(full), "%s/%s%s", dir, exe, kSuffixes[s]);
         if (fsFileExists(full)) return true;
       }
@@ -149,7 +149,7 @@ bool procInterrupted(void) { return g_wantInterrupt; }
 
 /* Susun command line "cmd.exe /d /s /c <cmd>" — dipakai procRun & procStart. */
 static bool procBuildShellCommand(const char *cmd, char *command, size_t n) {
-  char shell[MAX_PATH];
+  char shell[SATRIA_MAX_PATH];
   DWORD len = GetEnvironmentVariableA("COMSPEC", shell, sizeof(shell));
   if (len == 0 || len >= sizeof(shell)) strcpy(shell, "cmd.exe");
   int written = snprintf(command, n, "\"%s\" /d /s /c \"%s\"", shell, cmd);
@@ -158,11 +158,11 @@ static bool procBuildShellCommand(const char *cmd, char *command, size_t n) {
 
 /* File sementara untuk tangkapan output child (dir TEMP user). */
 bool procCaptureTemp(char *pathOut, size_t n) {
-  if (!pathOut || n < MAX_PATH) return false;
-  char dir[MAX_PATH + 1];
+  if (!pathOut || n < SATRIA_MAX_PATH) return false;
+  char dir[SATRIA_MAX_PATH + 1];
   DWORD len = GetTempPathA((DWORD)sizeof(dir), dir);
   if (len == 0 || len >= sizeof(dir)) return false;
-  char file[MAX_PATH];
+  char file[SATRIA_MAX_PATH];
   if (GetTempFileNameA(dir, "sat", 0, file) == 0) return false;
   pathNormalizeSlash(file);
   if (strlen(file) + 1 > n) {
@@ -178,10 +178,10 @@ bool procCaptureTemp(char *pathOut, size_t n) {
 static bool procCreate(const char *cmd, PROCESS_INFORMATION *pi, const char *capPath) {
   STARTUPINFOA si;
   /* Buffer command shell DIPROSES dinamis: tautan self-host (69+ object,
-     ~1.7KB perintah) melampaui batas lama MAX_PATH*4 (1040 byte) sehingga
+     ~1.7KB perintah) melampaui batas lama SATRIA_MAX_PATH*4 (1040 byte) sehingga
      pembangunan perintah gagal dan link dilaporkan "link failed" diam-diam.
      Batas absolut tetap 32767 karakter (limit CreateProcessA). */
-  size_t need = strlen(cmd) + MAX_PATH + 64;
+  size_t need = strlen(cmd) + SATRIA_MAX_PATH + 64;
   if (need > 32767) return false;
   char *command = malloc(need);
   if (!command) return false;

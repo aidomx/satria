@@ -49,7 +49,7 @@ int cmdsBuildPassFinish(CmdsPassTail *t) {
   List pending = t->pending;
   char *inc = t->inc;
   char *wf = t->wf;
-  char obj[MAX_PATH];
+  char obj[SATRIA_MAX_PATH];
   memcpy(obj, t->obj, sizeof(obj));
   CmdsBuildFingerprint currentFp = t->currentFp;
   int compiled = t->compiled;
@@ -108,14 +108,16 @@ int cmdsBuildPassFinish(CmdsPassTail *t) {
      input object lebih baru daripada target. Gunakan nanosecond mtime agar
      keputusan incremental tidak kehilangan perubahan yang terjadi dalam
      detik yang sama. */
-  char target[MAX_PATH * 2];
-  snprintf(target, sizeof(target), "%s/%s", c.outBinaryDir, c.outBinaryName);
+  /* Sisa 8 byte disediakan untuk sufiks ".exe": target selalu memuat path
+     final yang utuh, bukan path yang kehilangan sufiksnya. */
+  char target[SATRIA_MAX_PATH * 2 + 8];
+  snprintf(target, sizeof(target) - 8, "%s/%s", c.outBinaryDir, c.outBinaryName);
 #ifdef _WIN32
   /* Windows dapat menambahkan .exe otomatis saat link. */
   if (!fsFileExists(target)) {
-    char withExe[sizeof(target) + 8];
+    char withExe[sizeof(target) + 4];
     snprintf(withExe, sizeof(withExe), "%s.exe", target);
-    if (fsFileExists(withExe)) snprintf(target, sizeof(target), "%s", withExe);
+    if (fsFileExists(withExe)) memcpy(target, withExe, strlen(withExe) + 1);
   }
 #endif
 
@@ -227,7 +229,7 @@ int cmdsBuildPassFinish(CmdsPassTail *t) {
        /OUT menentukan target; link.exe untuk EXE tanpa /LD tidak menulis
        .lib/.exp sampingan, jadi tidak perlu /IMPLIB. (Nama variabel beda
        dari `target` luar — MSVC /W4 memperingatkan shadowing, C4456.) */
-    char linkTarget[MAX_PATH * 2];
+    char linkTarget[SATRIA_MAX_PATH * 2];
     snprintf(linkTarget, sizeof(linkTarget), "%s/%s", c.outBinaryDir, c.outBinaryName);
     /* link.exe TIDAK menambahkan .exe pada /OUT yang tanpa ekstensi (beda dari
        MinGW gcc yang menambahkannya sendiri). Tanpa ekstensi, binary self-host
@@ -280,16 +282,17 @@ int cmdsBuildPassFinish(CmdsPassTail *t) {
      Di Windows exe yang masih dipakai proses lain (terkunci / discan AV) tidak
      bisa DITIMPA: linker gagal LNK1104. Exe lama dipindah ke <out>.old lebih
      dulu. Rename file yang sedang dieksekusi diizinkan di Windows. */
-  char outPath[MAX_PATH * 2];
-  char oldPath[MAX_PATH * 2 + 8];
-  snprintf(outPath, sizeof(outPath), "%s/%s", c.outBinaryDir, c.outBinaryName);
+  /* Sisa 8 byte untuk sufiks ".exe" (lihat `target` di atas). */
+  char outPath[SATRIA_MAX_PATH * 2 + 8];
+  char oldPath[SATRIA_MAX_PATH * 2 + 16];
+  snprintf(outPath, sizeof(outPath) - 8, "%s/%s", c.outBinaryDir, c.outBinaryName);
 #ifdef _WIN32
   /* gcc/ld di Windows menambah .exe sendiri: file aktual bisa <out>.exe, dan
      itulah yang terkunci saat self-rebuild. Pilih file yang benar-benar ada. */
   if (!fsFileExists(outPath)) {
-    char withExeOut[sizeof(outPath) + 8];
+    char withExeOut[sizeof(outPath) + 4];
     snprintf(withExeOut, sizeof(withExeOut), "%s.exe", outPath);
-    if (fsFileExists(withExeOut)) snprintf(outPath, sizeof(outPath), "%s", withExeOut);
+    if (fsFileExists(withExeOut)) memcpy(outPath, withExeOut, strlen(withExeOut) + 1);
   }
 #endif
   snprintf(oldPath, sizeof(oldPath), "%s.old", outPath);

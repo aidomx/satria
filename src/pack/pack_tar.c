@@ -32,7 +32,7 @@ bool packBuildTar(const Config *c, const PackArtifact *a) {
 
   size_t n = strlen(a->tmp) + strlen(stage) + 64;
   for (int i = 0; i < c->pack.files.count; i++) {
-    char src[MAX_PATH * 2], dst[MAX_PATH * 2];
+    char src[SATRIA_MAX_PATH * 2], dst[SATRIA_MAX_PATH * 2];
     if (!packEntryParts(c->pack.files.items[i], src, sizeof(src),
                         dst, sizeof(dst))) continue;
     n += strlen(dst) + 2;
@@ -46,7 +46,7 @@ bool packBuildTar(const Config *c, const PackArtifact *a) {
 
   snprintf(cmd, n, "tar %sf %s -C %s", tarFlag(a->compress), a->tmp, stage);
   for (int i = 0; i < c->pack.files.count; i++) {
-    char src[MAX_PATH * 2], dst[MAX_PATH * 2];
+    char src[SATRIA_MAX_PATH * 2], dst[SATRIA_MAX_PATH * 2];
     if (!packEntryParts(c->pack.files.items[i], src, sizeof(src),
                         dst, sizeof(dst))) continue;
     strcat(cmd, " ");

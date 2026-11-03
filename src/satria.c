@@ -47,7 +47,7 @@ static bool cmdHelpCond(const char *args) {
    workspace induk ditolak (design/workspace.md aturan 1 & 5). Dipakai baik
    untuk `-w` maupun build single-project di dalam folder anggota. */
 static bool memberCwdRejected(void) {
-  char wsRoot[MAX_PATH], member[64];
+  char wsRoot[SATRIA_MAX_PATH], member[64];
   if (!wsMemberCwdDetect(wsRoot, sizeof(wsRoot), member, sizeof(member))) return false;
   fprintf(stderr,
           "satria: direktori ini adalah anggota workspace '%s' (proyek '%s')\n"

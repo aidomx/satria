@@ -116,7 +116,7 @@ static void embWriteHexBytes(FILE *out, FILE *in, long long *total) {
 }
 
 /* Kapasitas baris stamp: kasus terburuk format embStampLine adalah
-   archivePath (MAX_PATH+192) + extract (MAX_PATH) + key/type/name + sym 512
+   archivePath (SATRIA_MAX_PATH+192) + extract (SATRIA_MAX_PATH) + key/type/name + sym 512
    + angka = ±4107 byte. Buffer lama 4096 memotong baris itu senyap — stamp
    kehilangan entri dan perbandingan jadi tidak dapat dipercaya. Jaga selalu
    di atas maksimum tersebut. */
@@ -150,7 +150,7 @@ static bool embStampLine(const EmbeddedEntry *e, char *line, size_t cap) {
    Default: incbin untuk GCC/Clang, carray untuk MSVC. Override lewat env
    SATRIA_EMBED_MODE=carray|incbin (untuk pengujian/fallback). */
 static bool embAbsPath(const char *rel, char *out, size_t cap) {
-  char tmp[MAX_PATH * 2];
+  char tmp[SATRIA_MAX_PATH * 2];
   size_t k = 0;
   for (const char *p = rel; *p && k < sizeof(tmp) - 1; p++) tmp[k++] = (*p == '\\') ? '/' : *p;
   tmp[k] = '\0';
@@ -159,7 +159,7 @@ static bool embAbsPath(const char *rel, char *out, size_t cap) {
     if (strlen(tmp) >= cap) return false;
     memcpy(out, tmp, strlen(tmp) + 1);
   } else {
-    char cwd[MAX_PATH];
+    char cwd[SATRIA_MAX_PATH];
     if (!fsGetCwd(cwd, sizeof(cwd))) return false;
     const char *r = tmp;
     while (r[0] == '.' && r[1] == '/') r += 2;
@@ -179,7 +179,7 @@ static bool embUseIncbin(const Config *c) {
   if (m && strcmp(m, "carray") == 0) return false;
   for (int i = 0; i < c->embCount; i++) {
     const EmbeddedEntry *e = &c->emb[i];
-    char abs[MAX_PATH * 2];
+    char abs[SATRIA_MAX_PATH * 2];
     if (e->enable && !embAbsPath(e->archivePath, abs, sizeof(abs))) return false;
   }
   return true;
@@ -246,7 +246,7 @@ static void embWriteIncbinEntry(FILE *out, const char *sym, const char *absPath,
 
 /* Tulis stamp: versi, waktu mulai codegen (ns), lalu baris per entri. */
 static bool embWriteStamp(const char *stampPath, int64_t genNs, const char *mode, const char *sig) {
-  char tmpS[MAX_PATH + 48];
+  char tmpS[SATRIA_MAX_PATH + 48];
   snprintf(tmpS, sizeof(tmpS), "%s.tmp", stampPath);
   FILE *f = fopen(tmpS, "wb");
   if (!f) return false;
@@ -290,7 +290,7 @@ static bool embStampSkip(const Config *c, const char *path, const char *stampPat
 
 bool emitEmbeddedSource(const Config *c, bool *changed) {
   if (changed) *changed = false;
-  char path[MAX_PATH + 32], tmp[MAX_PATH + 40], stampPath[MAX_PATH + 40];
+  char path[SATRIA_MAX_PATH + 32], tmp[SATRIA_MAX_PATH + 40], stampPath[SATRIA_MAX_PATH + 40];
   snprintf(path, sizeof(path), "%s/embedded.c", c->outBuildDir);
   snprintf(tmp, sizeof(tmp), "%s.tmp", path);
   snprintf(stampPath, sizeof(stampPath), "%s/embedded.stamp", c->outBuildDir);
@@ -341,7 +341,7 @@ bool emitEmbeddedSource(const Config *c, bool *changed) {
     if (incbin) {
       long long sz = fsFileSize(e->archivePath);
       unsigned long long hash = 0;
-      char absP[MAX_PATH * 2];
+      char absP[SATRIA_MAX_PATH * 2];
       if (sz < 0 || !embFileFnv64(e->archivePath, &hash) ||
           !embAbsPath(e->archivePath, absP, sizeof(absP))) {
         fprintf(stderr, "satria: %s: embedded file '%s' tidak terbaca\n", e->name,
@@ -543,7 +543,7 @@ bool emitEmbeddedHeader(const Config *c, bool *changed) {
 
   used += (size_t)snprintf(body + used, sizeof(body) - used, "#endif /* RUPA_EMBEDDED_H */\n");
 
-  char embeddedHeader[MAX_PATH + 32];
+  char embeddedHeader[SATRIA_MAX_PATH + 32];
   snprintf(embeddedHeader, sizeof(embeddedHeader), "%s/embedded.h", c->outBuildDir);
   mkparent(embeddedHeader);
 

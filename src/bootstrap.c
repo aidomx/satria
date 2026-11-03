@@ -295,14 +295,14 @@ int bootstrapParse(int argc, const char *argv[], Bootstrap *bs) {
 int bootstrapApply(Bootstrap *bs) {
   /* build.ninja relatif dievaluasi terhadap cwd PEMANGGIL — absolut-kan
      sebelum chdir -f di bawah. */
-  static char convAbs[MAX_PATH * 2];
+  static char convAbs[SATRIA_MAX_PATH * 2];
   bs->conv_abs = NULL;
   /* "make" bukan path — resolusi nama file dilakukan setelah chdir -f. */
   if (bs->conv_file && !bs->conv_make) {
     if (bs->conv_file[0] == '/') {
       snprintf(convAbs, sizeof(convAbs), "%s", bs->conv_file);
     } else {
-      char cwd0[MAX_PATH];
+      char cwd0[SATRIA_MAX_PATH];
       if (fsGetCwd(cwd0, sizeof(cwd0)))
         snprintf(convAbs, sizeof(convAbs), "%s/%s", cwd0, bs->conv_file);
       else
@@ -317,7 +317,7 @@ int bootstrapApply(Bootstrap *bs) {
      ninja -C). File polos tanpa direktori berarti cwd sudah benar. */
   {
     /* static: buildfile menunjuk ke dalam buffer ini setelah blok berakhir */
-    static char dir[MAX_PATH];
+    static char dir[SATRIA_MAX_PATH];
     copyStr(dir, sizeof(dir), bs->buildfile);
     char *slash = strrchr(dir, '/');
 #ifdef _WIN32
@@ -344,12 +344,12 @@ int bootstrapApply(Bootstrap *bs) {
     if (bs->conv_make) {
       /* design/convert.md Resolusi Argumen: "make" -> cari Makefile,
          makefile, atau GNUmakefile di direktori kerja saat ini. */
-      static char mkAbs[MAX_PATH * 2];
+      static char mkAbs[SATRIA_MAX_PATH * 2];
       static const char *cands[] = {"Makefile", "makefile", "GNUmakefile", NULL};
       src = NULL;
       for (int k = 0; cands[k]; k++) {
         if (fsFileExists(cands[k])) {
-          char cwd0[MAX_PATH];
+          char cwd0[SATRIA_MAX_PATH];
           if (fsGetCwd(cwd0, sizeof(cwd0)))
             snprintf(mkAbs, sizeof(mkAbs), "%s/%s", cwd0, cands[k]);
           else

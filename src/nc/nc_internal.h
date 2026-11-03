@@ -4,7 +4,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-#include "../util.h" /* MAX_PATH */
+#include "../util.h" /* SATRIA_MAX_PATH */
 
 /*
  * nc_internal — tipe model build.ninja & helper bersama modul nc/.
@@ -97,9 +97,9 @@ bool ncParseInto(NcFile *f, const char *path, const char *dirHint, int depth);
 typedef struct {
   NcList flags;
   NcList includes;
-  char std[MAX_PATH * 4];
-  char src[MAX_PATH * 2];
-  char obj[MAX_PATH * 2];
+  char std[SATRIA_MAX_PATH * 4];
+  char src[SATRIA_MAX_PATH * 2];
+  char obj[SATRIA_MAX_PATH * 2];
 } NcCompile;
 
 /* Ganti semua $var / ${var} pada template dengan nilai: parameter edge

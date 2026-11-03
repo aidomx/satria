@@ -60,7 +60,7 @@ static void toBackslash(char *dst, size_t n, const char *src) {
 }
 
 static bool statInfo(const char *path, WIN32_FILE_ATTRIBUTE_DATA *fad) {
-  char tmp[MAX_PATH * 2];
+  char tmp[SATRIA_MAX_PATH * 2];
   toBackslash(tmp, sizeof(tmp), path);
   return GetFileAttributesExA(tmp, GetFileExInfoStandard, fad) != 0;
 }
@@ -138,13 +138,13 @@ bool fsStampNsSize(const char *path, int64_t *mtimeNs, long long *size) {
 }
 
 void fsMakeDir(const char *path) {
-  char tmp[MAX_PATH * 2];
+  char tmp[SATRIA_MAX_PATH * 2];
   toBackslash(tmp, sizeof(tmp), path);
   CreateDirectoryA(tmp, NULL); /* diam bila sudah ada */
 }
 
 bool fsRemoveFile(const char *path) {
-  char tmp[MAX_PATH * 2];
+  char tmp[SATRIA_MAX_PATH * 2];
   toBackslash(tmp, sizeof(tmp), path);
   return DeleteFileA(tmp) != 0;
 }
@@ -154,7 +154,7 @@ bool fsRemoveFile(const char *path) {
    ketiga (antivirus/indexer, ERROR_ACCESS_DENIED), fallback salin + hapus
    (rekomendasi design/startup.md §4). */
 bool fsRenameReplace(const char *from, const char *to) {
-  char f[MAX_PATH * 2], t[MAX_PATH * 2];
+  char f[SATRIA_MAX_PATH * 2], t[SATRIA_MAX_PATH * 2];
   toBackslash(f, sizeof(f), from);
   toBackslash(t, sizeof(t), to);
   if (MoveFileExA(f, t, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) return true;
@@ -166,13 +166,13 @@ bool fsRenameReplace(const char *from, const char *to) {
 }
 
 bool fsSetMode(const char *path, unsigned mode) {
-  char tmp[MAX_PATH * 2];
+  char tmp[SATRIA_MAX_PATH * 2];
   toBackslash(tmp, sizeof(tmp), path);
   return _chmod(tmp, (int)mode) == 0;
 }
 
 unsigned fsGetMode(const char *path) {
-  char tmp[MAX_PATH * 2];
+  char tmp[SATRIA_MAX_PATH * 2];
   toBackslash(tmp, sizeof(tmp), path);
   struct _stat st;
   if (_stat(tmp, &st) != 0) return 0;
@@ -180,10 +180,10 @@ unsigned fsGetMode(const char *path) {
 }
 
 bool fsRemoveTree(const char *path) {
-  char tmp[MAX_PATH * 2];
+  char tmp[SATRIA_MAX_PATH * 2];
   toBackslash(tmp, sizeof(tmp), path);
   /* SHFileOperation butuh path dobel-NUL-terminated */
-  char doubled[MAX_PATH * 2 + 2];
+  char doubled[SATRIA_MAX_PATH * 2 + 2];
   size_t len = strlen(tmp);
   if (len + 2 > sizeof(doubled)) return false;
   memcpy(doubled, tmp, len + 1);
@@ -199,7 +199,7 @@ bool fsRemoveTree(const char *path) {
 }
 
 void fsListDir(const char *dir, List *dirs, List *files) {
-  char pattern[MAX_PATH * 2];
+  char pattern[SATRIA_MAX_PATH * 2];
   toBackslash(pattern, sizeof(pattern), dir);
   size_t plen = strlen(pattern);
   if (plen + 3 > sizeof(pattern)) return;
@@ -213,7 +213,7 @@ void fsListDir(const char *dir, List *dirs, List *files) {
   do {
     const char *name = fd.cFileName;
     if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0) continue;
-    char path[MAX_PATH * 2];
+    char path[SATRIA_MAX_PATH * 2];
     snprintf(path, sizeof(path), "%s/%s", dir, name);
     if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
       if (dirs) listAdd(dirs, path);
@@ -225,7 +225,7 @@ void fsListDir(const char *dir, List *dirs, List *files) {
 }
 
 bool fsGetCwd(char *out, size_t n) {
-  char tmp[MAX_PATH * 2];
+  char tmp[SATRIA_MAX_PATH * 2];
   DWORD len = GetCurrentDirectoryA((DWORD)sizeof(tmp), tmp);
   if (len == 0 || len > sizeof(tmp)) return false;
   pathNormalizeSlash(tmp);
@@ -235,7 +235,7 @@ bool fsGetCwd(char *out, size_t n) {
 }
 
 bool fsSetCwd(const char *path) {
-  char tmp[MAX_PATH * 2];
+  char tmp[SATRIA_MAX_PATH * 2];
   toBackslash(tmp, sizeof(tmp), path);
   return SetCurrentDirectoryA(tmp) != 0;
 }
@@ -244,7 +244,7 @@ bool fsSetCwd(const char *path) {
 bool fsMapRead(const char *path, void **outData, size_t *outSize) {
   *outData = NULL;
   *outSize = 0;
-  char tmp[MAX_PATH * 2];
+  char tmp[SATRIA_MAX_PATH * 2];
   toBackslash(tmp, sizeof(tmp), path);
   HANDLE hFile = CreateFileA(tmp, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING,
                              FILE_ATTRIBUTE_NORMAL, NULL);
@@ -393,7 +393,7 @@ void fsListDir(const char *dir, List *dirs, List *files) {
   struct dirent *ent;
   while ((ent = readdir(d))) {
     if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0) continue;
-    char path[MAX_PATH];
+    char path[SATRIA_MAX_PATH];
     snprintf(path, sizeof(path), "%s/%s", dir, ent->d_name);
     bool isDir;
 #ifdef DT_DIR

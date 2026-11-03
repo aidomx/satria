@@ -43,11 +43,11 @@ static bool probeAvailableScan(const char *exe) {
   while (*p) {
     const char *colon = strchr(p, ':');
     size_t len = colon ? (size_t)(colon - p) : strlen(p);
-    if (len > 0 && len < MAX_PATH) {
-      char dir[MAX_PATH];
+    if (len > 0 && len < SATRIA_MAX_PATH) {
+      char dir[SATRIA_MAX_PATH];
       memcpy(dir, p, len);
       dir[len] = '\0';
-      char full[MAX_PATH + 128];
+      char full[SATRIA_MAX_PATH + 128];
       snprintf(full, sizeof(full), "%s/%s", dir, exe);
       if (fsFileExists(full)) return true;
     }
@@ -76,8 +76,8 @@ static const char *resolveSpawnExe(const char *name) {
   while (*p && !found) {
     const char *colon = strchr(p, ':');
     size_t len = colon ? (size_t)(colon - p) : strlen(p);
-    if (len > 0 && len < MAX_PATH) {
-      char full[MAX_PATH * 2];
+    if (len > 0 && len < SATRIA_MAX_PATH) {
+      char full[SATRIA_MAX_PATH * 2];
       snprintf(full, sizeof(full), "%.*s/%s", (int)len, p, name);
       if (access(full, X_OK) == 0) found = strdup(full);
     }
@@ -188,7 +188,7 @@ bool procCaptureTemp(char *pathOut, size_t n) {
   if (!pathOut || n < 32) return false;
   const char *tmp = getenv("TMPDIR");
   if (!tmp || !*tmp) tmp = "/tmp";
-  char tmpl[MAX_PATH + 32];
+  char tmpl[SATRIA_MAX_PATH + 32];
   if (snprintf(tmpl, sizeof(tmpl), "%s/satria-cap-XXXXXX", tmp) >= (int)sizeof(tmpl))
     return false;
   int fd = mkstemp(tmpl);

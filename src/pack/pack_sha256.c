@@ -130,7 +130,7 @@ bool packWriteSha256(const char *path) {
   unsigned char digest[32];
   sha256Final(&s, digest);
 
-  char sumPath[MAX_PATH * 2 + 8];
+  char sumPath[SATRIA_MAX_PATH * 2 + 8];
   snprintf(sumPath, sizeof(sumPath), "%s.sha256", path);
   FILE *out = fopen(sumPath, "w");
   if (!out) return false;

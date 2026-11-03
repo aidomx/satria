@@ -113,7 +113,7 @@ void cmdsFingerprintMake(const Config *c, const List *srcs, CmdsBuildFingerprint
 
   fp->sources = 14695981039346656037ULL;
   for (int i = 0; i < srcs->count; i++) {
-    char obj[MAX_PATH];
+    char obj[SATRIA_MAX_PATH];
     fp->sources = fpString(fp->sources, srcs->items[i]);
     if (objectPathFor(c, srcs->items[i], obj, sizeof(obj)))
       fp->sources = fpString(fp->sources, obj);
@@ -282,7 +282,7 @@ bool cmdsFastStateValid(const char *buildfilePath, bool libOnly) {
     fastStateFree(&s);
     return false;
   }
-  char cwd[MAX_PATH];
+  char cwd[SATRIA_MAX_PATH];
   int64_t buildfileMtime = -1, targetMtime = -1;
   long long buildfileSize = -1, targetSize = -1;
   bool buildfileStamp = memoStampNsSize(s.buildfile, &buildfileMtime, &buildfileSize);
@@ -318,7 +318,7 @@ bool cmdsFastStateValid(const char *buildfilePath, bool libOnly) {
     if (st->kind == 'L') {
       /* SATRIA_NO_LD sengaja memaksa jalur normal/fallback; jangan biarkan
          fastState menelan override itu. */
-      char ldPath[MAX_PATH];
+      char ldPath[SATRIA_MAX_PATH];
       bool cached = false;
       if (getenv("SATRIA_NO_LD") || !ldCacheResolve("ld", ldPath, sizeof(ldPath)) ||
           !cacheCheckLD(ldPath, &cached)) {

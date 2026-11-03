@@ -251,7 +251,7 @@ static bool snapDbg(void) {
 bool fastStateLoad(FastState *s, bool libOnly) {
   /* Fase library kini dari caches/lib.cache (design/startup.md §3). */
   if (libOnly) return fastStateLoadLib(s);
-  char cwd[MAX_PATH];
+  char cwd[SATRIA_MAX_PATH];
   if (!fsGetCwd(cwd, sizeof(cwd))) {
     if (snapDbg()) fprintf(stderr, "satria: snap: fsGetCwd gagal\n");
     return false;
@@ -325,20 +325,20 @@ void cmdsFastStateSave(const Config *c, const List *srcs, const char *target,
   /* Fast path hanya aman bila root build sama dengan cwd. Untuk root khusus,
      gunakan jalur normal sampai tersedia normalisasi path absolut. */
   if (strcmp(c->root, ".") != 0) {
-    char key[MAX_PATH];
+    char key[SATRIA_MAX_PATH];
     if (fsGetCwd(key, sizeof(key))) {
       fastSnapDelete();
     }
     SAVE_BAIL("root build bukan '.'");
   }
-  char cwd[MAX_PATH];
+  char cwd[SATRIA_MAX_PATH];
   if (!fsGetCwd(cwd, sizeof(cwd))) SAVE_BAIL("fsGetCwd gagal");
   const char *bf = buildfilePath && *buildfilePath ? buildfilePath : "Buildfile";
   int64_t bfm = fsMTimeNs(bf);
   long long bfs = fsFileSize(bf);
   /* Fase library proyek tanpa library tidak punya target: simpan "-" —
      validasi murni dari stamp input + object (lihat fastTargetRecorded). */
-  char targetBuf[MAX_PATH * 2];
+  char targetBuf[SATRIA_MAX_PATH * 2];
   const char *tgt = target;
   if (!tgt || !tgt[0]) {
     copyStr(targetBuf, sizeof(targetBuf), "-");
@@ -358,7 +358,7 @@ void cmdsFastStateSave(const Config *c, const List *srcs, const char *target,
 
   /* Library: status up-to-date saat build sukses selesai — ditampilkan
      lagi pada no-op berikutnya (dulu informasi ini hilang di fast path). */
-  char staticLib[MAX_PATH * 2] = {0}, sharedLib[MAX_PATH * 2] = {0};
+  char staticLib[SATRIA_MAX_PATH * 2] = {0}, sharedLib[SATRIA_MAX_PATH * 2] = {0};
   bool staticUp = true, sharedUp = true;
   long long staticSz = 0, sharedSz = 0;
   if (c->libRequested) {
@@ -439,7 +439,7 @@ void cmdsFastStateSave(const Config *c, const List *srcs, const char *target,
      design/embedded.md). Object embed kini object source biasa dan TIDAK
      distamp, seperti semua object. */
   if (c->embCount > 0) {
-    char embPath[MAX_PATH + 40];
+    char embPath[SATRIA_MAX_PATH + 40];
     snprintf(embPath, sizeof(embPath), "%s/embedded.c", c->outBuildDir);
     fastStampAdd(&paths, embPath);
     snprintf(embPath, sizeof(embPath), "%s/embedded.h", c->outBuildDir);

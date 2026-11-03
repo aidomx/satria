@@ -87,7 +87,7 @@ static uint64_t compdbEntryHash(const Config *c, const List *srcs, const char *c
      compiler. Timestamp source tidak ikut fingerprint: mengubah isi source
      tidak mengubah command compile yang direkam. */
   for (int i = 0; i < srcs->count; i++) {
-    char obj[MAX_PATH];
+    char obj[SATRIA_MAX_PATH];
     h = hashString(h, srcs->items[i]);
     if (objectPathFor(c, srcs->items[i], obj, sizeof(obj))) h = hashString(h, obj);
   }
@@ -200,7 +200,7 @@ static void compdbAppendEntries(char *buf, size_t *bufLen, size_t bufCap, const 
                                 List *srcs, const char *cwd, bool *first) {
   for (int i = 0; i < srcs->count; i++) {
     const char *src = srcs->items[i];
-    char obj[MAX_PATH];
+    char obj[SATRIA_MAX_PATH];
     if (!objectPathFor(c, src, obj, sizeof(obj))) continue;
 
     if (!*first) APPEND(buf, *bufLen, bufCap, ",\n");
@@ -224,7 +224,7 @@ static void compdbAppendEntries(char *buf, size_t *bufLen, size_t bufCap, const 
 
     for (int h = 0; h < c->headerPublic.count; h++) {
       const char *entry = c->headerPublic.items[h];
-      char flag[MAX_PATH + 8];
+      char flag[SATRIA_MAX_PATH + 8];
       if (entry[0] == '-')
         snprintf(flag, sizeof(flag), "%s", entry);
       else
@@ -236,7 +236,7 @@ static void compdbAppendEntries(char *buf, size_t *bufLen, size_t bufCap, const 
 
     for (int f = 0; f < c->flags.count; f++) {
       const char *fl = c->flags.items[f];
-      char withDash[MAX_PATH + 8];
+      char withDash[SATRIA_MAX_PATH + 8];
       if (fl[0] == '-')
         snprintf(withDash, sizeof(withDash), "%s", fl);
       else
@@ -263,7 +263,7 @@ static void compdbAppendEntries(char *buf, size_t *bufLen, size_t bufCap, const 
     jsonQuoteAppend(buf, bufLen, bufCap, src);
     APPEND(buf, *bufLen, bufCap, "\n    ],\n");
 
-    char absPath[MAX_PATH * 2];
+    char absPath[SATRIA_MAX_PATH * 2];
     APPEND(buf, *bufLen, bufCap, "    \"directory\": ");
     jsonQuoteAppend(buf, bufLen, bufCap, cwd);
     APPEND(buf, *bufLen, bufCap, ",\n    \"file\": ");
@@ -277,7 +277,7 @@ static void compdbAppendEntries(char *buf, size_t *bufLen, size_t bufCap, const 
 }
 
 RepCompdb writeCompdb(const Config *c, List *srcs) {
-  char cwd[MAX_PATH];
+  char cwd[SATRIA_MAX_PATH];
   if (!fsGetCwd(cwd, sizeof(cwd))) return REP_COMPDB_FAILED;
 
   uint64_t fingerprint = compdbEntryHash(c, srcs, cwd);
@@ -337,7 +337,7 @@ RepCompdb writeCompdb(const Config *c, List *srcs) {
  * restore tanpa render, sama dengan jalur single-project. */
 
 uint64_t compdbMultiFingerprint(const Config *const *cfgs, List *const *srcs, int count) {
-  char cwd[MAX_PATH];
+  char cwd[SATRIA_MAX_PATH];
   if (!fsGetCwd(cwd, sizeof(cwd))) return 0;
   uint64_t fp = 1469598103934665603ULL;
   fp = hashString(fp, cwd);
@@ -364,7 +364,7 @@ RepCompdb writeCompdbMulti(const Config *const *cfgs, List *const *srcs, int cou
     return REP_COMPDB_RESTORED;
   }
 
-  char cwd[MAX_PATH];
+  char cwd[SATRIA_MAX_PATH];
   if (!fsGetCwd(cwd, sizeof(cwd))) return REP_COMPDB_FAILED;
 
   size_t bufCap = 2 * 1024 * 1024;

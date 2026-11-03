@@ -267,7 +267,7 @@ void configFinalize(Config *c) {
   }
 
   if (!c->outBinaryName[0]) {
-    char cwd[MAX_PATH];
+    char cwd[SATRIA_MAX_PATH];
     if (fsGetCwd(cwd, sizeof(cwd))) {
       const char *base = strrchr(cwd, '/');
 #ifdef _WIN32

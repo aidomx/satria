@@ -40,7 +40,7 @@ static void ncNormalize(char *p) {
 /* Bila path absolut di bawah cwd, buang prefix cwd (jadikan relatif).
    Path absolut di luar cwd dibiarkan apa adanya. */
 static void ncRelativize(char *path, size_t cap) {
-  char cwd[MAX_PATH * 2];
+  char cwd[SATRIA_MAX_PATH * 2];
   if (!fsGetCwd(cwd, sizeof(cwd))) return;
   size_t cl = strlen(cwd);
   if (strncmp(path, cwd, cl) != 0) return;
@@ -59,7 +59,7 @@ void ncFixPath(const char *raw, const char *ninjaDir, char *out, size_t cap) {
     if (cap) out[0] = '\0';
     return;
   }
-  char joined[MAX_PATH * 2];
+  char joined[SATRIA_MAX_PATH * 2];
   if (raw[0] == '/') {
     /* absolut: relatif-kan terhadap cwd bila berada di bawahnya */
     snprintf(joined, sizeof(joined), "%s", raw);
@@ -89,7 +89,7 @@ void ncFixIncludeTok(const char *tok, const char *ninjaDir, bool fixedIn, char *
       snprintf(out, cap, "%s", tok);
       return;
     }
-    char dir[MAX_PATH * 2];
+    char dir[SATRIA_MAX_PATH * 2];
     ncFixPath(tok + 2, ninjaDir, dir, sizeof(dir));
     size_t len = strlen(dir);
     if (len > cap || cap - len < 3) {
@@ -155,7 +155,7 @@ bool ncParseInto(NcFile *f, const char *path, const char *dirHint, int depth) {
   if (!text) return false;
 
   /* direktori file ini untuk resolve include & path relatif */
-  char myDir[MAX_PATH];
+  char myDir[SATRIA_MAX_PATH];
   snprintf(myDir, sizeof(myDir), "%s", path);
   char *sl = strrchr(myDir, '/');
   if (sl)
@@ -212,7 +212,7 @@ bool ncParseInto(NcFile *f, const char *path, const char *dirHint, int depth) {
     curRule = NULL;
 
     if (strncmp(line, "include ", 8) == 0 && depth < 4) {
-      char incPath[MAX_PATH * 2];
+      char incPath[SATRIA_MAX_PATH * 2];
       ncFixPath(line + 8, myDir, incPath, sizeof(incPath));
       /* include dibaca relatif cwd hasil ncFixPath; bila file itu relatif
          dan tidak ada, coba lagi relatif direktori file induk */

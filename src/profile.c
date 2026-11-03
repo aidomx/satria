@@ -61,7 +61,7 @@ static void ctxHeader(const ProfCtx *p, char *out, size_t n) {
 
 /* Antarmuka terminal: ringkas, menjawab "apa yang mahal?". */
 static void printSummary(const ProfCtx *p) {
-  char hdr[MAX_PATH * 2 + 64];
+  char hdr[SATRIA_MAX_PATH * 2 + 64];
   ctxHeader(p, hdr, sizeof(hdr));
   printf("Profile : %s\n\n", hdr);
 
@@ -86,7 +86,7 @@ static void printReport(const ProfCtx *p, FILE *out) {
   fprintf(out, "type       : %s\n", p->type);
   fprintf(out, "target     : %s\n", p->target);
   fprintf(out, "directory  : %s\n", p->dir);
-  char hdr[MAX_PATH * 2 + 64];
+  char hdr[SATRIA_MAX_PATH * 2 + 64];
   ctxHeader(p, hdr, sizeof(hdr));
   const char *withEq = strstr(hdr, " with=");
   fprintf(out, "backend    : %s\n", withEq ? withEq + 6 : "default");
@@ -98,7 +98,7 @@ static void printReport(const ProfCtx *p, FILE *out) {
   fprintf(out, "platform   : %s\n", plat);
   fprintf(out, "compiler   : %s\n",
           p->compiler ? p->compiler : "n/a (context tidak memuat Buildfile)");
-  char cwd[MAX_PATH];
+  char cwd[SATRIA_MAX_PATH];
   if (fsGetCwd(cwd, sizeof(cwd))) fprintf(out, "cwd        : %s\n", cwd);
 
   fprintf(out, "\ninput\n\n---\n\n");
@@ -260,7 +260,7 @@ int cmdProfile(const char *const *args, int nargs) {
      Tanpa ini `~/...` gagal "direktori tidak ada" karena shell tidak
      meng-expand tilde di tengah token. */
   {
-    static char targetBuf[MAX_PATH * 3];
+    static char targetBuf[SATRIA_MAX_PATH * 3];
     if (profExpandTilde(value, targetBuf, sizeof(targetBuf)))
       p.target = targetBuf;
     else

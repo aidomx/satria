@@ -42,7 +42,7 @@ static uint64_t libMetaAddr(void) { return csHash("<libmeta>"); }
 uint64_t cmdsCacheProjAddr(void) {
   const char *name = cmdsStateWsProject();
   if (name && *name) return csHash(name);
-  char cwd[MAX_PATH];
+  char cwd[SATRIA_MAX_PATH];
   if (!fsGetCwd(cwd, sizeof(cwd))) return 0;
   return csHash(cwd);
 }

@@ -47,7 +47,7 @@
 /* ==================== state ==================== */
 
 static const char *g_argv[BG_MAX_ARGS + 1]; /* salinan pointer argv, NULL-akhir */
-static char g_abs0[MAX_PATH * 2];            /* argv[0] absolut (bila path relatif) */
+static char g_abs0[SATRIA_MAX_PATH * 2];            /* argv[0] absolut (bila path relatif) */
 static bool g_child = false;
 static BgMode g_mode = BG_SINGLE;
 
@@ -55,9 +55,9 @@ static BgMode g_mode = BG_SINGLE;
 
 static void bgAbs(char *path, size_t n) {
   if (!path[0] || path[0] == '/' || path[0] == '\\' || path[1] == ':') return;
-  char cwd[MAX_PATH];
+  char cwd[SATRIA_MAX_PATH];
   if (!fsGetCwd(cwd, sizeof(cwd))) return;
-  char buf[MAX_PATH * 2];
+  char buf[SATRIA_MAX_PATH * 2];
   snprintf(buf, sizeof(buf), "%s/%s", cwd, path);
   pathNormalizeSlash(buf);
   /* Tolak path yang tidak muat, jangan ambil versi yang sudah terpotong
@@ -68,12 +68,12 @@ static void bgAbs(char *path, size_t n) {
 }
 
 static const char *bgPidPath(BgMode mode) {
-  static char path[2][MAX_PATH];
+  static char path[2][SATRIA_MAX_PATH];
   static bool init[2];
   int i = mode == BG_WS ? 1 : 0;
   if (!init[i]) {
-    snprintf(path[i], MAX_PATH, "%s", i ? BG_PID_WS : BG_PID_SINGLE);
-    bgAbs(path[i], MAX_PATH);
+    snprintf(path[i], SATRIA_MAX_PATH, "%s", i ? BG_PID_WS : BG_PID_SINGLE);
+    bgAbs(path[i], SATRIA_MAX_PATH);
     init[i] = true;
   }
   return path[i];
@@ -82,13 +82,13 @@ static const char *bgPidPath(BgMode mode) {
 static const char *bgSimplePath(const char *rel) {
   /* Empat file non-PID; rel selalu konstan -> cache per pointer rel. */
   static const char *rels[4];
-  static char vals[4][MAX_PATH];
+  static char vals[4][SATRIA_MAX_PATH];
   static int n;
   for (int i = 0; i < n; i++)
     if (rels[i] == rel) return vals[i];
   if (n >= 4) return rel;
-  snprintf(vals[n], MAX_PATH, "%s", rel);
-  bgAbs(vals[n], MAX_PATH);
+  snprintf(vals[n], SATRIA_MAX_PATH, "%s", rel);
+  bgAbs(vals[n], SATRIA_MAX_PATH);
   rels[n] = rel;
   return vals[n++];
 }
@@ -135,7 +135,7 @@ static void bgWritePid(const char *path, int pid) {
 static void bgWriteProgress(const char *path, int pct, const char *activity) {
   if (pct < 0) pct = 0;
   if (pct > 100) pct = 100;
-  char tmp[MAX_PATH + 32];
+  char tmp[SATRIA_MAX_PATH + 32];
   snprintf(tmp, sizeof(tmp), "%s.%ld.tmp", path, (long)procSelfPid());
   FILE *f = fopen(tmp, "w");
   if (!f) return;
@@ -164,7 +164,7 @@ void bgNoteArgv(int argc, const char *argv[]) {
      direktori Buildfile. Nama polos (PATH) dibiarkan apa adanya. */
   if (n > 0 && argv[0] && (strchr(argv[0], '/') || strchr(argv[0], '\\')) &&
       argv[0][0] != '/' && argv[0][0] != '\\' && argv[0][1] != ':') {
-    char cwd[MAX_PATH];
+    char cwd[SATRIA_MAX_PATH];
     if (fsGetCwd(cwd, sizeof(cwd))) {
       snprintf(g_abs0, sizeof(g_abs0), "%s/%s", cwd, argv[0]);
       pathNormalizeSlash(g_abs0);
@@ -291,23 +291,42 @@ static bool bgRunOngoing(BgMode mode) {
   return procAlive(pid);
 }
 
-/* Stream isi log dari `offset`; file ditimpa (size < offset) -> mulai dari 0.
-   Return offset baru. */
+/* Seek/tell 64-bit portabel. `long` hanya 32-bit di Windows, sehingga fseek
+   biasa memicu C4244 dan tidak bisa menjangkau log > 2 GiB. */
+static int bgSeek(FILE *f, long long off, int whence) {
+#if defined(_WIN32)
+  return _fseeki64(f, off, whence);
+#else
+  return fseeko(f, (off_t)off, whence);
+#endif
+}
+
+static long long bgTell(FILE *f) {
+#if defined(_WIN32)
+  return _ftelli64(f);
+#else
+  return (long long)ftello(f);
+#endif
+}
+
+/*
+ * Stream isi log dari `offset`; file ditimpa (size < offset) -> mulai dari 0.
+ * Return offset baru. */
 static long long bgStreamFrom(const char *path, long long offset) {
   FILE *f = fopen(path, "rb");
   if (!f) return offset;
-  if (fseek(f, 0, SEEK_END) != 0) {
+  if (bgSeek(f, 0, SEEK_END) != 0) {
     fclose(f);
     return offset;
   }
-  long long size = ftell(f);
+  long long size = bgTell(f);
   if (size < 0) {
     fclose(f);
     return offset;
   }
   if (size < offset) offset = 0;
   if (offset < size) {
-    fseek(f, offset, SEEK_SET);
+    bgSeek(f, offset, SEEK_SET);
     char buf[4096];
     size_t n;
     while ((n = fread(buf, 1, sizeof(buf), f)) > 0) {
@@ -328,11 +347,11 @@ static long long bgStreamFrom(const char *path, long long offset) {
 static void bgPrintSummary(const char *path) {
   FILE *f = fopen(path, "rb");
   if (!f) return;
-  if (fseek(f, 0, SEEK_END) != 0) {
+  if (bgSeek(f, 0, SEEK_END) != 0) {
     fclose(f);
     return;
   }
-  long long size = ftell(f);
+  long long size = bgTell(f);
   if (size < 0) {
     fclose(f);
     return;
@@ -343,7 +362,7 @@ static void bgPrintSummary(const char *path) {
     fclose(f);
     return;
   }
-  fseek(f, size - cap, SEEK_SET);
+  bgSeek(f, size - cap, SEEK_SET);
   size_t got = fread(buf, 1, (size_t)cap, f);
   fclose(f);
   buf[got] = '\0';

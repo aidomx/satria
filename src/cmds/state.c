@@ -138,7 +138,7 @@ static void srcLoad(void) {
   if (!fsGetCwd(srcCwd, sizeof(srcCwd))) return;
   FILE *fp = fopen(".satria/sources.cache", "r");
   if (!fp) return;
-  char line[MAX_PATH * 6];
+  char line[SATRIA_MAX_PATH * 6];
   if (fgets(line, sizeof(line), fp)) {
     char magic[32], cwd[WS_PATH_LEN];
     if (sscanf(line, "%31s %" WS_SCAN "s", magic, cwd) != 2 || strcmp(magic, "SATRIASRC2") != 0 ||

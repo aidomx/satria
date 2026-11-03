@@ -112,7 +112,7 @@ static int snapFind(const DepCache *dc, const char *path) {
 /* Kunci entri edges: berprefix agar tidak tabrakan dengan entri snapshot
    milik source yang sama — (proj, file) dalam cache_store unik. */
 static uint64_t depsEdgeAddr(const char *src) {
-  char buf[MAX_PATH + 16];
+  char buf[SATRIA_MAX_PATH + 16];
   snprintf(buf, sizeof(buf), DEPS_EDGE_PREFIX "%s", src);
   return csHash(buf);
 }
@@ -156,8 +156,8 @@ static bool depSnapVisit(const CsEntry *e, CsOp op, void *ctxp) {
   const char *rest = e->payload + preLen;
   const char *sep = strchr(rest, '\x01');
   size_t sl = sep ? (size_t)(sep - rest) : strlen(rest);
-  if (sl == 0 || sl >= MAX_PATH) return true;
-  char src[MAX_PATH];
+  if (sl == 0 || sl >= SATRIA_MAX_PATH) return true;
+  char src[SATRIA_MAX_PATH];
   memcpy(src, rest, sl);
   src[sl] = '\0';
 
@@ -368,7 +368,7 @@ static void subtreeRecord(DepCache *dc, int idx) {
 
 bool depsContentUpToDate(DepCache *dc, const char *src) {
   if (!dc || !src) return false;
-  char path[MAX_PATH];
+  char path[SATRIA_MAX_PATH];
   snprintf(path, sizeof(path), "%s", src);
   depNormalizePath(path);
 
@@ -392,7 +392,7 @@ bool depsSnapshotIncomplete(const DepCache *dc) {
 
 void depsRecordUpdate(DepCache *dc, const char *src) {
   if (!dc || !src) return;
-  char path[MAX_PATH];
+  char path[SATRIA_MAX_PATH];
   snprintf(path, sizeof(path), "%s", src);
   depNormalizePath(path);
 
@@ -505,7 +505,7 @@ int64_t depsNewestHeaderMTime(DepCache *dc, const char *src) {
 
 int64_t depsNewestHeaderMTimeAt(DepCache *dc, const char *src, int64_t srcMTimeNs) {
   if (!dc || !src) return 0;
-  char path[MAX_PATH];
+  char path[SATRIA_MAX_PATH];
   snprintf(path, sizeof(path), "%s", src);
   depNormalizePath(path);
   int root = depNodeFind(dc, path);
@@ -574,7 +574,7 @@ void depsClosureVisitMany(DepCache *dc, const char *const *srcs, int count,
   dc->gen++;
   for (int i = 0; i < count; i++) {
     if (!srcs[i]) continue;
-    char path[MAX_PATH];
+    char path[SATRIA_MAX_PATH];
     snprintf(path, sizeof(path), "%s", srcs[i]);
     depNormalizePath(path);
     int root = depNodeFind(dc, path);
@@ -584,7 +584,7 @@ void depsClosureVisitMany(DepCache *dc, const char *const *srcs, int count,
 
 void depsClosureVisit(DepCache *dc, const char *src, DepVisitFn visit, void *ctx) {
   if (!dc || !src || !visit) return;
-  char path[MAX_PATH];
+  char path[SATRIA_MAX_PATH];
   snprintf(path, sizeof(path), "%s", src);
   depNormalizePath(path);
   int root = depNodeFind(dc, path);

@@ -77,7 +77,7 @@ static void wsPruneOrphanSources(const Config *c, const List *srcs) {
   if (!keep) return; /* alokasi gagal: jangan hapus apa pun (jalur aman) */
   int kn = 0;
   for (int i = 0; i < srcs->count; i++) {
-    char obj[MAX_PATH * 2];
+    char obj[SATRIA_MAX_PATH * 2];
     if (!objectPathFor(c, srcs->items[i], obj, sizeof(obj))) continue;
     keep[kn] = strdup(obj);
     if (keep[kn]) kn++;
@@ -136,7 +136,7 @@ static void wsPruneOrphanSources(const Config *c, const List *srcs) {
      (link = 0, sources = 0) agar binary tetap di-link ulang. */
 static void buildSavePartial(DepCache *deps, Config *c, const List *pending, const bool *ok,
                              const CmdsBuildFingerprint *fp) {
-  char obj[MAX_PATH * 2];
+  char obj[SATRIA_MAX_PATH * 2];
   for (int i = 0; i < pending->count; i++) {
     const char *src = pending->items[i];
     if (!objectPathFor(c, src, obj, sizeof(obj))) continue;
@@ -341,7 +341,7 @@ int cmdsBuildPassRun(int jobs, Config c, const char *buildfilePath, bool libOnly
      versi yang benar; perubahan memaksa kompilasi ulang total. embedded.h
      sudah diterbitkan di fase parse & generate (embHeaderChanged dihitung
      di sana) — jalurnya tetap memaksa recompile penuh di blok di bawah. */
-  char obj[MAX_PATH];
+  char obj[SATRIA_MAX_PATH];
   bool verHeaderChanged = false;
   if (!cmdsEmitVersionHeader(&c, &verHeaderChanged)) {
     statPlanFree(&plan);
@@ -549,7 +549,7 @@ int cmdsBuildPassRun(int jobs, Config c, const char *buildfilePath, bool libOnly
   if (compiled > 0 && pendingObjHashes.count == pending.count) {
     objectsChanged = false;
     for (int i = 0; i < pending.count; i++) {
-      char objPath[MAX_PATH];
+      char objPath[SATRIA_MAX_PATH];
       if (!objectPathFor(&c, pending.items[i], objPath, sizeof(objPath))) {
         objectsChanged = true;
         break;

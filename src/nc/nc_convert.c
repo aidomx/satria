@@ -21,7 +21,7 @@ static void ncCommonRoot(const NcList *srcs, char *out, size_t n) {
     snprintf(out, n, "src");
     return;
   }
-  char root[MAX_PATH];
+  char root[SATRIA_MAX_PATH];
   snprintf(root, sizeof(root), "%s", srcs->items[0]);
   char *slash = strrchr(root, '/');
   if (!slash) {
@@ -197,7 +197,7 @@ static bool ncLinkInHas(NcFile *f, const char *path) {
 }
 
 bool ninjaToBuildfile(const char *ninjaPath, const char *outPath, char *err, size_t errCap) {
-  char ninjaDir[MAX_PATH];
+  char ninjaDir[SATRIA_MAX_PATH];
   snprintf(ninjaDir, sizeof(ninjaDir), "%s", ninjaPath);
   char *slash = strrchr(ninjaDir, '/');
   if (slash)
@@ -217,7 +217,7 @@ bool ninjaToBuildfile(const char *ninjaPath, const char *outPath, char *err, siz
   NcList allIncs = {0};
   NcList libraries = {0};
   NcList embFiles = {0}; /* path arsip & object milik chain embedded */
-  char std[MAX_PATH * 4] = {0};
+  char std[SATRIA_MAX_PATH * 4] = {0};
   char binName[128] = {0};
   NcLibTarget lib = {0};
   int converted = 0;
@@ -279,7 +279,7 @@ bool ninjaToBuildfile(const char *ninjaPath, const char *outPath, char *err, siz
       if (!dup) incsOk = false;
       char *cur = dup, *tok;
       while (incsOk && (tok = ncNextTok(&cur)) != NULL) {
-        char fixed[MAX_PATH * 2];
+        char fixed[SATRIA_MAX_PATH * 2];
         ncFixIncludeTok(tok, ninjaDir, true, fixed, sizeof(fixed)); /* sudah pre-fix */
         if (incsLen && !ncAppendText(&incsFixed, &incsLen, &incsCap, " "))
           incsOk = false;
@@ -363,7 +363,7 @@ bool ninjaToBuildfile(const char *ninjaPath, const char *outPath, char *err, siz
     return false;
   }
 
-  char root[MAX_PATH];
+  char root[SATRIA_MAX_PATH];
   ncCommonRoot(&srcs, root, sizeof(root));
 
   fprintf(out, "use alias\n\n");
