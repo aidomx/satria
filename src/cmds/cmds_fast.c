@@ -309,8 +309,19 @@ static uint64_t fastProjStamp(const char *bf, const List *srcs) {
   return h;
 }
 
+/* TEMP (O9): jejak alasan fast-state batal disimpan. */
+#define SAVE_BAIL(msg)                          \
+  do {                                          \
+    if (snapDbg())                              \
+      fprintf(stderr, "satria: save: %s\n", (msg)); \
+    return;                                     \
+  } while (0)
+
 void cmdsFastStateSave(const Config *c, const List *srcs, const char *target,
                        const char *buildfilePath, bool libOnly) {
+  if (snapDbg())
+    fprintf(stderr, "satria: save: masuk libOnly=%d root='%s' target='%s'\n", (int)libOnly,
+            c->root, target ? target : "");
   /* Fast path hanya aman bila root build sama dengan cwd. Untuk root khusus,
      gunakan jalur normal sampai tersedia normalisasi path absolut. */
   if (strcmp(c->root, ".") != 0) {
@@ -318,10 +329,10 @@ void cmdsFastStateSave(const Config *c, const List *srcs, const char *target,
     if (fsGetCwd(key, sizeof(key))) {
       fastSnapDelete();
     }
-    return;
+    SAVE_BAIL("root build bukan '.'");
   }
   char cwd[MAX_PATH];
-  if (!fsGetCwd(cwd, sizeof(cwd))) return;
+  if (!fsGetCwd(cwd, sizeof(cwd))) SAVE_BAIL("fsGetCwd gagal");
   const char *bf = buildfilePath && *buildfilePath ? buildfilePath : "Buildfile";
   int64_t bfm = fsMTimeNs(bf);
   long long bfs = fsFileSize(bf);
@@ -338,11 +349,12 @@ void cmdsFastStateSave(const Config *c, const List *srcs, const char *target,
   if (fastTargetRecorded(tgt)) {
     tm = fsMTimeNs(tgt);
     ts = fsFileSize(tgt);
-    if (tm < 0 || ts < 0) return;
+    if (tm < 0 || ts < 0) SAVE_BAIL("stamp target gagal");
   }
-  if (bfm < 0 || bfs < 0) return;
+  if (bfm < 0 || bfs < 0) SAVE_BAIL("stamp Buildfile gagal");
   /* Format cache is whitespace-delimited; disable it for paths with spaces. */
-  if (strpbrk(cwd, " \t\r\n") || strpbrk(bf, " \t\r\n") || strpbrk(tgt, " \t\r\n")) return;
+  if (strpbrk(cwd, " \t\r\n") || strpbrk(bf, " \t\r\n") || strpbrk(tgt, " \t\r\n"))
+    SAVE_BAIL("path mengandung spasi");
 
   /* Library: status up-to-date saat build sukses selesai — ditampilkan
      lagi pada no-op berikutnya (dulu informasi ini hilang di fast path). */
@@ -354,14 +366,14 @@ void cmdsFastStateSave(const Config *c, const List *srcs, const char *target,
       cmdsLibStaticPath(c, staticLib, sizeof(staticLib));
       staticUp = cmdsLibVariantUpToDate(c, true, srcs);
       long long s1 = fsFileSize(staticLib);
-      if (s1 < 0) return; /* lib diwajibkan tapi belum ada — jangan simpan */
+      if (s1 < 0) SAVE_BAIL("lib static belum ada"); /* lib diwajibkan tapi belum ada */
       staticSz = s1;
     }
     if (c->libShared) {
       cmdsLibSharedPath(c, sharedLib, sizeof(sharedLib));
       sharedUp = cmdsLibVariantUpToDate(c, false, srcs);
       long long s2 = fsFileSize(sharedLib);
-      if (s2 < 0) return;
+      if (s2 < 0) SAVE_BAIL("lib shared belum ada");
       sharedSz = s2;
     }
   }
@@ -407,7 +419,7 @@ void cmdsFastStateSave(const Config *c, const List *srcs, const char *target,
       /* Gagal membentuk graph: jangan simpan fast-state yang bisa melewatkan
          header; kembali ke build normal pada run berikutnya. */
       listFree(&paths);
-      return;
+      SAVE_BAIL("depsNew gagal");
     }
   }
   /* Include file inputs that are not necessarily inside source/header roots. */
@@ -464,7 +476,7 @@ void cmdsFastStateSave(const Config *c, const List *srcs, const char *target,
   FastStamp *stamps = calloc((size_t)paths.count, sizeof(FastStamp));
   if (paths.count && !stamps) {
     listFree(&paths);
-    return;
+    SAVE_BAIL("calloc stamps gagal");
   }
   int count = 0;
   bool safePaths = true;
@@ -493,7 +505,7 @@ void cmdsFastStateSave(const Config *c, const List *srcs, const char *target,
   if (!safePaths) {
     free(stamps);
     listFree(&paths);
-    return;
+    SAVE_BAIL("path tidak aman (spasi/terlalu panjang)");
   }
   listFree(&paths);
   /* Fase library: simpan ke caches/lib.cache (design/startup.md §3) —
@@ -561,7 +573,12 @@ void cmdsFastStateSave(const Config *c, const List *srcs, const char *target,
     if (ok) used += (size_t)written;
   }
   free(stamps);
-  if (ok && fastSnapPut(buf, used) && optsRouterRecord(c, libOnly)) {
+  if (snapDbg())
+    fprintf(stderr, "satria: save: snapshot %s (%zu byte, %d entri)\n",
+            ok ? "diserialisasi" : "GAGAL serialize", used, count);
+  bool putOk = ok && fastSnapPut(buf, used);
+  if (snapDbg()) fprintf(stderr, "satria: save: fastSnapPut=%d\n", (int)putOk);
+  if (putOk && optsRouterRecord(c, libOnly)) {
     /* Grup P (§4) seragam — lihat catatan di cabang lib di atas. */
     uint64_t content = fastProjStamp(bf, srcs);
     long long t = csNowNs();
