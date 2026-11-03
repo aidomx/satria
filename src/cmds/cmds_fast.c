@@ -240,15 +240,44 @@ static void fastSnapDelete(void) {
   csClose(st);
 }
 
+/* TEMP (O9): diagnostik snapshot di bawah SATRIA_GATE_DEBUG/CI. */
+static bool snapDbg(void) {
+  static int on = -1;
+  if (on < 0) on = (getenv("SATRIA_GATE_DEBUG") || getenv("CI")) ? 1 : 0;
+  return on == 1;
+}
+
 bool fastStateLoad(FastState *s, bool libOnly) {
   /* Fase library kini dari caches/lib.cache (design/startup.md §3). */
   if (libOnly) return fastStateLoadLib(s);
   char cwd[MAX_PATH];
-  if (!fsGetCwd(cwd, sizeof(cwd))) return false;
+  if (!fsGetCwd(cwd, sizeof(cwd))) {
+    if (snapDbg()) fprintf(stderr, "satria: snap: fsGetCwd gagal\n");
+    return false;
+  }
   char *buf = NULL;
   size_t len = 0;
-  if (!fastSnapGet(&buf, &len)) return false;
+  if (!fastSnapGet(&buf, &len)) {
+    if (snapDbg()) {
+      fprintf(stderr,
+              "satria: snap: entri build.state tidak ada di %s (file=%d, %lld byte, cwd=%s)\n",
+              BUILD_FP_CACHE, (int)fsFileExists(BUILD_FP_CACHE),
+              fsFileSize(BUILD_FP_CACHE), cwd);
+      CsStore *st = csOpen(BUILD_FP_CACHE);
+      if (st) {
+        fprintf(stderr, "satria: snap: entri proyek ini=%zu\n", csCountProj(st, cmdsCacheProjAddr()));
+        csClose(st);
+      }
+    }
+    return false;
+  }
   bool ok = fastStateScan(buf, len, s);
+  if (!ok && snapDbg()) {
+    size_t show = len < 160 ? len : 160;
+    fprintf(stderr, "satria: snap: parse gagal (len=%zu) kepala: ", len);
+    fwrite(buf, 1, show, stderr);
+    fprintf(stderr, "\n");
+  }
   free(buf);
   return ok;
 }
