@@ -22,6 +22,9 @@ void artifactCacheAdd(const char *path);
    Daftar kosong: file lama dipertahankan; file belum ada -> dibuat (kosong)
    supaya cold build selalu menghasilkan .satria/artifact.cache. */
 bool artifactCacheSave(void);
+/* Varian merge (build selektif): entri run ini menimpa kunci yang sama,
+   entri proyek di LUAR closure dipertahankan — tanpa pruning. */
+bool artifactCacheSaveMerge(void);
 
 /* Validasi seluruh entri: stat (mtime ns + ukuran), fallback hash isi bila
    stamp beda (sentuh -> PATCH time/size, tanpa batal). false bila file

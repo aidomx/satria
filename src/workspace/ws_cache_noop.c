@@ -36,6 +36,28 @@ void wsCacheMapFree(WsCacheMap *m) {
   m->recs = NULL;
   m->n = m->cap = 0;
 }
+
+/* ---- Cakupan fingerprint (fp.cover) ---- */
+WsCoverage wsCacheCoverage(void) {
+  struct stat sb;
+  if (stat(WS_CACHE_FP, &sb) != 0) return WS_COV_NONE;
+  FILE *f = fopen(WS_FP_COVER, "r");
+  if (!f) return WS_COV_PARTIAL;
+  char tag[8] = {0};
+  (void)fread(tag, 1, sizeof(tag) - 1, f);
+  fclose(f);
+  return strncmp(tag, "full", 4) == 0 ? WS_COV_FULL : WS_COV_PARTIAL;
+}
+void wsCacheCoverWrite(bool full) {
+  if (!full) {
+    remove(WS_FP_COVER);
+    return;
+  }
+  FILE *f = fopen(WS_FP_COVER, "w");
+  if (!f) return; /* penanda adalah optimasi — gagal tulis = bayar walk */
+  fputs("full\n", f);
+  fclose(f);
+}
 static int wsCacheRecCmp(const void *a, const void *b) {
   uint64_t x = ((const WsCachePath *)a)->key, y = ((const WsCachePath *)b)->key;
   return x < y ? -1 : x > y;
@@ -109,7 +131,13 @@ static bool wsParseP(const char *rec, WsCachePath *r) {
 }
 
 /* Muat tabel path; false bila tidak ada/rusak. */
+/* Penanda format fingerprint: versi 2 memuat record 'O' untuk object dan .d.
+   Cache tanpa penanda (format lama) tidak dipercaya: jalur penuh menyimpannya
+   ulang dalam format baru, sehingga object/.d yang hilang tidak lolos noop. */
+#define WS_FP_FORMAT_MARK ".satria/caches/fp.format"
+
 bool wsCacheLoadMap(WsCacheMap *m) {
+  if (!fsFileExists(WS_FP_FORMAT_MARK)) return false;
   FILE *f = fopen(WS_CACHE_SOURCES, "r");
   if (!f) return false;
   char line[WS_PATH_LEN + 160]; /* format baru: +metadata (~76 kolom) */
@@ -483,7 +511,7 @@ static bool wsCacheVisit(const CsEntry *e, CsOp op, void *ctx) {
   if (!valid && wsCacheTrace()) fprintf(stderr, "satria cache: content changed %s\n", r->path);
   return c->ok = valid;
 }
-bool wsCacheNoopValid(const WsModel *m) {
+bool wsCacheNoopValid(const WsModel *m, const unsigned char *need) {
   if (!wsRouterValidate()) return false; /* router opts.cache dibaca lebih dulu */
   /* Kunci memo stat diset di sini (root workspace — path relatif gerbang) agar
      catatan yang gerbang tulis di bawah bisa dipakai ulang oleh save-walk di
@@ -498,6 +526,10 @@ bool wsCacheNoopValid(const WsModel *m) {
   }
   struct stat fsb;
   if (stat(WS_CACHE_FP, &fsb) != 0) return false;
+  /* P-fast HANYA bila cakupan penuh: fp parsial (selektif pertama di
+     workspace dingin) tidak membuktikan seluruh workspace — jalur penuh
+     menilai, dan stamp grup di bawah menolak proyek yang belum tercatat. */
+  bool coverFull = wsCacheCoverage() == WS_COV_FULL;
   struct stat ssb;
   if (stat(WS_CACHE_SOURCES, &ssb) != 0) return false;
   profMark("gate-artifact"); /* profil */
@@ -509,7 +541,9 @@ bool wsCacheNoopValid(const WsModel *m) {
   profMark("gate-map"); /* profil */
   /* Fast path (§4): semua baris P + stat cocok -> selesai tanpa membuka
      fingerprint.cache. Menolak di sini bukan vonis — jalur penuh menilai. */
-  int pfast = wsCachePFast(&map, wsCacheStampNs(&ssb));
+  int pfast = coverFull ? wsCachePFast(&map, wsCacheStampNs(&ssb)) : -1;
+  if (!coverFull && wsCacheTrace())
+    fprintf(stderr, "satria cache: coverage partial - P-fast dilewati\n");
   profMark("gate-pfast"); /* profil */
   if (pfast == -2) {
     /* Miss pasti dari P-fast: jangan bayar walk fingerprint.cache penuh yang
@@ -539,7 +573,21 @@ bool wsCacheNoopValid(const WsModel *m) {
   for (int i = 0; m && i < m->projectCount; i++) {
     uint64_t proj = csHash(m->projects[i].name), c0 = 0;
     long long t0 = 0, sz0 = 0;
-    if (!csProjMetaGet(st, proj, &c0, &t0, &sz0)) continue;
+    if (!csProjMetaGet(st, proj, &c0, &t0, &sz0)) {
+      /* Tanpa stempel grup: proyek yang BELUM PERNAH tercatat membuat no-op
+         palsu (walk hanya menilai entri yang ada) — proyek wajib (penuh:
+         semua; selektif: closure) harus punya stempel, selain itu kompatibel
+         mundur (cache versi lama tanpa stempel tetap dinilai jalur penuh). */
+      if (!need || need[i]) {
+        if (wsCacheTrace())
+          fprintf(stderr, "satria cache: coverage missing %s\n",
+                  m->projects[i].name);
+        csClose(st);
+        wsCacheMapFree(&map);
+        return false;
+      }
+      continue;
+    }
     if (c0 != wsProjStamp(m, i) || sz0 != (long long)csCountProj(st, proj)) {
       if (wsCacheTrace())
         fprintf(stderr, "satria cache: project stamp changed %s\n", m->projects[i].name);
@@ -577,6 +625,10 @@ bool wsCacheNoopValid(const WsModel *m) {
     }
     free(t.tab);
   }
+  /* Walk penuh yang sah = bukti cakupan penuh (proyek wajib semua punya
+     stempel — kegagalan di atas sudah menolak): tutup fp.cover agar run
+     berikutnya kembali lewat P-fast walau fp lahir dari build selektif. */
+  if (valid && !need && !coverFull) wsCacheCoverWrite(true);
   if (wsCacheTrace()) fprintf(stderr, "satria cache: %s (checked=%zu)\n", valid ? "hit" : "miss", c.seen);
   csClose(st);
   wsCacheMapFree(&map);

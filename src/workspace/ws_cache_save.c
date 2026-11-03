@@ -24,6 +24,10 @@ static bool wsCacheAddProjectDeps(FILE *pf, CsStore *st, uint64_t proj, const ch
 static CsStore *g_prevFp = NULL;
 static long long g_prevFpMtime = 0;
 static void wsCacheSaveBody(const WsModel *m, const char *wsName);
+/* Mode selektif (merge per proyek — design/build_report.md O1): indeks proyek
+   yang dibangun run ini. NULL/0 = simpanan penuh (perilaku lama). */
+static const int *g_selIdx = NULL;
+static int g_selN = 0;
 
 /* Audit save-walk (SATRIA_PROFILE): akumulasi ms baca .d / stat header /
    hash header agar komposisi save-walk terpetakan tanpa 43+ penanda.
@@ -142,11 +146,7 @@ static bool wsCacheAdd(FILE *pf, CsStore *st, uint64_t proj, const char *path, c
   /* Outputs belong to the workspace as a whole: project-specific discovery
      and the final bin/lib scan may encounter the same physical output.
      Store each output path once, while retaining all alias-only outputs. */
-  if (type == 'O') {
-    proj = csHash("workspace");
-    CsEntry existing;
-    if (csGet(st, proj, csHash(path), &existing)) return true;
-  }
+  if (type == 'O') proj = csHash("workspace");
   struct stat sb;
   long long mtimeNs = 0, fsize = 0;
   if (type == 'O') {
@@ -177,6 +177,16 @@ static bool wsCacheAdd(FILE *pf, CsStore *st, uint64_t proj, const char *path, c
       e.content = wsStartupHash(path);
     }
     if (!e.content) return false;
+  }
+  if (type == 'O') {
+    CsEntry existing;
+    /* Kunci sudah tercatat dengan nilai identik: duplikat dalam run yang sama
+       ATAU entri lama build selektif yang tidak berubah — lewati tanpa baris
+       baru (baris P lamanya tetap berlaku lewat aturan merge). Nilai BERBEDA
+       (output ditulis ulang run ini) -> timpa: catatan = kenyataan disk. */
+    if (csGet(st, proj, e.file, &existing) && existing.content == e.content &&
+        existing.time == e.time && existing.size == e.size)
+      return true;
   }
   fprintf(pf, "%016llx %c %016llx %lld %lld %s\n", (unsigned long long)e.file, type,
           (unsigned long long)e.content, e.time, e.size, path);
@@ -294,6 +304,18 @@ static bool wsCacheAddObjectTree(FILE *pf, CsStore *st, uint64_t proj,
     bool dstat = stat(dfile, &dst) == 0;
     g_aDSCheckMs += portMonoMs() - td0;
     g_aDSCheck++;
+    /* Object dan .d-nya sendiri dicatat sebagai output ('O'). Noop memvalidasi
+       stat-nya: object/.d yang hilang (build/ dihapus sebagian) membuat catatan
+       tidak valid -> jalur penuh memulihkannya. Tanpa ini noop melaporkan
+       'Nothing to build' padahal build/ tidak lengkap. */
+    if (!wsCacheAdd(pf, st, proj, o, 'O')) {
+      ok = false;
+      break;
+    }
+    if (dstat && !wsCacheAdd(pf, st, proj, dfile, 'O')) {
+      ok = false;
+      break;
+    }
     if (!dstat) {
       dr = 0;
     } else if (wsCacheStampNs(&dst) < g_prevFpMtime) {
@@ -384,8 +406,121 @@ static void wsOptsMetaSave(const WsProjStamp *st, int n) {
   csClose(o);
 }
 
+/* ==== Utilitas merge per proyek (mode selektif, O1) ==== */
+typedef struct {
+  uint64_t *v;
+  int n, cap;
+} WsU64Set;
+static int wsU64Cmp(const void *a, const void *b) {
+  uint64_t x = *(const uint64_t *)a, y = *(const uint64_t *)b;
+  return x < y ? -1 : x > y;
+}
+static bool wsU64Add(WsU64Set *s, uint64_t x) {
+  if (s->n == s->cap) {
+    int nc = s->cap ? s->cap * 2 : 64;
+    uint64_t *nv = (uint64_t *)realloc(s->v, (size_t)nc * sizeof(uint64_t));
+    if (!nv) return false;
+    s->v = nv;
+    s->cap = nc;
+  }
+  s->v[s->n++] = x;
+  return true;
+}
+static void wsU64Sort(WsU64Set *s) {
+  if (s->n > 1) qsort(s->v, (size_t)s->n, sizeof(uint64_t), wsU64Cmp);
+}
+static bool wsU64Has(const WsU64Set *s, uint64_t x) {
+  return s->n > 0 && bsearch(&x, s->v, (size_t)s->n, sizeof(uint64_t), wsU64Cmp) != NULL;
+}
+static void wsU64Free(WsU64Set *s) {
+  free(s->v);
+  s->v = NULL;
+  s->n = s->cap = 0;
+}
+/* Kunci 16 heksa di awal baris — format peta P maupun baris map mentah. */
+static bool wsCacheKey16(const char *s, uint64_t *out) {
+  char *end = NULL;
+  errno = 0;
+  unsigned long long v = strtoull(s, &end, 16);
+  if (errno || end != s + 16) return false;
+  *out = (uint64_t)v;
+  return true;
+}
+typedef struct {
+  WsU64Set *s;
+} WsKeyCtx;
+static bool wsCacheKeyStore(const CsEntry *e, CsOp op, void *ctx) {
+  (void)op;
+  return wsU64Add(((WsKeyCtx *)ctx)->s, e->file);
+}
+/* Entri simpanan lama proyek LUAR closure yang kuncinya juga ikut ditulis
+   ulang run ini (header bersama) — kumpulkan untuk aturan merge di bawah. */
+typedef struct {
+  WsU64Set *fresh, *shared;
+  const uint64_t *cloH;
+  int cloHN;
+  uint64_t wsProj;
+} WsSharedCtx;
+static bool wsCacheKeyShared(const CsEntry *e, CsOp op, void *ctx) {
+  (void)op;
+  WsSharedCtx *c = (WsSharedCtx *)ctx;
+  if (e->proj == c->wsProj) return true;
+  if (c->cloHN && bsearch(&e->proj, c->cloH, (size_t)c->cloHN, sizeof(uint64_t), wsU64Cmp))
+    return true;
+  if (wsU64Has(c->fresh, e->file)) return wsU64Add(c->shared, e->file);
+  return true;
+}
+/* Kunci pada file peta sementara (baris hasil write run ini = "kunci segar"). */
+static bool wsCacheKeyCollectMap(const char *path, WsU64Set *out) {
+  FILE *f = fopen(path, "r");
+  if (!f) return false;
+  char line[WS_PATH_LEN + 160];
+  bool ok = true;
+  while (ok && fgets(line, sizeof(line), f)) {
+    uint64_t k;
+    if (wsCacheKey16(line, &k)) ok = wsU64Add(out, k);
+  }
+  fclose(f);
+  if (ok) wsU64Sort(out);
+  return ok;
+}
+/* Entri grup closure yang dibuang sebelum walk segar. */
+typedef struct {
+  uint64_t proj, file;
+} WsDelKey;
+typedef struct {
+  WsDelKey *v;
+  int n, cap;
+  const uint64_t *cloH;
+  int cloHN;
+} WsDelCtx;
+static bool wsCacheDelCollect(const CsEntry *e, CsOp op, void *ctx) {
+  (void)op;
+  WsDelCtx *c = (WsDelCtx *)ctx;
+  if (!c->cloHN ||
+      !bsearch(&e->proj, c->cloH, (size_t)c->cloHN, sizeof(uint64_t), wsU64Cmp))
+    return true;
+  if (c->n == c->cap) {
+    int nc = c->cap ? c->cap * 2 : 64;
+    WsDelKey *nv = (WsDelKey *)realloc(c->v, (size_t)nc * sizeof(WsDelKey));
+    if (!nv) return false;
+    c->v = nv;
+    c->cap = nc;
+  }
+  c->v[c->n].proj = e->proj;
+  c->v[c->n].file = e->file;
+  c->n++;
+  return true;
+}
+
 /* Simpan cache sesudah build sukses. Gagal -> kedua file dibuang (tidak ada cache palsu). */
 void wsCacheSave(const WsModel *m, const char *wsName) {
+  wsCacheSaveSel(m, wsName, NULL, 0);
+}
+
+/* Varian selektif (O1 — merge per proyek): lihat deklarasi di ws_internal.h. */
+void wsCacheSaveSel(const WsModel *m, const char *wsName, const int *onlyIdx,
+                    int onlyN) {
   struct stat pfs;
   /* Kunci memo stat: sama dengan gerbang no-op (root workspace) supaya stat
      input yang gerbang catat di awal run tidak dibayar ulang di sini
@@ -403,7 +538,11 @@ void wsCacheSave(const WsModel *m, const char *wsName) {
     g_prevFp = csOpen(WS_CACHE_FP);
   }
   wsPrevHLoad(); /* daftar header save sebelumnya (disalin di wsCacheSaveBody) */
+  g_selIdx = (onlyIdx && onlyN > 0) ? onlyIdx : NULL;
+  g_selN = g_selIdx ? onlyN : 0;
   wsCacheSaveBody(m, wsName);
+  g_selIdx = NULL;
+  g_selN = 0;
   if (g_prevFp) csClose(g_prevFp);
   g_prevFp = NULL;
   g_prevFpMtime = 0;
@@ -412,12 +551,21 @@ void wsCacheSave(const WsModel *m, const char *wsName) {
 
 static void wsCacheSaveBody(const WsModel *m, const char *wsName) {
   mkdirs(WS_CACHE_DIR);
-  remove(WS_CACHE_FP);
+  bool sel = g_selN > 0;
+  /* Build selektif TANPA simpanan sebelumnya (workspace belum pernah
+     dibangun penuh): merge per proyek mustahil — buat fingerprint BARU yang
+     hanya memuat entri closure (parsial) dan hapus fp.cover. Gerbang tetap
+     menolak run penuh sampai semua proyek model punya stempel grup
+     (wsCacheNoopValid: "coverage missing"); simpan penuh berikutnya menulis
+     fp.cover. Dengan begitu run penuh PERTAMA setelah build selektif menutup
+     cakupan (bila semua proyek sudah tercatat) bisa langsung HIT. */
+  if (sel && !g_prevFp) wsCacheCoverWrite(false);
+  if (!sel) remove(WS_CACHE_FP); /* mode selektif: muat simpanan lama (merge) */
   char tmpPaths[WS_PATH_LEN + 8];
   snprintf(tmpPaths, sizeof(tmpPaths), "%s.map.tmp", WS_CACHE_SOURCES);
   FILE *pf = fopen(tmpPaths, "w");
   if (!pf) return;
-  CsStore *st = csOpen(WS_CACHE_FP); /* sudah dihapus -> store kosong */
+  CsStore *st = csOpen(WS_CACHE_FP); /* penuh: sudah dihapus -> kosong; selektif: muat merge */
   if (!st) {
     fclose(pf);
     remove(tmpPaths);
@@ -425,7 +573,44 @@ static void wsCacheSaveBody(const WsModel *m, const char *wsName) {
   }
   bool ok = true;
   uint64_t wsProj = csHash("workspace");
-  ok = ok && wsCacheAdd(pf, st, wsProj, wsName, 'W');
+  uint64_t wKey = csHash(wsName);
+  /* Mode selektif (merge per proyek — O1): tandai closure, lalu buang entri
+     lamanya — walk segar di bawah menulis ulang sumber/header/direktori
+     proyek closure. Entri proyek lain dan grup workspace TIDAK disentuh;
+     output yang ikut ter-scan diperbarui lewat pembanding nilai di
+     wsCacheAdd. */
+  bool clo[WS_MAX_PROJECTS] = {0};
+  uint64_t cloH[WS_MAX_PROJECTS];
+  int cloHN = 0;
+  if (sel) {
+    for (int i = 0; i < g_selN; i++) {
+      int idx = g_selIdx[i];
+      if (idx >= 0 && idx < m->projectCount && !clo[idx]) {
+        clo[idx] = true;
+        cloH[cloHN++] = csHash(m->projects[idx].name);
+      }
+    }
+    qsort(cloH, (size_t)cloHN, sizeof(uint64_t), wsU64Cmp);
+    WsDelCtx del = {0};
+    del.cloH = cloH;
+    del.cloHN = cloHN;
+    bool walked = csForEach(st, wsCacheDelCollect, &del);
+    if (!walked) ok = false;
+    for (int i = 0; ok && i < del.n; i++)
+      if (!csDelete(st, del.v[i].proj, del.v[i].file)) ok = false;
+    free(del.v);
+  }
+  /* Cek keberadaan kunci W dengan variabel bernama (bukan compound literal):
+     literal C99 tidak didukung mode-C MSVC lama yang masih menjadi target
+     port (design O7). Isinya tidak dipakai — hanya keberadaan entri. */
+  CsEntry wsEnt;
+  if (sel && csGet(st, wsProj, wKey, &wsEnt)) {
+    /* Buildfile.ws TIDAK disentuh build selektif: stempel lama dipertahankan —
+       konfigurasi bisa berubah bagi proyek di luar closure, jangan mengklaim
+       valid. Baris P lamanya ikut bertahan lewat aturan merge di bawah. */
+  } else {
+    ok = ok && wsCacheAdd(pf, st, wsProj, wsName, 'W');
+  }
   /* Salin entri header lama (audit 30/10): stamp di-stat ulang dari disk
      sehingga perubahan header sejak save terakhir tetap terdeteksi, dan isi
      hanya di-hash ulang bila (time,size) berbeda — aturan yang sama dengan
@@ -433,12 +618,21 @@ static void wsCacheSaveBody(const WsModel *m, const char *wsName) {
      milik build mana pun); .d kotor yang masih merujuknya tetap dibaca dan
      memakai jalur konservatif lama (save batal) seperti biasa. */
   for (int i = 0; ok && i < g_prevHN; i++) {
+    /* Mode selektif: entri header proyek LUAR closure sudah ada di store
+       (dimuat dari simpanan) — tidak disalin ulang; stat header pun hanya
+       dibayar bila minimal satu proyek closure memilikinya. */
     long long hm = 0, hsz = 0;
-    if (!wsCacheInputStamp(g_prevH[i].path, &hm, &hsz)) continue;
+    bool statDone = false, statOk = false;
     for (int pi = 0; pi < m->projectCount; pi++) {
+      if (sel && !clo[pi]) continue;
       uint64_t proj = csHash(m->projects[pi].name);
       CsEntry prev;
       if (!g_prevFp || !csGet(g_prevFp, proj, g_prevH[i].file, &prev)) continue;
+      if (!statDone) {
+        statOk = wsCacheInputStamp(g_prevH[i].path, &hm, &hsz);
+        statDone = true;
+      }
+      if (!statOk) break; /* header hilang dari disk: lewati (perilaku lama) */
       /* (proj,file) sudah tersalin save ini -> jangan tulis baris kedua:
          baris P duplikat menggandakan stat di gate P-fast tiap run. */
       CsEntry taken;
@@ -465,6 +659,7 @@ static void wsCacheSaveBody(const WsModel *m, const char *wsName) {
   profMark("save-headers"); /* profil: salin entri H dari sources.cache lama */
   char dirPath[WS_PATH_LEN];
   for (int i = 0; ok && i < m->projectCount; i++) {
+    if (sel && !clo[i]) continue; /* luar closure: entri lama dipertahankan */
     const char *name = m->projects[i].name;
     uint64_t proj = csHash(name);
     List srcs = {0};
@@ -537,9 +732,13 @@ static void wsCacheSaveBody(const WsModel *m, const char *wsName) {
   long long saveNs = wsNowNs();
   if (ok) {
     for (int i = 0; i < m->projectCount; i++) {
+      if (sel && !clo[i]) continue; /* luar closure: stempel lama dipertahankan */
       uint64_t proj = csHash(m->projects[i].name);
       size_t cnt = csCountProj(st, proj);
-      if (cnt == 0) continue; /* grup kosong: P pun tidak ditulis */
+      /* Grup kosong (proyek tanpa entri) TETAP distamp (size 0): stempel =
+         penanda "pernah tercatat". Tanpa ini gerbang menolak run penuh
+         selamanya untuk proyek tanpa entri (gate mewajibkan stempel).
+         Baris P tetap tidak ditulis — tidak ada entri untuk dipetakan. */
       stamps[sn].proj = proj;
       stamps[sn].content = wsProjStamp(m, i);
       stamps[sn].time = saveNs;
@@ -562,24 +761,80 @@ static void wsCacheSaveBody(const WsModel *m, const char *wsName) {
   }
   if (fclose(pf) != 0) ok = false;
   if (ok) ok = csCommit(st);
+  /* Tanda format fingerprint v2 (lihat WS_FP_FORMAT_MARK di ws_cache_noop.c). */
+  if (ok) {
+    FILE *fm = fopen(".satria/caches/fp.format", "w");
+    if (fm) {
+      fputs("2\n", fm);
+      fclose(fm);
+    }
+    /* Cakupan penuh: simpan penuh mencatat SEMUA proyek model (stempel di
+       atas menulis termasuk grup kosong) -> tulis fp.cover. Simpan selektif
+       TIDAK menyentuh penanda: merge mempertahankan cakupan lama; fp parsial
+       baru sudah menghapusnya di awal wsCacheSaveBody. */
+    if (!sel) wsCacheCoverWrite(true);
+  }
   profMark("save-commit"); /* profil: tulis fingerprint.cache */
   /* Gabungkan peta P ke sources.cache tanpa mengubah format SATRIASRC1.
-     Tulis atomik: cache lama tidak boleh hilang jika penulisan gagal. */
+     Tulis atomik: cache lama tidak boleh hilang jika penulisan gagal.
+     Mode penuh: SEMUA baris P diganti peta segar.
+     Mode selektif (merge per proyek — O1): baris lama dipertahankan kecuali
+     kuncinya ditulis ulang run ini; kunci segar yang juga dimiliki proyek di
+     LUAR closure (header bersama) memakai baris LAMA — P-fast menolak lalu
+     jalur penuh menilai proyek luar closure terhadap isi header yang berubah,
+     sehingga no-op penuh tidak salah mengklaim valid setelah build selektif
+     menyentuh header bersama. */
   if (ok) {
-    FILE *src = fopen(WS_CACHE_SOURCES, "r");
-    FILE *map = fopen(tmpPaths, "r");
+    WsU64Set fresh = {0}, store = {0}, shared = {0}, kept = {0};
+    if (sel) {
+      ok = wsCacheKeyCollectMap(tmpPaths, &fresh);
+      if (ok) {
+        WsKeyCtx kc = {&store};
+        ok = csForEach(st, wsCacheKeyStore, &kc);
+        wsU64Sort(&store);
+      }
+      if (ok && g_prevFp) {
+        WsSharedCtx sc = {&fresh, &shared, cloH, cloHN, wsProj};
+        ok = csForEach(g_prevFp, wsCacheKeyShared, &sc);
+        wsU64Sort(&shared);
+      }
+    }
+    FILE *src = ok ? fopen(WS_CACHE_SOURCES, "r") : NULL;
+    FILE *map = ok ? fopen(tmpPaths, "r") : NULL;
     char combined[WS_PATH_LEN + 16];
     snprintf(combined, sizeof(combined), "%s.merge.tmp", WS_CACHE_SOURCES);
-    FILE *dst = (src && map) ? fopen(combined, "w") : NULL;
+    /* fp parsial baru boleh tanpa sources.cache lama (run pertama workspace):
+       hasilnya baris P segar saja — jalur full mode tetap mensyaratkan src. */
+    FILE *dst = (map && (src || sel)) ? fopen(combined, "w") : NULL;
     if (!dst) ok = false;
     if (ok) {
       char line[WS_PATH_LEN + 128];
-      while (fgets(line, sizeof(line), src)) {
-        if (line[0] == 'P' && line[1] == ' ') continue;
-        if (fputs(line, dst) == EOF) { ok = false; break; }
+      while (src && fgets(line, sizeof(line), src)) {
+        if (line[0] == 'P' && line[1] == ' ') {
+          if (!sel) continue; /* mode penuh: baris P datang dari peta segar */
+          uint64_t k;
+          if (wsCacheKey16(line + 2, &k)) {
+            if (!wsU64Has(&store, k)) continue;        /* entri tak ada: buang */
+            if (wsU64Has(&shared, k))
+              wsU64Add(&kept, k); /* header bersama: baris lama menang */
+            else if (wsU64Has(&fresh, k)) continue;    /* ditulis ulang run ini */
+          }
+        }
+        if (fputs(line, dst) == EOF) {
+          ok = false;
+          break;
+        }
       }
+      wsU64Sort(&kept);
       while (ok && fgets(line, sizeof(line), map)) {
-        if (fprintf(dst, "P %s", line) < 0) { ok = false; break; }
+        if (sel) {
+          uint64_t k;
+          if (wsCacheKey16(line, &k) && wsU64Has(&kept, k)) continue;
+        }
+        if (fprintf(dst, "P %s", line) < 0) {
+          ok = false;
+          break;
+        }
       }
     }
     if (src) fclose(src);
@@ -587,15 +842,28 @@ static void wsCacheSaveBody(const WsModel *m, const char *wsName) {
     if (dst && fclose(dst) != 0) ok = false;
     if (ok) ok = fsRenameReplace(combined, WS_CACHE_SOURCES);
     if (!ok) remove(combined);
+    wsU64Free(&fresh);
+    wsU64Free(&store);
+    wsU64Free(&shared);
+    wsU64Free(&kept);
   }
   profMark("save-merge"); /* profil: gabung baris P ke sources.cache */
   remove(tmpPaths);
   csClose(st);
   if (!ok) {
     remove(tmpPaths);
-    remove(WS_CACHE_FP);
-    /* Jangan hapus sources.cache: indeks discovery dipakai kedua mode. */
-    wsRouterDrop();
+    if (!sel || !g_prevFp) {
+      /* Penuh gagal — buang simpanan tak sah; selektif TANPA simpanan lama
+         (fp parsial baru dibuat) juga dibuang supaya tidak menyisakan fp
+         setengah jadi tanpa penanda cakupan.
+         Jangan hapus sources.cache: indeks discovery dipakai kedua mode. */
+      remove(WS_CACHE_FP);
+      wsCacheCoverWrite(false);
+      wsRouterDrop();
+    }
+    /* Mode selektif dengan simpanan lama: simpanan TIDAK dibuang — berisi
+       entri proyek di luar closure — dan sources.cache tak tersentuh bila
+       merge gagal. */
   } else {
     remove(".satria/caches/paths.cache"); /* bersihkan artefak legacy */
     wsRouterRecord();
@@ -622,7 +890,10 @@ static void wsCacheSaveBody(const WsModel *m, const char *wsName) {
        dengan content/time grup workspace — penutup terakhir tanpa P meta. */
     if (sn > 0 && stamps[sn - 1].proj == wsProj)
       stateBlobProjMeta(WS_COMPDB_GLOBAL, stamps[sn - 1].content, stamps[sn - 1].time);
-    artifactCacheSave(); /* flush metadata artefak/input release (§9) */
+    /* Penuh: prune (entri tak lagi dirujuk ikut hilang); selektif: merge —
+       pertahankan entri artefak proyek di luar closure (O1). */
+    if (sel) artifactCacheSaveMerge();
+    else artifactCacheSave(); /* flush metadata artefak/input release (§9) */
     profMark("tail-artifact"); /* profil: artifact.cache */
   }
   profMark("save-tail"); /* profil: router/opts/state.blob/artifact */

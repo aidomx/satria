@@ -85,7 +85,7 @@ static bool artAddPath(CsStore *st, const char *path, unsigned depth) {
   return ok;
 }
 
-bool artifactCacheSave(void) {
+static bool artifactCacheSaveImpl(bool prune) {
   if (artList.n == 0) {
     if (fsFileExists(ARTIFACT_CACHE_FILE)) return true; /* run tanpa artefak: pertahankan */
     mkdirs(".satria");
@@ -95,7 +95,10 @@ bool artifactCacheSave(void) {
     return true;
   }
   mkdirs(".satria");
-  remove(ARTIFACT_CACHE_FILE);
+  /* Penuh: buang simpanan lama (entri yang tak lagi dirujuk ikut hilang).
+     Selektif: JANGAN buang — csOpen memuat entri lama, entri run ini menimpa
+     kunci yang sama, sisanya (proyek di luar closure) tetap utuh. */
+  if (prune) remove(ARTIFACT_CACHE_FILE);
   CsStore *st = csOpen(ARTIFACT_CACHE_FILE);
   if (!st) {
     artListClear();
@@ -124,6 +127,9 @@ bool artifactCacheSave(void) {
   artListClear();
   return ok;
 }
+
+bool artifactCacheSave(void) { return artifactCacheSaveImpl(true); }
+bool artifactCacheSaveMerge(void) { return artifactCacheSaveImpl(false); }
 
 typedef struct {
   CsStore *st;
