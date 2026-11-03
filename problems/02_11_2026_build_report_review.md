@@ -14,6 +14,12 @@ Build Report) dan F14 (fingerprint parsial — no-op penuh pertama hit setelah b
 selektif dari workspace dingin, dengan guard cakupan anti-HIT-palsu) — lihat FIXED.
 Verifikasi: `bash scripts/unit.sh -j 2` exit 0, 19/19 tes, nol baris FAIL.
 
+**Diperbarui 03/11/2026 (sesi lanjutan 3):** **O7b CLOSED** — build-manual.yml di
+runner Windows (MSVC `cl` + MinGW `gcc`) hijau dan smoke test tampil. Satu cacat
+ditemukan & diperbaiki di sesi ini (`satria help` kosong karena cmd.txt CRLF).
+Sisa OPEN baru: **O9 (no-op/incremental selalu dingin di Windows)** — lihat bagian O9.
+Verifikasi host: `bash scripts/unit.sh -j 2` exit 0, 23/23 tes, 0 FAIL.
+
 ## FIXED
 
 ### Sesi sebelumnya (F1–F7)
@@ -229,7 +235,7 @@ Perbaikan naif yang tidak aman (simpan semua stamp `m`) tidak dipakai.
   build host bersih; `tests/unit` 18/18; miniws menampilkan `Total time`.
 - **Catatan.** Verifikasi di Windows nyata tetap di O7.
 
-## O7 (dipecah)  O7a CLOSED, O7b OPEN
+## O7 (dipecah)  O7a CLOSED, O7b CLOSED
 
 Item O7 yang tercatat sebelumnya digabung. Dipecah menjadi dua bagian dengan status berbeda:
 
@@ -247,18 +253,41 @@ Item O7 yang tercatat sebelumnya digabung. Dipecah menjadi dua bagian dengan sta
 - Catatan `install.sh`: `rc=1` pada cross-build terjadi karena langkah `chmod bin/satria`
   setelah build (output mingw bernama `satria.exe`). Bukan kegagalan build.
 
-### O7b. Runtime di Windows / MSVC nyata  OPEN
+### O7b. Runtime di Windows / MSVC nyata  CLOSED (03/11/2026)
 
-Belum dijalankan di mesin Windows. Yang tersisa:
+Dieksekusi lewat CI, bukan mesin lokal (proot tidak bisa memasang MinGW). Bukti:
+`build-manual.yml` run **41638258152** pada commit `c837775`, `workflow_dispatch`,
+simpulan **success**, 7/7 job hijau. Job Windows: `build (windows-latest, cl)`
+(id 125924856229) dan `build (windows-latest, gcc)` (id 125924856413).
 
-- `cl.exe` (MSVC) build penuh dengan `install.ps1 --dev`, termasuk `warning C4996:` end-to-end.
-- Jalur tanpa relay tee (`#ifdef _WIN32` pada `build.log`).
-- Runner serial Windows: urutan dan format identik dengan Linux pada fixture yang sama.
-- Hitungan warning penuh di MSVC (`cmdsLineIsWarning` terhadap output `cl.exe`).
-- `satria.exe -w` pada `tests/miniws` di Windows, dan tes unit yang bisa dijalankan di
-  Windows (Git Bash/MSYS2).
+- **`cl.exe` build penuh via `install.ps1 --dev`.** `> Bootstrap : satria v0.2.4`,
+  kompilasi + link sukses; `warning C4996:` end-to-end terbukti (mis.
+  `src/bootstrap.c(404): warning C4996: 'getenv' ...`, `background.c(310):
+  warning C4244`).
+- **Hitungan warning MSVC.** Job cl melaporkan `* 91 compiled, 0 skipped, 180 warnings`
+  dan 180 baris diagnostic benar-benar tercetak — `cmdsLineIsWarning()` mengenali
+  pola `: warning C<digit>` di output `cl.exe` (bukan dead code lagi). Job gcc-Windows
+  memberi 2 warning GCC (`%s directive output may be truncated` di
+  `cmds_passfinish.c:118` dan `:292`), bukan warning yang sama dengan Linux
+  (`ws_cache_noop.c:47`, 1 warning) — beda jalur kode platform, bukan beda penghitung.
+- **Smoke test tampil.** `satria version` → `satria v0.2.4`; `satria help` mencetak teks
+  penuh (`Satria - A simple builder for you`, `> usage: satria ...`, baris `Topics:`)
+  di KEDUA toolchain — setelah perbaikan CRLF di bawah.
+- **Self-host build + incremental.** `$SELF_BIN -j4` (bootstrap) dan `./bin/satria`
+  (binary hasil self-host) keduanya exit 0 dengan `Status : Success`, termasuk
+  `bin/satria.exe` tertaut dan `dist/` terbentuk.
+- **`warning C4996` sengaja TIDAK diperbaiki.** 180 warning MSVC itu nyata
+  (`getenv`/`strdup`/`_CRT_SECURE_NO_WARNINGS` dsb.), tetapi perbaikannya bukan
+  syarat O7b: yang diuji adalah pengenalan dan penghitungan warning, bukan
+  kepatuhan terhadap rekomendasi MSVC.
 
-Penutupan O7b membutuhkan log dari mesin Windows.
+**Yang tidak dicakup CI ini** (tetap belum dieksekusi, bukan regresi):
+`satria.exe -w` pada `tests/miniws` di Windows dan `scripts/unit.sh` di Git Bash
+Windows — workflow belum memuat langkah itu. Jalankan bila ingin menutupnya.
+
+**Temuan baru dari CI ini — O9.** Langkah `Self-host incremental (semua up-to-date)`
+juga melaporkan `* 91 compiled, 0 skipped` di kedua toolchain Windows (di Linux run
+kedua mencetak `STATUS / Build : Nothing to build`). Lihat O9.
 
 #### O7b — temuan dari CI Windows (build-manual.yml): `satria help` kosong  FIXED
 
@@ -276,4 +305,30 @@ Penutupan O7b membutuhkan log dari mesin Windows.
   `\n` menjadi CRLF.
 - **Verifikasi.** `tests/unit/cmdhelp_crlf.sh` (baru): cmd.txt CRLF -> `help` tidak kosong,
   memuat baris usage, `help workspace` menemukan topiknya, keluaran bebas `\r`, dan identik
-  dengan keluaran cmd.txt LF. Host Linux: PASS; build self-host bersih.
+  dengan keluaran cmd.txt LF. Host Linux: PASS; build self-host bersih. CI Windows
+  (run 41638258152, kedua toolchain): teks help penuh tercetak.
+
+## O9. Build kedua di Windows selalu dingin (no-op tidak pernah hit)  OPEN
+
+- **Gejala.** Di CI Windows, langkah `Self-host incremental (semua up-to-date)` tetap
+  melaporkan `* 91 compiled, 0 skipped` (cl: 180 warnings; gcc-Windows: 2 warnings),
+  `bin/satria.exe` ditautkan ulang, dan `dist/` dibangun ulang — tidak ada baris
+  `STATUS` / `Build : Nothing to build`. Bukti pembanding dari run yang SAMA: job
+  `build (ubuntu-latest, gcc)` mencetak `Build        : Nothing to build` pada langkah
+  yang identik, dan secara lokal `./bin/satria` (kedua kali) mencetak `STATUS` +
+  `Cache valid : .satria/caches/fingerprint.cache`.
+- **Pengaruh.** Bukan kegagalan (exit 0, `Status : Success`), tetapi setiap run Windows
+  membayar build penuh — dan langkah CI "semua up-to-date" tidak membuktikan apa pun
+  karena hanya memeriksa exit code, bukan keluaran.
+- **Dugaan akar penyebab.** (a) granularitas waktu: `csNowNs()` di
+  `src/cache/cache_store.c` memakai `time(NULL) * 1e9` di `_WIN32` (resolusi detik),
+  sementara stamp file memakai `fsMTimeNs` (100 ns) — perbandingan "lebih baru" bisa
+  selalu benar; (b) state/fingerprint tidak persisten di Windows (tulis/ganti atomik
+  gagal diam-diam, sehingga tiap run mulai dingin); (c) ada input yang mtime-nya berubah
+  tiap run (mis. `build/version.h` hasil codegen).
+- **Langkah berikutnya.** (1) Tambahkan assert ke step CI:
+  `./bin/satria | grep -q "Nothing to build"` — jadikan step merah bila tidak cocok;
+  (2) bandingkan `.satria/caches/fingerprint.cache` (dan `startup.state`) antara dua run
+  di Windows; (3) cek apakah `csNowNs` menjadi pembeda dengan membandingkan perilaku
+  setelah memakai resolusi sub-detik (`GetSystemTimeAsFileTime`/`QueryPerformanceCounter`).
+- **Catatan.** Diuji hanya lewat log CI; reproduksi lokal butuh mesin Windows.

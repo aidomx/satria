@@ -92,15 +92,27 @@ time_t fsMTime(const char *path) {
   return filetimeToTimeT(&fad.ftLastWriteTime);
 }
 
+/* FILETIME = 100 ns sejak 1601; stempel satria = ns sejak epoch Unix (1970),
+   sama dengan cabang POSIX (st_mtim). Konversi wajib lewat offset ini:
+   FILETIME * 100 untuk tahun 2026 = 1,34e19 — melewati INT64_MAX sehingga
+   hasilnya NEGATIF dan semua penjaga "file hilang" (`mtime < 0`, `stamp ...
+   gagal`) menyala di Windows: fast-state tidak pernah disimpan, artefak
+   dianggap hilang, dan setiap run menjadi build penuh. */
+#define FILETIME_UNIX_OFFSET (116444736000000000ULL) /* 100 ns 1601 -> 1970 */
+
+static int64_t filetimeToNsSinceEpoch(const FILETIME *ft) {
+  ULARGE_INTEGER u;
+  u.LowPart = ft->dwLowDateTime;
+  u.HighPart = ft->dwHighDateTime;
+  if (u.QuadPart == 0) return -1;
+  if (u.QuadPart <= FILETIME_UNIX_OFFSET) return -1; /* sebelum 1970: anggap -1 */
+  return (int64_t)((u.QuadPart - FILETIME_UNIX_OFFSET) * 100ULL);
+}
+
 int64_t fsMTimeNs(const char *path) {
   WIN32_FILE_ATTRIBUTE_DATA fad;
   if (!statInfo(path, &fad)) return -1;
-  ULARGE_INTEGER u;
-  u.LowPart = fad.ftLastWriteTime.dwLowDateTime;
-  u.HighPart = fad.ftLastWriteTime.dwHighDateTime;
-  if (u.QuadPart == 0) return -1;
-  /* FILETIME is already expressed in 100ns units since 1601. */
-  return (int64_t)u.QuadPart * 100LL;
+  return filetimeToNsSinceEpoch(&fad.ftLastWriteTime);
 }
 
 long long fsFileSize(const char *path) {
@@ -115,13 +127,12 @@ long long fsFileSize(const char *path) {
 bool fsStampNsSize(const char *path, int64_t *mtimeNs, long long *size) {
   WIN32_FILE_ATTRIBUTE_DATA fad;
   if (!statInfo(path, &fad)) return false;
+  int64_t ns = filetimeToNsSinceEpoch(&fad.ftLastWriteTime);
+  if (ns < 0) return false;
   ULARGE_INTEGER u;
-  u.LowPart = fad.ftLastWriteTime.dwLowDateTime;
-  u.HighPart = fad.ftLastWriteTime.dwHighDateTime;
-  if (u.QuadPart == 0) return false;
-  *mtimeNs = (int64_t)u.QuadPart * 100LL;
   u.LowPart = fad.nFileSizeLow;
   u.HighPart = fad.nFileSizeHigh;
+  *mtimeNs = ns;
   *size = (long long)u.QuadPart;
   return true;
 }

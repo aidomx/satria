@@ -52,8 +52,7 @@ static bool optNameVisit(const CsEntry *e, CsOp op, void *ctxp) {
 /* Diagnostik gerbang no-op (SATRIA_GATE_DEBUG=1): alasan router menolak. */
 static bool optsDbg(void) {
   static int on = -1;
-  /* TEMP (O9): sama dengan cmds_state.c — CI ikut mengaktifkan diagnostik. */
-  if (on < 0) on = (getenv("SATRIA_GATE_DEBUG") || getenv("CI")) ? 1 : 0;
+  if (on < 0) on = getenv("SATRIA_GATE_DEBUG") ? 1 : 0;
   return on == 1;
 }
 

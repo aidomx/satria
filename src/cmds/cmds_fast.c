@@ -240,10 +240,11 @@ static void fastSnapDelete(void) {
   csClose(st);
 }
 
-/* TEMP (O9): diagnostik snapshot di bawah SATRIA_GATE_DEBUG/CI. */
+/* Diagnostik snapshot fast-state, aktif dengan SATRIA_GATE_DEBUG=1 (lihat
+   cmds_state.c): alasan save batal dan alasan snapshot tidak terbaca. */
 static bool snapDbg(void) {
   static int on = -1;
-  if (on < 0) on = (getenv("SATRIA_GATE_DEBUG") || getenv("CI")) ? 1 : 0;
+  if (on < 0) on = getenv("SATRIA_GATE_DEBUG") ? 1 : 0;
   return on == 1;
 }
 
@@ -309,7 +310,6 @@ static uint64_t fastProjStamp(const char *bf, const List *srcs) {
   return h;
 }
 
-/* TEMP (O9): jejak alasan fast-state batal disimpan. */
 #define SAVE_BAIL(msg)                          \
   do {                                          \
     if (snapDbg())                              \

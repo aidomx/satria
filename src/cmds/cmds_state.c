@@ -246,9 +246,7 @@ static void fastStateWriteFrom(const FastState *s) {
    Dipakai untuk melacak no-op yang tidak pernah HIT di platform tertentu. */
 static bool gateDbg(void) {
   static int on = -1;
-  /* TEMP (O9): CI ikut mengaktifkan diagnostik supaya log build-manual memuat
-     alasan penolakan tanpa perlu mengubah workflow. Dihapus setelah O9 tutup. */
-  if (on < 0) on = (getenv("SATRIA_GATE_DEBUG") || getenv("CI")) ? 1 : 0;
+  if (on < 0) on = getenv("SATRIA_GATE_DEBUG") ? 1 : 0;
   return on == 1;
 }
 
