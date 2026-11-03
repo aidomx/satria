@@ -6,10 +6,6 @@
 #ifndef SATRIA_WORKSPACE_INTERNAL_H
 #define SATRIA_WORKSPACE_INTERNAL_H
 
-#ifdef _WIN32
-#define _CRT_SECURE_NO_WARNINGS
-#endif
-
 #include "../uses/workspace.h"
 
 #include <stdio.h>

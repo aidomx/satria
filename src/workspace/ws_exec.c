@@ -63,7 +63,7 @@ int wsRunProject(const WsModel *m, const char *name, const char *cmd, int jobs,
    * dan dipakai sampai pass berjalan. Prune .d orphan TIDAK lagi di sini —
    * dipindah ke bawah, setelah gerbang fast-state (lihat catatan di sana).
    * Previously a cache miss constructed the same Config twice. */
-  Config c;
+  Config c = {0};
   bool configReady = false;
   profMark("cfg-pre"); /* profil: sebelum perakitan Config */
   if (!wsProjectArchiveOnly(p)) {

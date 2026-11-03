@@ -211,8 +211,8 @@ bool reportBlobFinish(bool save) {
     }
   }
   remove(RB_TMP); /* run gagal / kosong / report tak aktif: laporan lama dipertahankan */
-#endif
   return false;
+#endif
 }
 
 void reportBlobShow(void) {

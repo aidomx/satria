@@ -501,10 +501,10 @@ bool embArchiveFresh(const EmbeddedEntry *e) {
       long long mt = -1;
       char p[WS_PATH_LEN];
       if (sscanf(st.items[i], "D %lld %" WS_SCAN "s", &mt, p) != 2 || mt < 0) continue;
-      const char *rel = p;
-      if (rel[0] == '.' && rel[1] == '/') rel += 2;
-      if (strcmp(rel, ".") != 0 && *rel && embExcluded(e, rel)) continue;
-      if (strcmp(rel, ad) == 0 || (strcmp(rel, ".") == 0 && strcmp(ad, ".") == 0)) continue;
+      const char *stampRel = p;
+      if (stampRel[0] == '.' && stampRel[1] == '/') stampRel += 2;
+      if (strcmp(stampRel, ".") != 0 && *stampRel && embExcluded(e, stampRel)) continue;
+      if (strcmp(stampRel, ad) == 0 || (strcmp(stampRel, ".") == 0 && strcmp(ad, ".") == 0)) continue;
       if (mt > newest) newest = mt;
     }
     listFree(&st);

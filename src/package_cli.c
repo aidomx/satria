@@ -7,6 +7,7 @@
 #include <time.h>
 
 #include "portability.h"
+#include "satria.h" /* satriaVersion (dipakai jalur self-upgrade) */
 #include "util.h"
 
 #ifdef _WIN32
@@ -230,7 +231,6 @@ static int cmdSelfUpgrade(int argc, const char *argv0) {
     }
   }
   char qscript[PKG_PATH_MAX * 2], qversion[256], command[PKG_PATH_MAX * 4];
-  extern const char *satriaVersion(void);
   const char *current = satriaVersion();
   if (!shellQuote(powerShell, qpowershell, sizeof(qpowershell)) ||
       !shellQuote(scriptPath, qscript, sizeof(qscript)) ||
