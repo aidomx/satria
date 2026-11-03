@@ -58,9 +58,45 @@ static const char *dotdLineEnd(const char *s) {
 }
 
 /*
+ * Pemisah target di .d adalah ':' yang diikuti akhir baris atau whitespace
+ * ("obj.o: dep" / "header.h:"). Colon drive Windows ("D:/...", "D:\...")
+ * diikuti '/' atau '\\' sehingga tidak pernah dianggap pemisah — aturan
+ * posisi (colon karakter ke-2) tidak cukup: baris continuation bisa memuat
+ * path drive, dan memilih colon "berikutnya" membuat path terpotong
+ * ("D:/a/b.h D" + "/a/c.h") sehingga anak hantu ber-mtime -1 memaksa
+ * recompile. Return NULL = baris ini bukan baris target.
+ */
+static char *dotdTargetColon(char *line) {
+  for (char *c = strchr(line, ':'); c; c = strchr(c + 1, ':')) {
+    char n = c[1];
+    if (n == '\0' || n == ' ' || n == '\t' || n == '\r') return c;
+  }
+  return NULL;
+}
+
+/* Tambah semua token dependensi pada `deps` (satu atau banyak path per
+   baris). Object di-skip: ia target, bukan dependensi. */
+static void dotdAddDepTokens(DepCache *dc, int idx, char *deps) {
+  char *tok = deps;
+  while (*tok) {
+    while (*tok == ' ' || *tok == '\t' || *tok == '\r')
+      tok++;
+    if (!*tok) break;
+    char *end = tok;
+    while (*end && *end != ' ' && *end != '\t' && *end != '\r')
+      end++;
+    bool last = *end == '\0';
+    *end = '\0';
+    if (!depIsObjectPath(tok)) dotdAddDep(dc, idx, tok);
+    if (last) break;
+    tok = end + 1;
+  }
+}
+
+/*
  * Satu baris logis .d (fragment, backslash sudah dibuang):
  *   - baris pertama entry  : "target: dep dep ..."
- *   - baris continuation   : "dep dep ..."
+ *   - baris continuation   : "dep dep ..." (bisa banyak token)
  *   - phony -MP            : "path:" (entry baru, tanpa dependen)
  * Target .o (berakhiran .o/.obj) di-skip; sisanya dianggap dependensi.
  */
@@ -70,26 +106,16 @@ static void dotdProcessLine(DepCache *dc, int idx, char *line, bool *isTarget) {
     q++;
   if (!*q || *q == '#') return; /* kosong / komentar */
 
-  char *colon = strchr(q, ':');
+  char *colon = dotdTargetColon(q);
   if (!colon) {
-    if (!*isTarget) dotdAddDep(dc, idx, q); /* continuation */
+    /* continuation: seluruh baris berisi dependensi (bukan satu path) */
+    if (*isTarget) dotdAddDepTokens(dc, idx, q);
     return;
   }
 
   /* Entry baru: teks sebelum ':' adalah target, sisanya dependensi. */
   *isTarget = true;
-
-  /* Windows path "C:/..." atau "C:\..." — colon bagian drive, bukan
-     pemisah target: geser ke colon berikutnya. */
-  if ((colon - q) == 1 &&
-      ((q[0] >= 'A' && q[0] <= 'Z') || (q[0] >= 'a' && q[0] <= 'z')) &&
-      (colon[1] == '\\' || colon[1] == '/')) {
-    char *real = strchr(colon + 1, ':');
-    if (real) colon = real;
-  }
-
   *colon = '\0';
-  char *deps = colon + 1;
 
   size_t tl = strlen(q);
   /* NB: ".o" = 2 karakter → tl - 2. Offset lama (tl - 3) tidak pernah cocok,
@@ -106,21 +132,7 @@ static void dotdProcessLine(DepCache *dc, int idx, char *line, bool *isTarget) {
   dotdAddDep(dc, idx, q); /* target non-object: header phony hasil -MP dsb. */
 
 deps_of_line:;
-  /* dependensi di baris yang sama, setelah ':' */
-  char *tok = deps;
-  while (*tok) {
-    while (*tok == ' ' || *tok == '\t' || *tok == '\r')
-      tok++;
-    if (!*tok) break;
-    char *end = tok;
-    while (*end && *end != ' ' && *end != '\t' && *end != '\r')
-      end++;
-    bool last = *end == '\0';
-    *end = '\0';
-    dotdAddDep(dc, idx, tok);
-    if (last) break;
-    tok = end + 1;
-  }
+  dotdAddDepTokens(dc, idx, colon + 1);
 }
 
 bool depIsObjectPath(const char *p) {
