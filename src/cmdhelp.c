@@ -18,6 +18,8 @@
 #include <unistd.h>
 #elif defined(__APPLE__)
 #include <mach-o/dyld.h>
+#elif defined(_WIN32)
+#include <windows.h>
 #endif
 
 #define CMD_TXT_MAX (64 * 1024)
@@ -28,6 +30,23 @@ static char *cmdReadFile(const char *path, char *buf, size_t n) {
   size_t got = fread(buf, 1, n - 1, fp);
   fclose(fp);
   buf[got] = '\0';
+  /* Normalisasi CRLF/CR -> LF. File yang di-checkout di Windows (git
+     core.autocrlf) memakai "\r\n", sehingga baris marker terbaca
+     "---help\r": panjang namanya ikut menghitung '\r' dan section tidak
+     pernah cocok — `satria help` keluar kosong tanpa pesan apa pun. Selain
+     itu isi section dicetak lewat fwrite ke stdout mode teks (di Windows
+     '\n' sudah diterjemahkan jadi CRLF), jadi '\r' sisa akan tampil sebagai
+     "\r\r\n". */
+  size_t w = 0;
+  for (size_t r = 0; r < got; r++) {
+    if (buf[r] == '\r') {
+      if (r + 1 < got && buf[r + 1] == '\n') continue; /* CRLF -> LF */
+      buf[w++] = '\n';                                 /* CR tunggal -> LF */
+      continue;
+    }
+    buf[w++] = buf[r];
+  }
+  buf[w] = '\0';
   return strstr(buf, "---") ? buf : NULL;
 }
 
@@ -40,9 +59,16 @@ static bool cmdExeDir(char *buf, size_t n) {
 #elif defined(__APPLE__)
   uint32_t size = (uint32_t)n;
   if (_NSGetExecutablePath(buf, &size) != 0) return false;
+#elif defined(_WIN32)
+  /* GetModuleFileNameA memberi path ber-backslash; dinormalkan ke '/' agar
+     sisa fungsi ini (dan pencarian jalur di bawah) platform-netral. */
+  DWORD len = GetModuleFileNameA(NULL, buf, (DWORD)n);
+  if (len == 0 || len >= (DWORD)n) return false;
+  buf[len] = '\0';
+  pathNormalizeSlash(buf);
 #else
   (void)n;
-  return false; /* Windows: cukup jalur 2 (cwd) & 3 (relative repo) */
+  return false;
 #endif
   char *slash = strrchr(buf, '/');
   if (!slash) return false;

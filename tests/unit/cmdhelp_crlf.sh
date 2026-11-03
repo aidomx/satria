@@ -1,0 +1,42 @@
+#!/bin/sh
+# Unit test: `satria help` tetap tampil walau cmd.txt ber-terminasi CRLF.
+# Di Windows file di-checkout dengan "\r\n" (git autocrlf), sehingga baris
+# marker terbaca `---help\r` dan section tidak pernah cocok — help kosong.
+#   - `satria help` tidak kosong dan memuat baris usage
+#   - `satria help <topic>` menemukan section
+#   - keluaran tidak membawa sisa '\r'
+# Pemakaian: sh tests/unit/cmdhelp_crlf.sh <path-ke-satria>
+
+S="$1"
+
+fail() { echo "FAIL cmdhelp_crlf: $1"; exit 1; }
+
+[ -x "$S" ] || fail "binary tidak ditemukan: $S"
+
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+SRC="$ROOT/src/cmd.txt"
+[ -f "$SRC" ] || fail "cmd.txt tidak ditemukan: $SRC"
+
+tmp=$(mktemp -d) || fail "mktemp gagal"
+trap 'rm -rf "$tmp"' EXIT
+
+# Salinan CRLF, seperti hasil checkout Windows.
+awk '{ printf "%s\r\n", $0 }' "$SRC" > "$tmp/cmd.txt" || fail "gagal menulis cmd.txt CRLF"
+CR=$(printf '\r')
+grep -q "$CR" "$tmp/cmd.txt" || fail "salinan uji bukan CRLF"
+
+out=$(SATRIA_CMD="$tmp/cmd.txt" "$S" help 2>&1) || fail "'help' rc!=0 pada cmd.txt CRLF"
+[ -n "$out" ] || fail "'help' kosong pada cmd.txt CRLF"
+printf '%s' "$out" | grep -q 'usage: satria' || fail "'help' tidak memuat baris usage"
+
+topic=$(SATRIA_CMD="$tmp/cmd.txt" "$S" help workspace 2>&1) ||
+  fail "'help workspace' rc!=0 pada cmd.txt CRLF"
+[ -n "$topic" ] || fail "'help workspace' kosong pada cmd.txt CRLF"
+printf '%s' "$topic" | grep -q 'workspace' || fail "'help workspace' bukan isi topik"
+
+printf '%s%s' "$out" "$topic" | grep -q "$CR" && fail "keluaran masih memuat CR"
+
+outlf=$(SATRIA_CMD="$SRC" "$S" help 2>&1) || fail "'help' rc!=0 pada cmd.txt LF"
+[ "$outlf" = "$out" ] || fail "keluaran CRLF berbeda dari LF"
+
+echo "PASS cmdhelp_crlf"
