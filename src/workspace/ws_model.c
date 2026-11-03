@@ -47,5 +47,6 @@ void wsModelFree(WsModel *m) {
   for (int i = 0; i < m->projectCount; i++)
     listFree(&m->projects[i].lines);
   listFree(&m->commonLines);
+  listFree(&m->cdepsGroups);
   listFree(&m->release.lines);
 }

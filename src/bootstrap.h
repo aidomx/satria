@@ -60,6 +60,8 @@ typedef struct {
 
   // Workspace specific
   const char *ws_only;      // -w <nama>
+  bool ws_with_cdeps;       // `--with-cdeps` (hanya -w): closure selektif ikut
+                            // menarik provider cdeps (opt-in; default tidak berubah)
   const char **ws_sel_argv; // [malloc] token `-- key=value ...`, NULL-terminasi
 
   // Profile specific

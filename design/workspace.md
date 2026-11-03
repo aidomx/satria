@@ -17,7 +17,9 @@ Workspace di `satria` dirancang dengan prinsip:
 ## Aturan Pengguna
 
 1. **Build hanya dari root workspace.** Pemanggilan `satria` atau `satria -g compdb` dari direktori proyek anggota ditolak dengan pesan yang menunjuk ke root workspace dan `satria -w <project>`.
-2. **Build selektif** menggunakan `satria -w <project>` dan membangun dependency closure yang diperlukan. Build penuh tetap `satria -w`.
+2. **Build selektif** menggunakan `satria -w <project>` dan membangun dependency closure yang diperlukan (depends_on + `library.<os>` + pack deps). Build penuh tetap `satria -w`.
+   - **cdeps tidak ikut menutup closure** pada default: `cdeps` menyatakan header/library yang dikonsumsi saat compile/link, bukan instruksi membangun ulang proyek pemasok (lihat catatan di `wsTopoSort`). Proyek cdeps yang sudah ada dipakai; yang belum ada menghasilkan link error + peringatan pre-flight yang menyebut nama provider dan jalur perbaikannya.
+   - **`satria -w <project> --with-cdeps`** (opt-in): closure ikut menarik provider cdeps secara transitif (fixpoint, aman untuk cdeps siklik seperti `bade ↔ core`). Flag hanya berlaku dengan `-w`; tanpa selektor (build penuh) sifatnya no-op karena seluruh proyek memang sudah masuk. Default tidak berubah — tanpa flag, perilaku identik dengan sebelumnya.
 3. **Editor sebaiknya membuka root workspace** agar source seluruh proyek dan satu `compile_commands.json` dapat diakses bersama.
 4. **Direktori anggota adalah penyedia source/config**, bukan tempat output build.
 5. **Deteksi anggota workspace** harus memvalidasi keanggotaan pada `Buildfile.ws` induk; keberadaan file workspace pada parent saja tidak cukup. Jalur single-project di luar workspace tidak berubah.

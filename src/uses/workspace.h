@@ -37,9 +37,13 @@
  * release implisit dibuat bila proyek ada tapi belum dideklarasikan);
  * `target=<tar|deb>` override format kemasan. NULL/"" = build + release
  * seluruh workspace (dist/release).
+ * withCdeps: `--with-cdeps` — build selektif (`only`) ikut menarik provider
+ * cdeps (ketergantungan compile/link) ke closure; tanpa selektor sifatnya
+ * no-op. Default false: cdeps tidak pernah memperluas closure (kontrak lama).
  * Return code gaya main(): 0 sukses, 1 gagal, 130 interupsi.
  */
-int workspaceRun(const char *cmd, int jobs, const char *only, const char *releaseSel);
+int workspaceRun(const char *cmd, int jobs, const char *only, const char *releaseSel,
+                 bool withCdeps);
 
 /*
  * workspaceEnumerate — baca+validasi Buildfile.ws di `wsDir` (parse, topo

@@ -121,7 +121,9 @@ bool wsParse(WsModel *m, const char *path) {
 
   List aliases = {0};
   char line[WS_LINE_LEN];
+  int lineno = 0;
   while (fgets(line, sizeof(line), fp)) {
+    lineno++;
     char *comment = strchr(line, '#');
     if (comment) *comment = '\0';
     char *text = trim(line);
@@ -162,10 +164,18 @@ bool wsParse(WsModel *m, const char *path) {
       }
       continue;
     }
+    /* cdeps level atas: grup {a,b}, {b,c} (design/cdeps_group.md). Diekspansi
+       setelah seluruh file dibaca, karena nama proyek bisa datang di baris mana pun. */
+    if (strcmp(key, "cdeps") == 0) {
+      char gbuf[WS_LINE_LEN];
+      snprintf(gbuf, sizeof(gbuf), "%d\t%s", lineno, v);
+      listAdd(&m->cdepsGroups, gbuf);
+      continue;
+    }
     aliasResolve(&aliases, key, sizeof(key));
     wsRecordLine(m, key, v);
   }
   fclose(fp);
   listFree(&aliases);
-  return true;
+  return wsExpandCdepsGroups(m, path);
 }

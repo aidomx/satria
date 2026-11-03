@@ -164,7 +164,7 @@ int satriaRun(int argc, const char *argv[]) {
       /* Query-only: CompDB merged seluruh workspace di root, tanpa build
          dan tanpa mengubah build state (design/workspace_v1.md §No-op
          dan CompDB). `--` selector tidak berlaku untuk compdb. */
-      rc = workspaceRun("compdb", bs.jobs, NULL, NULL);
+      rc = workspaceRun("compdb", bs.jobs, NULL, NULL, false);
       bootstrapCleanup(&bs);
       return rc;
     }
@@ -177,7 +177,8 @@ int satriaRun(int argc, const char *argv[]) {
       return 2;
     }
     /* Workspace logging uses the already restored WsModel (startup.state). */
-    rc = workspaceRun(bs.cmd == CMD_CLEAN ? "clean" : "build", bs.jobs, bs.ws_only, sel);
+    rc = workspaceRun(bs.cmd == CMD_CLEAN ? "clean" : "build", bs.jobs, bs.ws_only, sel,
+                      bs.ws_with_cdeps);
     if (sel) free(sel);
     bootstrapCleanup(&bs);
     return rc;

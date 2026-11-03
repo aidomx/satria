@@ -227,6 +227,42 @@ fail:
   for (int i = 0; i < nint; i++) free(intl[i]);
   return false;
 }
+/* Daftar nama provider cdeps milik proyek `idx` (dedup, urutan deklarasi).
+   Mencakup dua bentuk baris per proyek — `cdeps = a, b` (setting polos) dan
+   `library.cdeps = a, b` (alias `badelib.cdeps` -> bade.library.cdeps) —
+   serta baris global `library.cdeps = ...` di commonLines (berlaku untuk
+   semua proyek). Nama yang bukan proyek dikenal diabaikan (wsApplyCdeps
+   sudah memberi pesan error saat konfigurasi). Dipakai wsExpandCdeps
+   (--with-cdeps) dan pre-flight peringatan provider hilang. */
+void wsCdepsProviders(const WsModel *m, int idx, List *out) {
+  const WsProject *p = &m->projects[idx];
+  const List *sources[2] = {&p->lines, &m->commonLines};
+  for (int s = 0; s < 2; s++) {
+    const List *lines = sources[s];
+    for (int j = 0; j < lines->count; j++) {
+      const char *ln = lines->items[j];
+      const char *v = NULL;
+      if (strncmp(ln, "cdeps = ", 8) == 0)
+        v = ln + 8;
+      else if (strncmp(ln, "library.cdeps = ", 16) == 0)
+        v = ln + 16;
+      if (!v) continue;
+      char buf[WS_LINE_LEN];
+      if (strlen(v) >= sizeof(buf)) continue;
+      copyStr(buf, sizeof(buf), v);
+      for (char *save = buf;;) {
+        char *comma = strchr(save, ',');
+        if (comma) *comma = '\0';
+        char *item = trim(save);
+        if (*item && strcmp(item, p->name) != 0 && wsFindProject(m, item) >= 0 &&
+            !wsListHas(out, item))
+          listAdd(out, item);
+        if (!comma) break;
+        save = comma + 1;
+      }
+    }
+  }
+}
 /* cdeps -> `library = <dep>/<libDir>/lib<name>.a` + `headers = <dep>/<dir>`
    (keduanya relatif root workspace; tanpa ../ — tidak ada chdir). */
 void wsApplyCdeps(const WsModel *m, const WsProject *p, Config *c) {
@@ -280,4 +316,124 @@ void wsApplyCdeps(const WsModel *m, const WsProject *p, Config *c) {
     listFree(&depHeaders);
   }
   listFree(&deps);
+}
+
+/* ==================== grup cdeps level atas ==================== */
+/* design/cdeps_group.md:  cdeps = {a,b}, {b,c}, {a,c}  di Buildfile.ws.
+ * Setiap grup dua arah (semua anggota saling bergantung) dan tanpa batas
+ * jumlah anggota. Diekspansi ke baris per proyek `cdeps = <daftar>`, yaitu
+ * bentuk yang sudah didukung wsApplyCdeps. Relasi yang sudah ditulis per
+ * proyek digabung (tanpa duplikat, tanpa relasi ke diri sendiri). */
+
+static void cdepsErr(const char *file, int line, const char *msg) {
+  if (!wsGuardQuiet)
+    fprintf(stderr, "satria: %s:%d: cdeps: %s\n", file, line, msg);
+}
+
+/* true bila nama `want` sudah ada di daftar "a, b, c". */
+static bool cdepsListHas(const char *list, const char *want) {
+  char buf[WS_LINE_LEN];
+  if (strlen(list) >= sizeof(buf)) return false;
+  copyStr(buf, sizeof(buf), list);
+  for (char *save = buf;;) {
+    char *comma = strchr(save, ',');
+    if (comma) *comma = '\0';
+    if (strcmp(trim(save), want) == 0) return true;
+    if (!comma) break;
+    save = comma + 1;
+  }
+  return false;
+}
+
+/* Tambah relasi `from` -> `to` ke baris cdeps proyek `from` (idempoten). */
+static bool cdepsAddRelation(WsModel *m, const char *from, const char *to) {
+  int pi = wsFindProject(m, from);
+  if (pi < 0) return false;
+  WsProject *p = &m->projects[pi];
+  for (int k = 0; k < p->lines.count; k++) {
+    char *ln = p->lines.items[k];
+    if (strncmp(ln, "cdeps = ", 8) != 0) continue;
+    if (cdepsListHas(ln + 8, to)) return true;
+    char buf[WS_LINE_LEN];
+    if (snprintf(buf, sizeof(buf), "%s, %s", ln, to) >= (int)sizeof(buf)) return false;
+    char *dup = strdup(buf);
+    if (!dup) return false;
+    free(p->lines.items[k]);
+    p->lines.items[k] = dup;
+    return true;
+  }
+  char buf[WS_LINE_LEN];
+  if (snprintf(buf, sizeof(buf), "cdeps = %s", to) >= (int)sizeof(buf)) return false;
+  return listAdd(&p->lines, buf);
+}
+
+/* Proses satu nilai `cdeps = ...` level atas: deret grup {..}, {..} dipisah koma/spasi. */
+static bool cdepsExpandValue(WsModel *m, const char *file, int line, const char *val) {
+  const char *p = val;
+  for (;;) {
+    while (*p == ' ' || *p == '\t' || *p == ',') p++;
+    if (!*p) return true;
+    if (*p != '{') {
+      cdepsErr(file, line, "grup harus berbentuk {a,b}, contoh: cdeps = {core,bade}");
+      return false;
+    }
+    const char *close = strchr(p, '}');
+    if (!close) {
+      cdepsErr(file, line, "kurung '}' penutup grup tidak ditemukan");
+      return false;
+    }
+    size_t bl = (size_t)(close - p - 1);
+    char body[WS_LINE_LEN];
+    if (bl >= sizeof(body)) {
+      cdepsErr(file, line, "grup terlalu panjang");
+      return false;
+    }
+    memcpy(body, p + 1, bl);
+    body[bl] = '\0';
+
+    char *names[WS_MAX_PROJECTS];
+    int nn = 0;
+    for (char *save = body;;) {
+      char *comma = strchr(save, ',');
+      if (comma) *comma = '\0';
+      char *item = trim(save);
+      if (!*item) {
+        cdepsErr(file, line, "nama proyek kosong di dalam grup");
+        return false;
+      }
+      if (wsFindProject(m, item) < 0) {
+        char msg[256];
+        snprintf(msg, sizeof(msg), "proyek '%s' tidak dikenal di workspace", item);
+        cdepsErr(file, line, msg);
+        return false;
+      }
+      bool dup = false;
+      for (int k = 0; k < nn; k++)
+        if (strcmp(names[k], item) == 0) dup = true;
+      if (!dup && nn < WS_MAX_PROJECTS) names[nn++] = item;
+      if (!comma) break;
+      save = comma + 1;
+    }
+    if (nn < 2) {
+      cdepsErr(file, line, "grup harus memuat minimal dua proyek berbeda");
+      return false;
+    }
+    for (int i = 0; i < nn; i++)
+      for (int j = 0; j < nn; j++)
+        if (i != j && !cdepsAddRelation(m, names[i], names[j])) {
+          cdepsErr(file, line, "gagal menambahkan relasi cdeps (buffer penuh?)");
+          return false;
+        }
+    p = close + 1;
+  }
+}
+
+bool wsExpandCdepsGroups(WsModel *m, const char *file) {
+  for (int i = 0; i < m->cdepsGroups.count; i++) {
+    const char *ent = m->cdepsGroups.items[i];
+    const char *tab = strchr(ent, '\t');
+    int line = atoi(ent);
+    if (!cdepsExpandValue(m, file, line, tab ? tab + 1 : "")) return false;
+  }
+  return true;
 }

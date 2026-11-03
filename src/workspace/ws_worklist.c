@@ -61,6 +61,27 @@ void wsExpandLibDeps(const WsModel *m, unsigned char *needed) {
     }
   }
 }
+/* `--with-cdeps` (opt-in): perluas closure selektif dengan provider cdeps
+   (wsCdepsProviders mengenal kedua bentuk baris + baris global commonLines).
+   Siklus (bade<->core) aman: fixpoint berhenti saat tak ada proyek baru.
+   Return true bila ada proyek baru ditandai. */
+bool wsExpandCdeps(const WsModel *m, unsigned char *needed) {
+  bool changed = false;
+  for (int i = 0; i < m->projectCount; i++) {
+    if (!needed[i]) continue;
+    List providers = {0};
+    wsCdepsProviders(m, i, &providers);
+    for (int j = 0; j < providers.count; j++) {
+      int dep = wsFindProject(m, providers.items[j]);
+      if (dep >= 0 && !needed[dep]) {
+        needed[dep] = 1;
+        changed = true;
+      }
+    }
+    listFree(&providers);
+  }
+  return changed;
+}
 /* ==================== Eksekusi anak build (workspaceRun) ====================
  *
  * Satu worklist per run: proyek needed dalam urutan topo, indeks model

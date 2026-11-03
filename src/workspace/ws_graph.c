@@ -125,7 +125,9 @@ bool wsTopoSort(WsModel *m) {
      header/library yang dikonsumsi saat compile/link, bukan instruksi untuk
      membangun ulang proyek pemasok. `-w <target>` mengikuti depends_on dan
      library.<os> eksplisit; proyek cdeps lain yang sudah ada tetap dapat
-     dipakai oleh konfigurasi target tanpa ikut dibangun otomatis. */
+     dipakai oleh konfigurasi target tanpa ikut dibangun otomatis.
+     Pengecualian OPT-IN: flag CLI `--with-cdeps` menjalankan wsExpandCdeps
+     setelah ini (workspace.c) untuk menarik provider bila memang diinginkan. */
 
   unsigned char color[WS_MAX_PROJECTS] = {0};
   List order = {0};
