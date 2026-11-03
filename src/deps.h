@@ -59,6 +59,12 @@ void depsClosureVisit(DepCache *dc, const char *src, DepVisitFn visit, void *ctx
 void depsClosureVisitMany(DepCache *dc, const char *const *srcs, int count,
                           DepVisitFn visit, void *ctx);
 
+/* Diagnostik sementara (SATRIA_DIAG_DEPS=1, atau otomatis saat env CI ada):
+   cetak node header yang membuat `src` dinyatakan stale — path, mtime node,
+   dan entri snapshot-nya. Untuk membedah gerbang no-op di platform tanpa
+   akses interaktif. */
+void depsDiagStale(DepCache *dc, const char *src, int64_t srcMTimeNs, int64_t objMTimeNs);
+
 /*
  * Verifikasi konten (anti recompile tanpa perubahan isi, mis. setelah
  * `touch`): `true` bila snapshot hash source + seluruh dependensinya dari

@@ -442,6 +442,7 @@ int cmdsBuildPassRun(int jobs, Config c, const char *buildfilePath, bool libOnly
           skipped++;
           continue;
         }
+        depsDiagStale(deps, src, srcM, objM);
         headerStale++;
       } else {
         skipped++;
