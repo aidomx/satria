@@ -12,11 +12,15 @@ set -uo pipefail
 #   bash scripts/unit.sh -b                                 # jalankan di background
 #   bash scripts/unit.sh -b -o /tmp/unit.log                # background + log file
 #   bash scripts/unit.sh -o /tmp/unit.log tests/miniws      # kombinasi dengan target
+#   bash scripts/unit.sh -j4                                # batasi satria ke 4 job
 #   CLEAN_VERBOSE=1 bash scripts/unit.sh                    # tampilkan detail clean()
 #
 # Opsi:
 #   -o <file>   Simpan semua output ke file log (stdout + stderr) via tee
 #   -b          Jalankan di background (detached). PID ditulis ke file .pid
+#   -j <N>      Batasi job satria per test (default 2). -j 0 = tanpa batas (core).
+#               Banyak test memanggil satria tanpa -j (jatuh ke cpuCount());
+#               wrapper menyisipkan -jN agar ringan, terutama saat -b di proot.
 #
 # Environment:
 #   CLEAN_VERBOSE=1   Tampilkan detail setiap item yang dihapus oleh clean()
@@ -35,6 +39,7 @@ units=$(find "$ROOT_DIR/tests/unit" -name "*.sh" | sort)
 # ---------------------------- parsing argumen ------------------------------
 LOG_FILE=""
 BACKGROUND=0
+JOBS=2                     # default pembatas: ringan di proot; -j 0 = tanpa batas
 target=""
 
 while [ $# -gt 0 ]; do
@@ -51,9 +56,17 @@ while [ $# -gt 0 ]; do
       BACKGROUND=1
       shift
       ;;
+    -j)
+      if [ $# -lt 2 ]; then
+        echo "Error: -j memerlukan argumen angka" >&2
+        exit 1
+      fi
+      JOBS="$2"
+      shift 2
+      ;;
     -*)
       echo "Opsi tidak dikenal: $1" >&2
-      echo "Pemakaian: $0 [-o <file>] [-b] [target]" >&2
+      echo "Pemakaian: $0 [-o <file>] [-b] [-j <N>] [target]" >&2
       exit 1
       ;;
     *)
@@ -65,6 +78,27 @@ done
 
 # Default target jika tidak diberikan
 target="${target:-$ROOT_DIR/tests/miniws}"
+
+# Validasi -j: harus bilangan bulat >= 0.
+case $JOBS in
+  '' | *[!0-9]*)
+    echo "Error: -j harus bilangan bulat >= 0 (dapat '$JOBS')" >&2
+    exit 1
+    ;;
+esac
+
+# ---------------------------- pembatas jobs (-j) ---------------------------
+# Banyak test memanggil "$SAT" TANPA -j, sehingga satria jatuh ke cpuCount()
+# (paralel sebanyak core) — ini yang membuat -b berat di proot. Wrapper
+# menyisipkan -jN di depan SETIAP pemanggilan satria. Parse satria mengambil
+# -j TERAKHIR, jadi -j1/-j2 yang eksplisit di sebagian test tetap menang.
+# -j 0 = tanpa wrapper (perilaku lama: paralel sebanyak core).
+if [ "$JOBS" -ge 1 ]; then
+  SATRIA_WRAP="$TMP_DIR/satria-j"
+  printf '#!/bin/sh\nexec "%s" -j%d "$@"\n' "$SATRIA" "$JOBS" > "$SATRIA_WRAP"
+  chmod +x "$SATRIA_WRAP"
+  SATRIA="$SATRIA_WRAP"
+fi
 
 # ---------------------------- setup environment ----------------------------
 # Daftar artifact yang harus dibersihkan sebelum test

@@ -67,7 +67,7 @@ KEEP=0                        # -k : jangan hapus workspace di akhir
 ONLY=""                       # -s : subset skenario
 TOOLS_OPT="satria,cmake" # -t : subset tool pembanding
 OUTDIR=""                     # -o : direktori kerja
-NPROC=$(nproc 2> /dev/null || echo 4)
+NPROC=$(nproc 2> /dev/null || echo 4) # -j : jumlah job paralel (default nproc). Di-pass-through ke satria/cmake.
 MUT_DELAY=0       # -d : jeda (detik) sebelum tiap edit
 RUN_DELAY=0       # -D : jeda (detik) sebelum tiap pengukuran
 AUDIT_ENABLED=true             # -w true/false: preflight audit sebelum benchmark
@@ -98,10 +98,11 @@ while (($#)); do
   esac
 done
 set -- "${args[@]}"
-while getopts "n:H:m:r:b:a:c:d:D:O:ko:s:t:w:h" opt; do
+while getopts "n:H:m:r:b:a:c:d:D:O:j:ko:s:t:w:h" opt; do
   case $opt in
     n) NSRC=$OPTARG ;; H) NHEAD=$OPTARG ;; m) NMOD=$OPTARG ;;
     r) NRUN=$OPTARG ;; b) SATRIA=$OPTARG ;; a) SATRIA_ARGS=$OPTARG ;;
+    j) NPROC=$OPTARG ;;
     c) COMPILERS=$OPTARG ;; k) KEEP=1 ;; o) OUTDIR=$OPTARG ;;
     s) ONLY=$OPTARG ;; t) TOOLS_OPT=$OPTARG ;; d) MUT_DELAY=$OPTARG ;; D) RUN_DELAY=$OPTARG ;; O) RUN_ORDER=$OPTARG ;; w) AUDIT_ENABLED=$OPTARG ;; *) usage ;;
   esac
@@ -130,6 +131,7 @@ opt_uint n "$NSRC" 1
 opt_uint H "$NHEAD" 1
 opt_uint m "$NMOD" 1
 opt_uint r "$NRUN" 1
+opt_uint j "$NPROC" 1
 case ${BENCH_EMBED:-} in "" | ld | carray) ;; *)
   echo "BENCH_EMBED harus ld atau carray" >&2
   exit 2

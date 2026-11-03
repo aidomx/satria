@@ -10,6 +10,7 @@
 #   scripts/bench_check.sh -o /tmp/x -k         # outdir sendiri, simpan fixture
 #   scripts/bench_check.sh -b                   # jalankan di background
 #   scripts/bench_check.sh -b -l /tmp/bench.log # background + log ke file spesifik
+#   scripts/bench_check.sh -j4                  # jobs satria/cmake per skenario (default 2)
 #
 # Exit: 0 bila semua skenario "in accordance", 1 bila melenceng, 2 bila build gagal.
 
@@ -21,6 +22,7 @@ OUT=/tmp/bench_check
 BUILD=1
 KEEP=1
 NSRC=100 NHEAD=20 NMOD=20 NRUN=1
+JOBS=2                     # default ringan (proot/ce); -j N menimpa, diteruskan ke ws.sh
 SCEN=()
 TRACE='Not in accordance|✓|✗|GAGAL|compile='
 BACKGROUND=0
@@ -62,6 +64,10 @@ while [ $# -gt 0 ]; do
       ;;
     -r)
       NRUN="$2"
+      shift 2
+      ;;
+    -j)
+      JOBS="$2"
       shift 2
       ;;
     -t)
@@ -118,6 +124,7 @@ if [ "$BACKGROUND" = 1 ]; then
   [ "$NHEAD" != 20 ] && REMAINING_ARGS+=("-H" "$NHEAD")
   [ "$NMOD" != 20 ] && REMAINING_ARGS+=("-m" "$NMOD")
   [ "$NRUN" != 1 ] && REMAINING_ARGS+=("-r" "$NRUN")
+  [ "$JOBS" != 2 ] && REMAINING_ARGS+=("-j" "$JOBS")
   [ "$OUT" != "/tmp/bench_check" ] && REMAINING_ARGS+=("-o" "$OUT")
   for s in "${SCEN[@]}"; do
     REMAINING_ARGS+=("-s" "$s")
@@ -169,7 +176,7 @@ mkdir -p "$OUT"
 for s in "${SCEN[@]}"; do
   echo "▸ skenario: $s"
   taskset -c 0-5 bash "$ROOT/bench/ws.sh" -b "$BIN" -n "$NSRC" -H "$NHEAD" \
-    -m "$NMOD" -r "$NRUN" -t satria -s "$s" -o "$OUT.$s" $kflag \
+    -m "$NMOD" -r "$NRUN" -j "$JOBS" -t satria -s "$s" -o "$OUT.$s" $kflag \
     > "$OUT.$s.log" 2>&1
 done
 
