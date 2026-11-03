@@ -20,6 +20,15 @@ ditemukan & diperbaiki di sesi ini (`satria help` kosong karena cmd.txt CRLF).
 Sisa OPEN baru: **O9 (no-op/incremental selalu dingin di Windows)** — lihat bagian O9.
 Verifikasi host: `bash scripts/unit.sh -j 2` exit 0, 23/23 tes, 0 FAIL.
 
+**Diperbarui 03/11/2026 (sesi lanjutan 4):** **O9 CLOSED** — ternyata dua cacat
+yang saling menutupi: (a) konversi FILETIME Windows pada `fsStampNsSize`/`fsMTimeNs`
+overflow `int64` (negatif), sehingga snapshot/fingerprint tak pernah tersimpan;
+(b) parser `.d` menganggap colon path drive (`D:/...`) sebagai pemisah target pada
+baris continuation hasil wrap GCC, sehingga source di subdirektori mendapat anak
+hantu ber-mtime -1 → `INT64_MAX` (stale) dan selalu dikompilasi ulang. Rincian dan
+verifikasi ada di bagian O9. Verifikasi host: `bash scripts/unit.sh -j 2` exit 0,
+23/23 tes, 0 FAIL.
+
 ## FIXED
 
 ### Sesi sebelumnya (F1–F7)
@@ -308,7 +317,7 @@ kedua mencetak `STATUS / Build : Nothing to build`). Lihat O9.
   dengan keluaran cmd.txt LF. Host Linux: PASS; build self-host bersih. CI Windows
   (run 41638258152, kedua toolchain): teks help penuh tercetak.
 
-## O9. Build kedua di Windows selalu dingin (no-op tidak pernah hit)  OPEN
+## O9. Build kedua di Windows selalu dingin (no-op tidak pernah hit)  FIXED
 
 - **Gejala.** Di CI Windows, langkah `Self-host incremental (semua up-to-date)` tetap
   melaporkan `* 91 compiled, 0 skipped` (cl: 180 warnings; gcc-Windows: 2 warnings),
@@ -320,15 +329,29 @@ kedua mencetak `STATUS / Build : Nothing to build`). Lihat O9.
 - **Pengaruh.** Bukan kegagalan (exit 0, `Status : Success`), tetapi setiap run Windows
   membayar build penuh — dan langkah CI "semua up-to-date" tidak membuktikan apa pun
   karena hanya memeriksa exit code, bukan keluaran.
-- **Dugaan akar penyebab.** (a) granularitas waktu: `csNowNs()` di
-  `src/cache/cache_store.c` memakai `time(NULL) * 1e9` di `_WIN32` (resolusi detik),
-  sementara stamp file memakai `fsMTimeNs` (100 ns) — perbandingan "lebih baru" bisa
-  selalu benar; (b) state/fingerprint tidak persisten di Windows (tulis/ganti atomik
-  gagal diam-diam, sehingga tiap run mulai dingin); (c) ada input yang mtime-nya berubah
-  tiap run (mis. `build/version.h` hasil codegen).
-- **Langkah berikutnya.** (1) Tambahkan assert ke step CI:
-  `./bin/satria | grep -q "Nothing to build"` — jadikan step merah bila tidak cocok;
-  (2) bandingkan `.satria/caches/fingerprint.cache` (dan `startup.state`) antara dua run
-  di Windows; (3) cek apakah `csNowNs` menjadi pembeda dengan membandingkan perilaku
-  setelah memakai resolusi sub-detik (`GetSystemTimeAsFileTime`/`QueryPerformanceCounter`).
-- **Catatan.** Diuji hanya lewat log CI; reproduksi lokal butuh mesin Windows.
+- **Akar penyebab 1 — stamp negatif (commit `fe9ec82`).** `fsStampNsSize`/`fsMTimeNs`
+  di `src/port/port_fs.c` mengalikan FILETIME (100 ns sejak 1601) dengan 100 apa adanya,
+  menghasilkan ≈1,34e19 — melewati batas `int64` sehingga nilainya negatif. Semua guard
+  "file hilang" menyala dan snapshot `build.state`/fingerprint tidak pernah disimpan.
+  Perbaikan: kurangi epoch 1601→1970 lebih dulu, baru kalikan 100 (diuji dengan program
+  kecil di host: hasil negatif sebelum, positif sesudah).
+- **Akar penyebab 2 — parser `.d` (commit `176a140`).** Setelah (1) beres, MSVC sudah
+  no-op tetapi MinGW masih `23 compiled, 68 skipped` dengan `Headers : 23 source(s) stale
+  due to header change` — tepat source di subdirektori (`src/runners/*`, `src/workspace/*`).
+  `.d` MinGW memuat path absolut `D:/...`, dan GCC mem-wrap daftar dependensi panjang ke
+  beberapa baris. `dotdProcessLine` memakai colon pertama sebagai pemisah target lalu
+  "menggeser ke colon berikutnya" untuk drive letter; pada baris continuation berisi
+  path drive, langkah itu memotong path menjadi `D` dan `/a/...`, bahkan menghasilkan
+  anak `D:/...h D`. Anak `D` tidak ada → mtime -1 → `depsNewestHeaderMTimeAt`
+  mengembalikan `INT64_MAX` (sentinel dependensi hilang) → source selalu stale.
+  Perbaikan: pemisah target ditentukan oleh aturan "colon diikuti whitespace/akhir
+  baris" (colon drive diikuti `/` atau `\` tidak pernah jadi pemisah), dan baris
+  continuation kini dibaca sebagai DAFTAR token dependensi (sebelumnya seluruh baris
+  dianggap satu path, sehingga dependensi hasil wrap tidak pernah tercatat).
+- **Verifikasi.** CI run 41699264783 (commit `176a140`): ketujuh job hijau; langkah
+  incremental `windows-latest` **MinGW dan MSVC** mencetak `STATUS` /
+  `Build : Nothing to build`, begitu pula Linux (x64/arm64, gcc/clang) dan macOS.
+  Diagnostik sementara yang dipakai untuk menemukannya (`[deps] stale ... kid ...`)
+  sudah dicabut kembali. Host Linux: `bash scripts/unit.sh -j 2` exit 0, 23/23 tes.
+- **Catatan.** Diagnostik dijalankan lewat CI (tanpa mesin Windows); bukti mentahnya
+  adalah log job `build (windows-latest, gcc)` pada run 41695851872.

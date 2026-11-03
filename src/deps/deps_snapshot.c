@@ -539,38 +539,6 @@ int64_t depsNewestHeaderMTimeAt(DepCache *dc, const char *src, int64_t srcMTimeN
   return best;
 }
 
-/* Diagnostik sementara: alasan `src` dinyatakan stale oleh gerbang header.
-   Cetak langsung ke stderr (tidak lewat report/blob) supaya muncul di log CI. */
-void depsDiagStale(DepCache *dc, const char *src, int64_t srcM, int64_t objM) {
-  const char *gate = getenv("SATRIA_DIAG_DEPS");
-  if ((!gate || !*gate) && !getenv("CI")) return;
-  if (!dc || !src) return;
-
-  char path[MAX_PATH];
-  snprintf(path, sizeof(path), "%s", src);
-  depNormalizePath(path);
-  int root = depNodeFind(dc, path);
-  fprintf(stderr, "[deps] stale %s srcM=%lld objM=%lld", src, (long long)srcM,
-          (long long)objM);
-  if (root < 0) {
-    fprintf(stderr, " root=<tak ada>\n");
-    return;
-  }
-  depParseNodeIfNeeded(dc, root);
-  int nkids = dc->nodes[root].nkids;
-  int dloaded = dc->nodes[root].dloaded ? 1 : 0;
-  fprintf(stderr, " root dloaded=%d nkids=%d newest=%lld\n", dloaded, nkids,
-          (long long)depsNewestHeaderMTimeAt(dc, src, srcM));
-  for (int i = 0; i < nkids; i++) {
-    int kid = dc->nodes[root].kids[i];
-    int64_t rm = 0;
-    uint64_t rh = snapshotHashOf(dc, dc->nodes[kid].path, &rm);
-    fprintf(stderr, "[deps]   kid %s mtime=%lld snap=%s%016llx snapM=%lld\n",
-            dc->nodes[kid].path, (long long)dc->nodes[kid].mtime, rh ? "" : "(none)",
-            (unsigned long long)rh, (long long)rm);
-  }
-}
-
 /* ==================== closure dependensi (fast-state workspace) ====================
    Pola traversal sama dengan depsNewestHeaderMTimeAt. Node dloaded (edges dari
    .d) sudah flat dan lengkap, jadi anak langsungnya dikirim tanpa ditelusuri lagi. */
