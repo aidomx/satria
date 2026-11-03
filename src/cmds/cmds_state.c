@@ -241,17 +241,46 @@ static void fastStateWriteFrom(const FastState *s) {
   free(buf);
 }
 
+/* Diagnostik gerbang no-op: SATRIA_GATE_DEBUG=1 mencetak alasan penolakan
+   pertama ke stderr. Nol biaya saat env tidak diset (satu getenv, di-cache).
+   Dipakai untuk melacak no-op yang tidak pernah HIT di platform tertentu. */
+static bool gateDbg(void) {
+  static int on = -1;
+  /* TEMP (O9): CI ikut mengaktifkan diagnostik supaya log build-manual memuat
+     alasan penolakan tanpa perlu mengubah workflow. Dihapus setelah O9 tutup. */
+  if (on < 0) on = (getenv("SATRIA_GATE_DEBUG") || getenv("CI")) ? 1 : 0;
+  return on == 1;
+}
+
+#define GATE_MISS(...)                              \
+  do {                                              \
+    if (gateDbg()) {                                \
+      fprintf(stderr, "satria: gate: " __VA_ARGS__); \
+      fprintf(stderr, "\n");                        \
+    }                                               \
+  } while (0)
+
 bool cmdsFastStateValid(const char *buildfilePath, bool libOnly) {
   double noopT0 = portMonoMs(); /* Total time fallback no-op */
   cmdsStatMemoSetCwd(); /* memo stat pindah ke cmds_statmemo.c */
   /* Router (opts.cache) dibaca lebih dulu: cache yang dirutekan hilang /
      kosong -> batal cepat tanpa memuat snapshot fast-state. */
-  if (!optsRouterValidate()) return false;
+  if (!optsRouterValidate()) {
+    GATE_MISS("router opts.cache menolak");
+    return false;
+  }
   /* Metadata artefak (design/startup.md §9): file hilang/berubah -> batal. */
-  if (!artifactCacheValid()) return false;
+  if (!artifactCacheValid()) {
+    GATE_MISS("artifact.cache tidak valid");
+    return false;
+  }
   FastState s;
-  if (!fastStateLoad(&s, libOnly)) return false;
+  if (!fastStateLoad(&s, libOnly)) {
+    GATE_MISS("snapshot build.state tidak terbaca");
+    return false;
+  }
   if (s.phase != (libOnly ? 1 : 0)) {
+    GATE_MISS("fase snapshot %d != %d", s.phase, libOnly ? 1 : 0);
     fastStateFree(&s);
     return false;
   }
@@ -263,11 +292,26 @@ bool cmdsFastStateValid(const char *buildfilePath, bool libOnly) {
       fastTargetRecorded(s.target) ? memoStampNsSize(s.target, &targetMtime, &targetSize) : true;
   bool targetOk = !fastTargetRecorded(s.target) ||
                   (targetStamp && targetMtime == s.targetMtime && targetSize == s.targetSize);
-  bool ok =
-      fsGetCwd(cwd, sizeof(cwd)) && strcmp(cwd, s.cwd) == 0 &&
-      strcmp(buildfilePath && *buildfilePath ? buildfilePath : "Buildfile", s.buildfile) == 0 &&
-      buildfileStamp && buildfileMtime == s.buildfileMtime && buildfileSize == s.buildfileSize &&
-      targetOk;
+  const char *bfName = buildfilePath && *buildfilePath ? buildfilePath : "Buildfile";
+  bool cwdOk = fsGetCwd(cwd, sizeof(cwd)) && strcmp(cwd, s.cwd) == 0;
+  bool bfNameOk = strcmp(bfName, s.buildfile) == 0;
+  bool bfStampOk = buildfileStamp && buildfileMtime == s.buildfileMtime &&
+                   buildfileSize == s.buildfileSize;
+  bool ok = cwdOk && bfNameOk && bfStampOk && targetOk;
+  if (!ok) {
+    if (!cwdOk)
+      GATE_MISS("cwd beda: '%s' != '%s'", cwd, s.cwd);
+    else if (!bfNameOk)
+      GATE_MISS("buildfile beda: '%s' != '%s'", bfName, s.buildfile);
+    else if (!bfStampOk)
+      GATE_MISS("stamp Buildfile beda: %lld/%lld != %lld/%lld (stat ok=%d)",
+                (long long)buildfileMtime, buildfileSize, (long long)s.buildfileMtime,
+                s.buildfileSize, (int)buildfileStamp);
+    else
+      GATE_MISS("stamp target beda: %lld/%lld != %lld/%lld (stat ok=%d)",
+                (long long)targetMtime, targetSize, (long long)s.targetMtime, s.targetSize,
+                (int)targetStamp);
+  }
   bool patched = false; /* sentuh: stamp di-PATCH setelah seluruh entri lolos */
   for (int i = 0; ok && i < s.count; i++) {
     FastStamp *st = &s.stamps[i];
@@ -280,6 +324,7 @@ bool cmdsFastStateValid(const char *buildfilePath, bool libOnly) {
       bool cached = false;
       if (getenv("SATRIA_NO_LD") || !ldCacheResolve("ld", ldPath, sizeof(ldPath)) ||
           !cacheCheckLD(ldPath, &cached)) {
+        GATE_MISS("cache ld tidak valid");
         ok = false;
         break;
       }
@@ -288,6 +333,7 @@ bool cmdsFastStateValid(const char *buildfilePath, bool libOnly) {
     bool exists = memoStampNsSize(st->path, &currentMtime, &currentSize);
     if (st->kind == 'M') {
       if (exists) {
+        GATE_MISS("entri M ada padahal seharusnya hilang: %s", st->path);
         ok = false;
         break;
       }
@@ -309,6 +355,9 @@ bool cmdsFastStateValid(const char *buildfilePath, bool libOnly) {
         }
       }
       if (!touchOk) {
+        GATE_MISS("stamp beda %c %s: disk %lld/%lld != catatan %lld/%lld (ada=%d)",
+                  st->kind, st->path, (long long)currentMtime, currentSize,
+                  (long long)st->mtime, st->size, (int)exists);
         ok = false;
         break;
       }

@@ -49,6 +49,14 @@ static bool optNameVisit(const CsEntry *e, CsOp op, void *ctxp) {
    wajib ada dan stempelnya (ns + ukuran) harus cocok; route menunjuk indeks
    yang hilang juga menolak. Route opsional hanya untuk proyek yang memang
    belum dirutekan atau tidak punya indeks sumber. */
+/* Diagnostik gerbang no-op (SATRIA_GATE_DEBUG=1): alasan router menolak. */
+static bool optsDbg(void) {
+  static int on = -1;
+  /* TEMP (O9): sama dengan cmds_state.c — CI ikut mengaktifkan diagnostik. */
+  if (on < 0) on = (getenv("SATRIA_GATE_DEBUG") || getenv("CI")) ? 1 : 0;
+  return on == 1;
+}
+
 bool optsRouterValidate(void) {
   CsStore *st = csOpen(OPTS_CACHE_FILE);
   if (!st) return true;
@@ -64,15 +72,27 @@ bool optsRouterValidate(void) {
   long long mt = 0, sz = 0;
   bool idxOk = optsSourcesStamp(&mt, &sz);
   if (idxOk) {
-    if (!names.hasSource || names.sourceTime != mt || names.sourceSize != sz)
+    if (!names.hasSource || names.sourceTime != mt || names.sourceSize != sz) {
+      if (optsDbg())
+        fprintf(stderr,
+                "satria: gate: route sources basi (route ada=%d %lld/%lld, indeks %lld/%lld)\n",
+                (int)names.hasSource, names.sourceTime, names.sourceSize, mt, sz);
       return false; /* indeks ada tapi route hilang / stempel basi */
+    }
   } else if (names.hasSource) {
+    if (optsDbg())
+      fprintf(stderr, "satria: gate: route sources ada tetapi indeks %s hilang\n",
+              WS_SOURCE_FILE);
     return false; /* route menunjuk indeks yang hilang */
   }
   for (int i = 0; i < names.n; i++) {
     char path[128];
     snprintf(path, sizeof(path), ".satria/caches/%s.cache", names.names[i]);
-    if (!optsCacheHasGroup(path, proj)) return false;
+    if (!optsCacheHasGroup(path, proj)) {
+      if (optsDbg())
+        fprintf(stderr, "satria: gate: grup '%s' tidak ada di %s\n", names.names[i], path);
+      return false;
+    }
   }
   profMark("rt-groups"); /* profil: buka tiap cache dirutekan utk cek grup */
   return true;
