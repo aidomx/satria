@@ -10,8 +10,9 @@
        Total time : 1.41s
        Archives   : 1 created
        Libraries  : 4 generated (2 static, 2 shared)
-       Binaries   : 2 linked
-       Status     : Success
+        Binaries   : 2 linked
+        Releases   : 1 created, 0 up-to-date  [hanya bila fase release dijalankan]
+        Status     : Success
 
    Agregat dihitung dari record EKSPLISIT build report (buildReportAgg) —
    parser teks rbCondense lama dihapus (design §9: "Hapus agregasi berbasis
@@ -81,8 +82,10 @@ static void rbRelayLoop(int rd, int term, int file) {
    hanya bila build report aktif (pemilik lifecycle: cmdBuildEx / wsRunCore
    memanggil buildReportBegin sebelum reportBlobBegin). */
 static bool rbCondenseReport(FILE *out, double secs) {
-  int nArch = 0, nLibStatic = 0, nLibShared = 0, nBin = 0, nBinUp = 0;
-  if (!buildReportAgg(&nArch, &nLibStatic, &nLibShared, &nBin, &nBinUp))
+  int nArch = 0, nLibStatic = 0, nLibShared = 0, nBin = 0, nBinUp = 0, nRel = 0,
+      nRelUp = 0;
+  if (!buildReportAgg(&nArch, &nLibStatic, &nLibShared, &nBin, &nBinUp, &nRel,
+                      &nRelUp))
     return false;
   int libs = nLibStatic + nLibShared;
   fprintf(out, "STATUS\n------\n");
@@ -101,6 +104,11 @@ static bool rbCondenseReport(FILE *out, double secs) {
   fprintf(out, "Libraries  : %d generated (%d static, %d shared)\n", libs,
           nLibStatic, nLibShared);
   fprintf(out, "Binaries   : %d linked, %d up-to-date\n", nBin, nBinUp);
+  /* Bila fase release benar-benar dijalankan (design §8: "Release hanya
+     ditampilkan bila pack/release dijalankan") — checksum sidecar tidak
+     dihitung dalam agregat ini. */
+  if (nRel + nRelUp > 0)
+    fprintf(out, "Releases   : %d created, %d up-to-date\n", nRel, nRelUp);
   fprintf(out, "Status     : Success\n"); /* file hanya ditulis bila run sukses */
   return true;
 }

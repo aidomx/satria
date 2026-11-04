@@ -1,9 +1,11 @@
 /* report_blob — .satria/report.blob: ringkasan laporan build (design/startup.md §10).
    Setelah build sukses, keluaran run TIDAK disimpan mentah: dikondensasi ke
    format terstruktur dua blok — STATUS (pesan no-op) + LAST BUILD SUMMARY
-   (total time, arsip/perpustakaan/binary agregat, status). Pada no-op file itu
-   diputar ulang sehingga pesan no-op seragam di kedua mode. Output proses build
-   TIDAK berubah: stdout di-tee (terminal tetap menerima salinan yang sama). */
+   (total time, arsip/perpustakaan/binary/release agregat, status). Baris
+   Releases hanya ada bila fase release dijalankan pada build tersimpan. Pada
+   no-op file itu diputar ulang sehingga pesan no-op seragam di kedua mode.
+   Output proses build TIDAK berubah: stdout di-tee (terminal tetap menerima
+   salinan yang sama). */
 #ifndef SATRIA_REPORT_BLOB_H
 #define SATRIA_REPORT_BLOB_H
 #include <stddef.h>

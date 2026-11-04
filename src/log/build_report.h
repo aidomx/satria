@@ -116,9 +116,12 @@ void buildReportFinish(bool success);
 /* Isi agregat untuk blob LAST BUILD SUMMARY (no-op) — SUMBER EKSPLISIT,
    bukan parsing teks log (design §9): nArch = arsip REP_BUILT ("created");
    nLibStatic/nLibShared = library REP_BUILT per ekstensi (.a/.so);
-   nBin = REP_LINKED; nBinUp = REP_CACHED. Return false bila report tak aktif. */
+   nBin = REP_LINKED; nBinUp = REP_CACHED; nRel = release REP_BUILT
+   ("created"); nRelUp = REP_CACHED — sidecar checksum (size < 0) tidak
+   dihitung agar paket tidak dihitung ganda. Return false bila report tak
+   aktif. */
 bool buildReportAgg(int *nArch, int *nLibStatic, int *nLibShared, int *nBin,
-                    int *nBinUp);
+                    int *nBinUp, int *nRel, int *nRelUp);
 
 /* Bebaskan semua record. Aman dipanggil berkali-kali / setelah finish. */
 void buildReportRelease(void);

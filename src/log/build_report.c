@@ -507,11 +507,11 @@ void buildReportFinish(bool success) {
 
 /* Agregat blob LAST BUILD SUMMARY dari record EKSPLISIT (design §9) —
    bukan parsing teks: arsip/library yang dibuat ulang pada run ini,
-   binary linked vs up-to-date. */
+   binary linked vs up-to-date, release created vs up-to-date. */
 bool buildReportAgg(int *nArch, int *nLibStatic, int *nLibShared, int *nBin,
-                    int *nBinUp) {
+                    int *nBinUp, int *nRel, int *nRelUp) {
   if (!R.active) return false;
-  int ar = 0, ls = 0, lsh = 0, bn = 0, bu = 0;
+  int ar = 0, ls = 0, lsh = 0, bn = 0, bu = 0, rl = 0, rlu = 0;
   for (int i = 0; i < R.nArch; i++)
     if (R.arch[i].st == REP_BUILT) ar++;
   for (int i = 0; i < R.nLib; i++) {
@@ -531,11 +531,20 @@ bool buildReportAgg(int *nArch, int *nLibStatic, int *nLibShared, int *nBin,
     else if (R.bin[i].st == REP_CACHED)
       bu++;
   }
+  for (int i = 0; i < R.nRel; i++) {
+    if (R.rel[i].size < 0) continue; /* sidecar checksum: paket jangan dihitung ganda */
+    if (R.rel[i].st == REP_BUILT)
+      rl++;
+    else if (R.rel[i].st == REP_CACHED)
+      rlu++;
+  }
   if (nArch) *nArch = ar;
   if (nLibStatic) *nLibStatic = ls;
   if (nLibShared) *nLibShared = lsh;
   if (nBin) *nBin = bn;
   if (nBinUp) *nBinUp = bu;
+  if (nRel) *nRel = rl;
+  if (nRelUp) *nRelUp = rlu;
   return true;
 }
 
