@@ -218,6 +218,23 @@ static long long debDataSize(const char *dir) {
   return total;
 }
 
+/* tar+gzip satu pohon staging ke dst. Buffer perintah dialokasikan sesuai
+   panjang path (bukan buffer tetap), supaya path panjang tidak terpotong.
+   Flag deterministik (GNU tar) dari tarDetFlags. */
+static bool debTar(const char *dst, const char *srcDir) {
+  const char *flags = tarDetFlags();
+  size_t cap = strlen(flags) + strlen(dst) + strlen(srcDir) + 64;
+  char *cmd = malloc(cap);
+  if (!cmd) {
+    fprintf(stderr, "satria: pack: kehabisan memori\n");
+    return false;
+  }
+  snprintf(cmd, cap, "tar %s-czf %s -C %s .", flags, dst, srcDir);
+  bool ok = runCmd(cmd);
+  free(cmd);
+  return ok;
+}
+
 /* ==================== ar archive ==================== */
 
 /* Header member 60 byte: nama(16) mtime(12) uid(6) gid(6) mode(8) size(10)
@@ -225,7 +242,7 @@ static long long debDataSize(const char *dir) {
 static bool arHeader(FILE *fp, const char *name, long long size) {
   char hdr[64];
   int nw = snprintf(hdr, sizeof(hdr), "%-16.16s%-12ld%-6s%-6s%-8s%-10lld`\n", name,
-                    (long)time(NULL), "0", "0", "100644", size);
+                    (long)reproEpoch(), "0", "0", "100644", size);
   if (nw != 60) return false;
   return fwrite(hdr, 1, 60, fp) == 60;
 }
@@ -293,18 +310,15 @@ bool packBuildDeb(const Config *c, const PackArtifact *a) {
 
   /* tar+gzip kedua pohon staging. */
   char ctlTar[128], dataTar[128];
-  char cmd[320];
   snprintf(ctlTar, sizeof(ctlTar), "%s/control.tar.gz", debRoot);
   snprintf(dataTar, sizeof(dataTar), "%s/data.tar.gz", debRoot);
   fsRemoveFile(ctlTar);
   fsRemoveFile(dataTar);
-  snprintf(cmd, sizeof(cmd), "tar czf %s -C %s .", ctlTar, ctlDir);
-  if (!runCmd(cmd)) {
+  if (!debTar(ctlTar, ctlDir)) {
     fprintf(stderr, "satria: pack: tar control gagal\n");
     return false;
   }
-  snprintf(cmd, sizeof(cmd), "tar czf %s -C %s .", dataTar, dataDir);
-  if (!runCmd(cmd)) {
+  if (!debTar(dataTar, dataDir)) {
     fprintf(stderr, "satria: pack: tar data gagal\n");
     return false;
   }

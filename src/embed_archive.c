@@ -84,20 +84,20 @@ static bool buildEmbeddedArchiveEntryEx(const EmbeddedEntry *e, bool *rebuilt) {
     fclose(lf);
     listFree(&files);
 
-    size_t cap = strlen(tmpArchive) + strlen(e->src) + strlen(listFile) + 96;
+    size_t cap = strlen(tmpArchive) + strlen(e->src) + strlen(listFile) + 256;
     char *cmd = malloc(cap);
     if (!cmd) {
       fsRemoveFile(listFile);
       return false;
     }
-    snprintf(cmd, cap, "tar c%sf %s -C %s -T %s", z, tmpArchive, e->src, listFile);
+    snprintf(cmd, cap, "tar %s-c%sf %s -C %s -T %s", tarDetFlags(), z, tmpArchive, e->src, listFile);
     ok = runCmd(cmd);
     free(cmd);
     fsRemoveFile(listFile);
   } else {
-    char *cmd = malloc(strlen(tmpArchive) + strlen(e->src) + 64);
+    char *cmd = malloc(strlen(tmpArchive) + strlen(e->src) + 256);
     if (!cmd) return false;
-    sprintf(cmd, "tar czf %s -C %s .", tmpArchive, e->src);
+    sprintf(cmd, "tar %s-czf %s -C %s .", tarDetFlags(), tmpArchive, e->src);
     ok = runCmd(cmd);
     free(cmd);
   }

@@ -30,7 +30,7 @@ bool packBuildTar(const Config *c, const PackArtifact *a) {
   snprintf(stage, sizeof(stage), ".satria/pack/tar-data");
   if (!packStageEntries(c, stage)) return false;
 
-  size_t n = strlen(a->tmp) + strlen(stage) + 64;
+  size_t n = strlen(a->tmp) + strlen(stage) + 256;
   for (int i = 0; i < c->pack.files.count; i++) {
     char src[SATRIA_MAX_PATH * 2], dst[SATRIA_MAX_PATH * 2];
     if (!packEntryParts(c->pack.files.items[i], src, sizeof(src),
@@ -44,7 +44,7 @@ bool packBuildTar(const Config *c, const PackArtifact *a) {
     return false;
   }
 
-  snprintf(cmd, n, "tar %sf %s -C %s", tarFlag(a->compress), a->tmp, stage);
+  snprintf(cmd, n, "tar %s-%sf %s -C %s", tarDetFlags(), tarFlag(a->compress), a->tmp, stage);
   for (int i = 0; i < c->pack.files.count; i++) {
     char src[SATRIA_MAX_PATH * 2], dst[SATRIA_MAX_PATH * 2];
     if (!packEntryParts(c->pack.files.items[i], src, sizeof(src),

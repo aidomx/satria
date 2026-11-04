@@ -220,3 +220,37 @@ bool runCmd(const char *cmd) {
 double nowSeconds(void) {
   return monotonicSeconds();
 }
+
+/* ==================== reproducible archive helpers ==================== */
+
+long long reproEpoch(void) {
+  const char *e = getenv("SOURCE_DATE_EPOCH");
+  if (e && *e) {
+    char *end = NULL;
+    long long v = strtoll(e, &end, 10);
+    if (end && *end == '\0' && v >= 0) return v;
+  }
+  return 0;
+}
+
+const char *tarDetFlags(void) {
+  static char flags[160];
+  static int state = 0; /* 0 belum dicek, 1 GNU, 2 bukan GNU */
+  if (state == 0) {
+    state = 2;
+    FILE *fp = popenRB("tar --version 2>/dev/null");
+    if (fp) {
+      char line[160];
+      if (fgets(line, sizeof(line), fp) && strstr(line, "GNU tar")) state = 1;
+      pclose(fp);
+    }
+    if (state == 1)
+      snprintf(flags, sizeof(flags),
+               "--sort=name --mtime=@%lld --owner=0 --group=0 --numeric-owner ",
+               reproEpoch());
+    else
+      flags[0] = '\0';
+  }
+  return flags;
+}
+

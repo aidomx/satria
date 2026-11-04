@@ -42,6 +42,13 @@ bool parseBool(const char *s, bool *out);
 /* popen(cmd, "r")/pclose portabel — MSVC tidak punya keduanya (POSIX);
    di Windows diimplementasikan via _popen/_pclose (cmd.exe). */
 FILE *popenRB(const char *cmd);
+
+/* Flag tar deterministik untuk GNU tar (urutan, mtime, owner tetap), supaya arsip
+   identik antar mesin dan antar run. Kosong bila tar bukan GNU (bsdtar tidak
+   punya opsi ini). Dideteksi sekali per proses. Hasil diakhiri spasi. */
+const char *tarDetFlags(void);
+/* mtime untuk header ar/deb: SOURCE_DATE_EPOCH bila di-set, selain itu 0. */
+long long reproEpoch(void);
 void pcloseRB(FILE *fp);
 
 /* ==================== Filesystem ==================== */
