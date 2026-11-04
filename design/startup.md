@@ -375,6 +375,7 @@ LAST BUILD SUMMARY
   Archives   : 1 created
   Libraries  : 4 generated (2 static, 2 shared)
   Binaries   : 2 linked
+  Releases   : 1 created  (bila fase release dijalankan)
   Status     : Success
 ```
 
@@ -382,7 +383,7 @@ LAST BUILD SUMMARY
 >
 > **Keseragaman pesan no-op:** baris `> Cache valid: ...` kini sama di KEDUA mode. Workspace dan single-project sama-sama memvalidasi lewat `caches/fingerprint.cache`: build fingerprint (satu record per proyek) dan snapshot fast state (`build.state`, satu record per cwd) berada di file yang sama. `caches/state.cache` kini hanya dipakai workspace untuk blob per proyek (`ws.state`, `src`, `hdr/*`). Output build dan input link (`O`) divalidasi dengan stamp mtime/ukuran tanpa hash, sehingga binary yang hanya di-touch tetap di-relink.
 
-Format yang tampil: blok `STATUS` (pesan no-op), satu baris kosong, lalu blok `LAST BUILD SUMMARY`. Baris pertama blok ringkasan adalah `Last : <tanggal jam>` (saat build terakhir disimpan), disusul total waktu, jumlah arsip, library statis/shared, jumlah binary yang benar-benar di-link ulang (lapangan `Target` pada blok ringkasan fase binary tanpa penanda `up-to-date`; phase-run workspace tidak mencetak baris live `Linking` saat link nyata, dan baris live diterima dengan prefix `>` atau `|`), dan status. Tanpa laporan tersimpan, no-op menampilkan blok `STATUS` saja.
+Format yang tampil: blok `STATUS` (pesan no-op), satu baris kosong, lalu blok `LAST BUILD SUMMARY`. Baris pertama blok ringkasan adalah `Last : <tanggal jam>` (saat build terakhir disimpan), disusul total waktu, jumlah arsip, library statis/shared, jumlah binary yang benar-benar di-link ulang, jumlah release (`created`/`up-to-date` — hanya bila fase release dijalankan; sidecar checksum tidak dihitung), dan status. Tanpa laporan tersimpan, no-op menampilkan blok `STATUS` saja.
 
 ## 11. Ringkasan
 

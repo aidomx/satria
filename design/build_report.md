@@ -426,8 +426,13 @@ Total time : 31.13s
 Archives   : 0 created
 Libraries  : 0 generated (0 static, 0 shared)
 Binaries   : 1 linked, 0 up-to-date
+Releases   : 1 created, 0 up-to-date
 Status     : Success
 ```
+
+Baris `Releases` mengikuti aturan §8 — hanya ada bila fase release benar-benar
+dijalankan pada build yang tersimpan; sidecar checksum (`.sha256`) tidak
+dihitung dalam agregat agar paket tidak dihitung ganda.
 
 Pemulihan laporan: setiap build sukses menyalin isi `report.blob` ke state (single: `fingerprint.cache`; workspace: `state.cache` dengan proyek pseudo `__report__`). Bila `report.blob` hilang, setiap no-op memulihkannya dari salinan sebelum memutarnya, sehingga replay tetap sama dengan build terakhir.
 
