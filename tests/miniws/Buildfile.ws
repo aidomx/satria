@@ -46,5 +46,7 @@ bademod.variable = MODULES
 bademod.extract = /tmp/satria-miniws-system
 bademod.pattern = .rp
 
-badelib.cdeps = core
-corelib.cdeps = bade
+# Relasi dua arah bade <-> core (grup cdeps level atas, design/cdeps_group.md):
+#   cdeps = {bade,core}
+# == badelib.cdeps = core + corelib.cdeps = bade
+cdeps = {bade,core}

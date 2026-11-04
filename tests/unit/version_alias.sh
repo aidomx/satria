@@ -11,6 +11,12 @@ MW="${2:-$(dirname "$0")/../miniws}"
 
 fail() { echo "FAIL version_alias: $1"; exit 1; }
 
+# Path absolut: test melakukan cd ke direktori tmp sebelum memanggil "$S",
+# jadi path relatif akan lupa asalnya dan binary tidak ditemukan.
+abspath() { (cd "$(dirname "$1")" 2>/dev/null && printf '%s/%s\n' "$(pwd)" "$(basename "$1")"); }
+S=$(abspath "$S")
+MW=$(abspath "$MW")
+
 [ -x "$S" ] || fail "binary tidak ditemukan: $S"
 
 v1=$("$S" version 2>&1) || fail "'version' rc!=0"

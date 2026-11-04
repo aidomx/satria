@@ -11,6 +11,12 @@ MW="${2:-$(dirname "$0")/../miniws}"
 
 fail() { echo "FAIL cdeps_group: $1"; exit 1; }
 
+# Path absolut: compdb() melakukan cd ke direktori tmp sebelum memanggil "$S",
+# jadi path relatif akan lupa asalnya dan binary tidak ditemukan.
+abspath() { (cd "$(dirname "$1")" 2>/dev/null && printf '%s/%s\n' "$(pwd)" "$(basename "$1")"); }
+S=$(abspath "$S")
+MW=$(abspath "$MW")
+
 [ -x "$S" ] || fail "binary tidak ditemukan: $S"
 
 tmp=$(mktemp -d) || fail "mktemp gagal"

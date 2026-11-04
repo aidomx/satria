@@ -57,6 +57,8 @@ release.compress = gzip
 release.checksum = sha256
 REL
 "$SAT" -w > rc0.txt 2>&1; check "release: cold build (release)" $?
+grep -q "Releases   : 1 created" .satria/report.blob
+check "release: LAST BUILD SUMMARY berisi baris Releases (blob)" $?
 grep -c "dist/rupa-v" .satria/artifact.cache > /tmp/rpt_cnt.$$
 [ "$(cat /tmp/rpt_cnt.$$)" -gt 0 ]; check "release: artefak dist tercatat di artifact.cache" $?
 grep -q "cmd.txt" .satria/artifact.cache
@@ -65,6 +67,8 @@ grep -q "rupa_modules.tar" .satria/artifact.cache
 check "release: arsip proyek kemasan tercatat di artifact.cache" $?
 "$SAT" -w > rc1.txt 2>&1
 hit_ws rc1.txt; check "release: no-op HIT saat release aktif (gerbang terbuka)" $?
+grep -q "Releases   : 1 created" rc1.txt
+check "release: no-op memutar baris Releases dari LAST BUILD SUMMARY" $?
 
 # artefak dihapus -> batal no-op + dibangun ulang + hit lagi
 rm -f dist/*.tar.gz
