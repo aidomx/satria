@@ -1,19 +1,30 @@
 # Pengujian manual di Windows/MSVC (workflow_dispatch — TIDAK jalan di
 # push/PR/release; dipicu: `gh workflow run tests-manual.yml`).
 #
-# Tujuan (design/packaging.md §Catatan terbuka): unit suite + smoke pack
-# belum pernah diuji nyata di Windows/MSVC. Workflow ini menjalankannya
-# on-demand dari perangkat yang punya `gh`, tanpa menunggu release
-# (build.yml) atau trigger build-manual.yml.
+# Temuan run pertama 05/11/2026 (setelah fix LNK2019 pclose/`pcloseRB` —
+# bootstrap + self-host MSVC SUDAH lulus; log: unit suite step):
+#   - Fixture & log HARUS path ABSOLUT (runner men-cd ke salinan tmp
+#     sebelum mengeksekusi test): relatif membuat abspath() test gagal
+#     ("cp: cannot stat 'tests/miniws/.'", "fixture tidak ditemukan: (kosong)")
+#     dan log hilang dari upload-artifact. Sudah ditangani: input diubah
+#     absolut via cygpath (step "Fixture suite absolut").
+#   - checkout WAJIB core.autocrlf false — default runner mengonversi LF→CRLF,
+#     gen_tracer_src menghasilkan byte berbeda → trace_src_sync FAIL palsu.
+#     (config core.autocrlf di step checkout.)
 #
-# Yang diharapkan GAGAL di Windows (diabaikan dari verdict — jalur POSIX):
-#   - tests/unit/trace_summary.sh  → `satria trace` menolak (LD_PRELOAD
-#     / dlsym tidak ada di Windows; cmdTrace menolak dengan rc=2).
-#   - tests/unit/trace_src_sync.sh → murni regen header; seharusnya tetap
-#     PASS, dijadikan sanity tracer source.
-# Runner scripts/unit.sh menjalankan SELURUH tests/unit/*.sh — target arg
-# hanya fixture workspace, bukan filter; jadi anggap 2 FAIL trace di atas
-# baseline.
+# Yang diharapkan GAGAL di Windows (jalur POSIX — jangan dianggap regresi):
+#   - trace_summary.sh → `satria trace` menolak (LD_PRELOAD/dlsym tidak ada;
+#     cmdTrace menolak dengan rc=2).
+#   - build_resume.sh D (Ctrl+C rc 130) → semantik SIGINT tidak 1:1 di
+#     git-bash/Windows (dapat 0).
+#   - faststate_external_header.sh ("steady state is no-op") → SATU-satunya
+#     logika yang mungkin nyata; perlu investigasi (mtime NTFS?).
+#   - trace_src_sync.sh & cmdhelp_crlf → PASS palsu ikut hilang bersama
+#     core.autocrlf (lihat atas).
+#
+# Runner scripts/unit.sh menjalankan SELURUH tests/unit/*.sh — input arg
+# hanya FIXTURE workspace, bukan filter; jadi masukkan baseline fail di atas
+# saat membaca result.
 name: Tests Manual (Windows/MSVC)
 
 on:
@@ -41,6 +52,30 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Pelajaran run 05/11/2026: default core.autocrlf membuat tracer.src
+          # dll. terkonversi CRLF → gen_tracer_src.h membedakan hasil
+          # regen → trace_src_sync/cmdhelp_crlf FAIL palsu (dokumen和生产 LF).
+          config: |
+            core.autocrlf false
+            core.eol lf
+
+      - name: Fixture suite absolut (bash MSYS butuh gaya POSIX)
+        if: ${{ inputs.suite != '' }}
+        shell: bash
+        id: suite
+        run: |
+          WS="$(cygpath -u "$GITHUB_WORKSPACE")"
+          echo "suite=$WS/${{ inputs.suite }}" >> "$GITHUB_OUTPUT"
+          SUITE2="${{ inputs.suite2 }}"
+          if [ -n "$SUITE2" ]; then
+            echo "suite2=$WS/$SUITE2" >> "$GITHUB_OUTPUT"
+          fi
+          # Pelajaran run 05/11/2026: scripts/unit.sh men-cd ke salinan tmp
+          # sebelum menulis log — path relatif membuat log hilang dari
+          # upload-artifact. Log ABSOLUT juga.
+          echo "log1=$WS/unit-msvc-1.log" >> "$GITHUB_OUTPUT"
+          echo "log2=$WS/unit-msvc-2.log" >> "$GITHUB_OUTPUT"
 
       - name: Setup Node.js 24
         uses: actions/setup-node@v4
@@ -83,15 +118,18 @@ jobs:
         run: ./bin/satria.exe
 
       # ---- unit suite (satria membangun proyek-proyek fixture) ----
+      # Pelajaran run 05/11/2026: fixture WAJIB path ABSOLUT — runner men-cd
+      # ke salinan tmp sebelum mengeksekusi test, jadi argumen relatif
+      # membuat abspath() test gagal (cp: cannot stat / fixture kosong).
       - name: Unit suite (scripts/unit.sh)
         if: ${{ inputs.suite != '' }}
         shell: bash
-        run: bash scripts/unit.sh -o unit-msvc-1.log -j "${{ inputs.jobs }}" "${{ inputs.suite }}"
+        run: bash scripts/unit.sh -o "${{ steps.suite.outputs.log1 }}" -j "${{ inputs.jobs }}" "${{ steps.suite.outputs.suite }}"
 
       - name: Unit suite kedua (opsional)
-        if: ${{ inputs.suite2 != '' }}
+        if: ${{ steps.suite.outputs.suite2 != '' }}
         shell: bash
-        run: bash scripts/unit.sh -o unit-msvc-2.log -j "${{ inputs.jobs }}" "${{ inputs.suite2 }}"
+        run: bash scripts/unit.sh -o "${{ steps.suite.outputs.log2 }}" -j "${{ inputs.jobs }}" "${{ steps.suite.outputs.suite2 }}"
 
       # ---- smoke pack.optimize = true di MSVC ----
       # Jalur pack TARBALL dua langkah (tar → gzip -1) perlu dibuktikan di
@@ -124,14 +162,15 @@ jobs:
           head -c 64 dist/smoke.tar.gz | grep -aq 'out.tar.part' \
             && echo "SMOKE OK: optimize dua-langkah (FNAME=out.tar.part) + tarball valid"
 
-      # Selalu unggah log walau salah satu suite gagal
+      # Selalu unggah log walau salah satu suite gagal (suite ke-2 boleh
+      # tidak jalan → if-no-files-found: ignore).
       - name: Upload logs (always)
-        if: always()
+        if: ${{ always() && inputs.suite != '' }}
         uses: actions/upload-artifact@v4
         with:
           name: unit-logs-msvc
           path: |
-            unit-msvc-1.log
-            unit-msvc-2.log
+            ${{ steps.suite.outputs.log1 }}
+            ${{ steps.suite.outputs.log2 }}
           if-no-files-found: ignore
           retention-days: 14
