@@ -17,7 +17,7 @@
  *      bin/<binaryName> tiap proyek binary + lib/<libraryName>.a/.so
  *      tiap proyek library. Proyek archive/tanpa output tidak menyumbang.
  *
- * Baris release lain (name/version/output/format/compress/checksum/
+ * Baris release lain (name/version/output/format/compress/optimize/checksum/
  * exclude/deb.*) diteruskan apa adanya ke Config — pack engine yang
  * mengartikan. prefix dikonversi ke pack.* agar parser lama mengenali.
  */
@@ -66,6 +66,8 @@ int wsRelease(WsModel *m, int jobs, const char *wsDir) {
         packApply(&c, "output", v);
       else if (strcmp(k, "compress") == 0)
         packApply(&c, "compress", v);
+      else if (strcmp(k, "optimize") == 0)
+        packApply(&c, "optimize", v);
       else if (strcmp(k, "checksum") == 0)
         packApply(&c, "checksum", v);
       else if (strcmp(k, "format") == 0)
