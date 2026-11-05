@@ -23,7 +23,7 @@ trap 'rm -rf "$tmp"' EXIT
 # Salinan CRLF, seperti hasil checkout Windows.
 awk '{ printf "%s\r\n", $0 }' "$SRC" > "$tmp/cmd.txt" || fail "gagal menulis cmd.txt CRLF"
 CR=$(printf '\r')
-grep -q "$CR" "$tmp/cmd.txt" || fail "salinan uji bukan CRLF"
+grep -q "$CR" "$tmp/cmd.txt" || { od -c "$tmp/cmd.txt" | head -n 8 >&2; fail "salinan uji bukan CRLF"; }
 
 out=$(SATRIA_CMD="$tmp/cmd.txt" "$S" help 2>&1) || fail "'help' rc!=0 pada cmd.txt CRLF"
 [ -n "$out" ] || fail "'help' kosong pada cmd.txt CRLF"
