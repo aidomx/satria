@@ -69,7 +69,10 @@ static bool buildEmbeddedArchiveEntryEx(const EmbeddedEntry *e, bool *rebuilt) {
 
     char listFile[SATRIA_MAX_PATH * 2 + 32];
     snprintf(listFile, sizeof(listFile), ".satria/embed-%s.list", e->name);
-    FILE *lf = fopen(listFile, "w");
+    /* "wb": listfile dibaca tar -T. Mode text di Windows menulis \n sebagai
+     * \r\n, lalu tar membaca \r sebagai bagian nama file ("math/index.rp\r").
+     * Mode biner menjaga \n apa adanya di semua platform. */
+    FILE *lf = fopen(listFile, "wb");
     if (!lf) {
       listFree(&files);
       return false;
