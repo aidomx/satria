@@ -192,8 +192,10 @@ static const char *embIncbinPrelude =
     "#define SATRIA_PFX SATRIA_STR(__USER_LABEL_PREFIX__)\n"
     "#if defined(__APPLE__)\n"
     "#define SATRIA_SECT \".section __TEXT,__const\\n\"\n"
+    "#define SATRIA_TEXT \".section __TEXT,__text\\n\"\n"
     "#else\n"
     "#define SATRIA_SECT \".section .rodata\\n\"\n"
+    "#define SATRIA_TEXT \".text\\n\"\n"
     "#endif\n"
     "#if __SIZEOF_LONG__ == 8\n"
     "#define SATRIA_LONG_DIR \".quad \"\n"
@@ -241,7 +243,7 @@ static void embWriteIncbinEntry(FILE *out, const char *sym, const char *absPath,
   fprintf(out, "  \".globl \" SATRIA_PFX \"%s_len\\n\"\n", sym);
   fprintf(out, "  SATRIA_PFX \"%s_len:\\n\"\n", sym);
   fprintf(out, "  SATRIA_LONG_DIR SATRIA_PFX \"%s_pend - \" SATRIA_PFX \"%s_start\\n\"\n", sym, sym);
-  fprintf(out, "  \".previous\\n\");\n\n");
+  fprintf(out, "  SATRIA_TEXT\n);\n\n");
 }
 
 /* Tulis stamp: versi, waktu mulai codegen (ns), lalu baris per entri. */
