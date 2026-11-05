@@ -94,6 +94,44 @@ touch dist/*.tar.gz
 hit_ws rc6.txt; check "release: sentuh artefak tetap no-op (PATCH hash)" $?
 rm -f /tmp/rpt_cnt.$$
 
+# ===================== release.optimize: jalur gzip -1 dua langkah =====================
+O=$(mktemp -d /tmp/rpt_opt_XXXX)
+cp -r "$MWS/." "$O/" || exit 2
+cd "$O" || exit 2
+rm -rf build bin lib modules dist .satria
+printf 'perintah-test\n' > core/src/cmd.txt
+cat >> Buildfile.ws <<'REL'
+release.name = rupa
+release.version = 0.3.0
+release.files = core/src/cmd.txt
+release.output = dist/{name}-v{version}.tar.gz
+release.compress = gzip
+release.checksum = sha256
+release.optimize = true
+REL
+"$SAT" -w > oc0.txt 2>&1; check "optimize: cold build (release)" $?
+# tarball valid + gzip level ter-FASTEST (header "was out.tar.part", max speed)
+tar tzf dist/*.tar.gz >/dev/null 2>&1; check "optimize: tarball gzip valid" $?
+[ -s dist/*.tar.gz ]; check "optimize: tarball terbentuk" $?
+grep -q "Releases   : 1 created" .satria/report.blob
+check "optimize: blob berbaris Releases" $?
+grep -q "cmd.txt" .satria/artifact.cache
+check "optimize: input tercatat di artifact.cache" $?
+# value tak valid ditolak dengan pesan, build tetap lanjut
+cat >> Buildfile.ws <<'BAD'
+release.optimize = maybe
+BAD
+"$SAT" -w > oc1.txt 2>&1
+grep -q "optimize 'maybe' tidak valid" oc1.txt
+check "optimize: nilai tidak valid ditolak (pesan pack)" $?
+sed -i '/release.optimize = maybe/d' Buildfile.ws
+# edit Buildfile.ws membatalkan no-op sekali; pulihkan lalu cek HIT
+"$SAT" -w > /dev/null 2>&1
+# no-op pulih; tarball hasil optimize masih valid
+"$SAT" -w > oc2.txt 2>&1
+hit_ws oc2.txt; check "optimize: no-op HIT (gerbang terbuka)" $?
+tar tzf dist/*.tar.gz >/dev/null 2>&1; check "optimize: tarball tetap valid setelah no-op" $?
+
 # ===================== single-project =====================
 S=$(mktemp -d /tmp/rpt_s_XXXX)
 mkdir -p "$S/src"
@@ -107,5 +145,5 @@ cd "$S" || exit 2
 grep -q "Status     : Success" sn.txt; check "single: no-op informatif dari state" $?
 
 echo "---"
-echo "lulus: $pass  gagal: $fail  (folder uji: $W | $R | $S)"
+echo "lulus: $pass  gagal: $fail  (folder uji: $W | $R | $O | $S)"
 [ "$fail" -eq 0 ]
