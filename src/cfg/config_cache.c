@@ -18,9 +18,12 @@
 #include "../util.h"
 
 #define CONFIG_CACHE_MAGIC "SATRIACFG1"
-#define CONFIG_CACHE_VERSION 13u /* 13: background (design/background.md)
-                                     12: embedded.key + embedded.type (design/embedded.md)
-                                     11: ... 10: defines + suffix flags/library/headers/std */
+/* Versi format startup.state: naikkan tiap mengubah layout Config.
+   14: pack.optimize (release.optimize)
+   13: background (design/background.md)
+   12: embedded.key + embedded.type (design/embedded.md)
+   11: ... 10: defines + suffix flags/library/headers/std */
+#define CONFIG_CACHE_VERSION 14u
 #define CONFIG_CACHE_DIR ".satria"
 #define CONFIG_CACHE_FILE "startup.state"
 
@@ -159,6 +162,7 @@ static bool cacheWriteConfig(FILE *fp, const Config *c) {
       !cacheWriteList(fp, &c->excludes) || !cacheWriteString(fp, c->pack.name) ||
       !cacheWriteString(fp, c->pack.version) || !cacheWriteList(fp, &c->pack.files) ||
       !cacheWriteString(fp, c->pack.output) || !cacheWriteString(fp, c->pack.compress) ||
+      !cacheWriteU8(fp, c->pack.optimize ? 1 : 0) ||
       !cacheWriteString(fp, c->pack.checksum) || !cacheWriteString(fp, c->pack.format) ||
       !cacheWriteString(fp, c->pack.debMaintainer) ||
       !cacheWriteString(fp, c->pack.debDescription) ||
@@ -176,6 +180,7 @@ static bool cacheWriteConfig(FILE *fp, const Config *c) {
 static bool cacheReadConfig(FILE *fp, Config *c) {
   uint8_t cleanBuild = 0, cleanCompdb = 0, progress = 0, progressError = 0, foreground = 0;
   uint8_t binary = 1, logEnabled = 0, background = 0;
+  uint8_t packOptimize = 0;
   uint8_t libRequested = 0, libStatic = 0, libShared = 0, packRequested = 0, langCpp = 0;
   uint32_t embCount = 0;
 
@@ -203,6 +208,7 @@ static bool cacheReadConfig(FILE *fp, Config *c) {
       !cacheReadList(fp, &c->pack.files) ||
       !cacheReadString(fp, c->pack.output, sizeof(c->pack.output)) ||
       !cacheReadString(fp, c->pack.compress, sizeof(c->pack.compress)) ||
+      !cacheReadU8(fp, &packOptimize) ||
       !cacheReadString(fp, c->pack.checksum, sizeof(c->pack.checksum)) ||
       !cacheReadString(fp, c->pack.format, sizeof(c->pack.format)) ||
       !cacheReadString(fp, c->pack.debMaintainer, sizeof(c->pack.debMaintainer)) ||
@@ -213,6 +219,7 @@ static bool cacheReadConfig(FILE *fp, Config *c) {
       !cacheReadU32(fp, &embCount) || embCount > MAX_EMBEDDED)
     return false;
   c->pack.requested = packRequested != 0;
+  c->pack.optimize = packOptimize != 0;
   c->langCpp = langCpp != 0;
 
   c->cleanBuildDir = cleanBuild != 0;
