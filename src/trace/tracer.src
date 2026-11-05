@@ -2,38 +2,170 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdarg.h>
+#include <string.h>
 #include <dlfcn.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <errno.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
 #include <dirent.h>
 #include <pthread.h>
 
+/* Tracer gaya-strace: satu baris per panggilan,
+   <op>(<args>) = <hasil>.
+   Hasil: "= <fd>" saat sukses (persis strace), "= ok" saat sukses tapi
+   nilai baliknya bukan fd (fopen/opendir), "= -1 ENOENT (pesan strerror)"
+   saat gagal. Bendera open/access didekode seperti strace; bit asing hex.
+   Log best-effort: satu write() per baris, kegagalan tulis diabaikan. */
+
 static int logfd = -1;
 static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 
-static void logline(const char *fn, const char *path, int extra) {
+/* tambahkan s ke ujung out (potong diam bila tak muat) */
+static void apnd(char *out, size_t cap, const char *s) {
+    size_t l = strlen(out), n = strlen(s);
+    if (l + n >= cap) n = cap > l ? cap - 1 - l : 0;
+    if (n > 0) { memcpy(out + l, s, n); out[l + n] = 0; }
+}
+
+/* bendera tambahan gaya-strace: pemisah "|" antar nama */
+static void addFlag(char *out, size_t cap, int *first, const char *nm) {
+    apnd(out, cap, *first ? nm : "|");
+    *first = 0;
+}
+
+/* bendera open: mode akses (0 = RDONLY default) + bit umum. hasmode:
+   bila O_CREAT artinya va_arg mode diambil, append ", %04o". */
+static void fmtOpenFlags(char *out, size_t cap, int flags, int hasmode, mode_t mode) {
+    int first = 1, acc = (int)(flags & O_ACCMODE);
+    addFlag(out, cap, &first,
+            acc == O_WRONLY ? "O_WRONLY" : acc == O_RDWR ? "O_RDWR" : "O_RDONLY");
+    static const struct { int bit; const char *nm; } tb[] = {
+        {O_CREAT, "O_CREAT"}, {O_EXCL, "O_EXCL"}, {O_TRUNC, "O_TRUNC"},
+        {O_APPEND, "O_APPEND"}, {O_NONBLOCK, "O_NONBLOCK"},
+        {O_DIRECTORY, "O_DIRECTORY"}, {O_CLOEXEC, "O_CLOEXEC"},
+        {O_NOFOLLOW, "O_NOFOLLOW"}, {O_NOCTTY, "O_NOCTTY"},
+        {O_SYNC, "O_SYNC"}, {O_DSYNC, "O_DSYNC"},
+    };
+    int rest = flags & ~O_ACCMODE;
+    for (size_t i = 0; i < sizeof tb / sizeof tb[0]; i++) {
+        if ((rest & tb[i].bit) == tb[i].bit) {
+            addFlag(out, cap, &first, tb[i].nm);
+            rest &= ~tb[i].bit;
+        }
+    }
+    if (rest) {
+        char t[16];
+        snprintf(t, sizeof t, "%#x", (unsigned)rest);
+        addFlag(out, cap, &first, t);
+    }
+    if (hasmode && (flags & O_CREAT)) {
+        char t[20];
+        snprintf(t, sizeof t, ", %04o", (unsigned)(mode & 07777));
+        apnd(out, cap, t);
+    }
+}
+
+/* bendera access: F_OK/R_OK|W_OK|X_OK seperti strace */
+static void fmtAccessFlags(char *out, size_t cap, int mode) {
+    int first = 1;
+    if (mode & R_OK) addFlag(out, cap, &first, "R_OK");
+    if (mode & W_OK) addFlag(out, cap, &first, "W_OK");
+    if (mode & X_OK) addFlag(out, cap, &first, "X_OK");
+    if (first) addFlag(out, cap, &first, "F_OK"); /* mode 0 */
+}
+
+/* bendera *at di luar dirfd (0 = tanpa bendera, seperti strace) */
+static void fmtAtFlags(char *out, size_t cap, int flags) {
+    int first = 1;
+    static const struct { int bit; const char *nm; } tb[] = {
+        {AT_SYMLINK_NOFOLLOW, "AT_SYMLINK_NOFOLLOW"},
+        {AT_REMOVEDIR, "AT_REMOVEDIR"},
+        {AT_EMPTY_PATH, "AT_EMPTY_PATH"},
+    };
+    for (size_t i = 0; i < sizeof tb / sizeof tb[0]; i++) {
+        if ((flags & tb[i].bit) == tb[i].bit) {
+            addFlag(out, cap, &first, tb[i].nm);
+            flags &= ~tb[i].bit;
+        }
+    }
+    if (flags) {
+        char t[16];
+        snprintf(t, sizeof t, "%#x", (unsigned)flags);
+        addFlag(out, cap, &first, t);
+    }
+}
+
+/* nama errno umum; NULL = dicetak angka */
+static const char *errName(int e) {
+    switch (e) {
+    case EPERM: return "EPERM";
+    case ENOENT: return "ENOENT";
+    case EACCES: return "EACCES";
+    case EEXIST: return "EEXIST";
+    case EISDIR: return "EISDIR";
+    case ENOTDIR: return "ENOTDIR";
+    case ELOOP: return "ELOOP";
+    case ENAMETOOLONG: return "ENAMETOOLONG";
+    case EROFS: return "EROFS";
+    case ENOSPC: return "ENOSPC";
+    case EMFILE: return "EMFILE";
+    case ENFILE: return "ENFILE";
+    case EBADF: return "EBADF";
+    case EINVAL: return "EINVAL";
+    case ENOMEM: return "ENOMEM";
+    case EINTR: return "EINTR";
+    case EAGAIN: return "EAGAIN";
+    case EIO: return "EIO";
+    default: return NULL;
+    }
+}
+
+/* hasil gaya-strace: " = 3" | " = ok" | " = -1 ENOENT (pesan)" */
+static void fmtResult(char *out, size_t cap, long ret, int se, int fdlike) {
+    if (ret >= 0) {
+        if (fdlike) snprintf(out, cap, " = %ld", ret);
+        else snprintf(out, cap, " = ok");
+        return;
+    }
+    const char *nm = errName(se);
+    if (nm) snprintf(out, cap, " = -1 %s (%s)", nm, strerror(se));
+    else snprintf(out, cap, " = -1 errno=%d (%s)", se, strerror(se));
+}
+
+/* tulis satu baris: fn(pre"path"post) = hasil. pre/post kosong boleh. */
+static void logline(const char *fn, const char *pre, const char *path, const char *post, long ret, int se, int fdlike) {
     if (logfd < 0) return;
     char buf[4096];
-    int n;
-    if (extra >= 0)
-        n = snprintf(buf, sizeof buf, "%s\t%s\t0x%x\n", fn, path ? path : "(null)", extra);
-    else
-        n = snprintf(buf, sizeof buf, "%s\t%s\n", fn, path ? path : "(null)");
+    char res[192];
+    fmtResult(res, sizeof res, ret, se, fdlike);
+    int n = snprintf(buf, sizeof(buf) - 2, "%s(\"%s\"%s%s)%s", fn,
+                     path ? path : "(null)", pre ? pre : "", post ? post : "", res);
     if (n <= 0) return;
+    if (n >= (int)sizeof(buf) - 1) n = (int)sizeof(buf) - 2; /* dipotong: tetap ditutup \n */
+    buf[n] = '\n';
     pthread_mutex_lock(&lock);
-    if (write(logfd, buf, n) < 0) { /* log best-effort: abaikan kegagalan */ }
+    if (write(logfd, buf, (size_t)n + 1) < 0) { /* best-effort: abaikan */ }
     pthread_mutex_unlock(&lock);
 }
 
-// Buka log langsung via syscall, jangan lewat libc (hindari rekursi ke hook sendiri)
+/* pre untuk panggilan *at: "AT_FDCWD, " atau "<n>, " */
+static void atPre(char *out, size_t cap, int dirfd) {
+    out[0] = 0;
+    if (dirfd == AT_FDCWD) { apnd(out, cap, "AT_FDCWD, "); return; }
+    char t[20];
+    snprintf(t, sizeof t, "%d, ", dirfd);
+    apnd(out, cap, t);
+}
+
+// Buka log lewat syscall langsung (bukan libc) agar tidak rekursi ke hook sendiri
 __attribute__((constructor))
 static void init_log(void) {
-    /* Lokasi log: SATRIA_TRACE_LOG (diset `satria trace`), fallback /tmp/trace.log. */
-    const char *path = getenv("SATRIA_TRACE_LOG");
-    if (!path || !*path) path = "/tmp/trace.log";
-    logfd = syscall(SYS_openat, AT_FDCWD, path,
+    /* Lokasi log: env SATRIA_TRACE_LOG (diset `satria trace`); fallback /tmp/trace.log. */
+    const char *p = getenv("SATRIA_TRACE_LOG");
+    if (!p || !*p) p = "/tmp/trace.log";
+    logfd = syscall(SYS_openat, AT_FDCWD, p,
                     O_WRONLY | O_CREAT | O_APPEND, 0644);
 }
 
@@ -41,116 +173,222 @@ static void init_log(void) {
     static __typeof__(name) *real_##name; \
     if (!real_##name) real_##name = dlsym(RTLD_NEXT, #name)
 
-// ---------- open family ----------
+// ---------- keluarga open ----------
 int open(const char *path, int flags, ...) {
     va_list ap; va_start(ap, flags);
     mode_t mode = va_arg(ap, mode_t); va_end(ap);
     REAL(open);
-    logline("open", path, flags);
-    return real_open(path, flags, mode);
+    errno = 0;
+    int r = real_open(path, flags, mode);
+    int se = errno;
+    char post[96];
+    post[0] = 0;
+    apnd(post, sizeof post, ", ");
+    fmtOpenFlags(post, sizeof post, flags, 1, mode);
+    logline("open", "", path, post, r, se, 1);
+    return r;
 }
 
 int open64(const char *path, int flags, ...) {
     va_list ap; va_start(ap, flags);
     mode_t mode = va_arg(ap, mode_t); va_end(ap);
     REAL(open64);
-    logline("open64", path, flags);
-    return real_open64(path, flags, mode);
+    errno = 0;
+    int r = real_open64(path, flags, mode);
+    int se = errno;
+    char post[96];
+    post[0] = 0;
+    apnd(post, sizeof post, ", ");
+    fmtOpenFlags(post, sizeof post, flags, 1, mode);
+    logline("open64", "", path, post, r, se, 1);
+    return r;
 }
 
 int openat(int dirfd, const char *path, int flags, ...) {
     va_list ap; va_start(ap, flags);
     mode_t mode = va_arg(ap, mode_t); va_end(ap);
     REAL(openat);
-    logline("openat", path, flags);
-    return real_openat(dirfd, path, flags, mode);
+    errno = 0;
+    int r = real_openat(dirfd, path, flags, mode);
+    int se = errno;
+    char pre[24], post[96];
+    atPre(pre, sizeof pre, dirfd);
+    post[0] = 0;
+    apnd(post, sizeof post, ", ");
+    fmtOpenFlags(post, sizeof post, flags, 1, mode);
+    logline("openat", pre, path, post, r, se, 1);
+    return r;
 }
 
 FILE *fopen(const char *path, const char *mode) {
     REAL(fopen);
-    logline("fopen", path, -1);
-    return real_fopen(path, mode);
+    errno = 0;
+    FILE *r = real_fopen(path, mode);
+    int se = errno;
+    char post[64];
+    post[0] = 0;
+    apnd(post, sizeof post, ", \"");
+    apnd(post, sizeof post, mode ? mode : "<null>");
+    apnd(post, sizeof post, "\"");
+    logline("fopen", "", path, post, r ? 0 : -1, se, 0);
+    return r;
 }
 
 FILE *fopen64(const char *path, const char *mode) {
     REAL(fopen64);
-    logline("fopen64", path, -1);
-    return real_fopen64(path, mode);
+    errno = 0;
+    FILE *r = real_fopen64(path, mode);
+    int se = errno;
+    char post[64];
+    post[0] = 0;
+    apnd(post, sizeof post, ", \"");
+    apnd(post, sizeof post, mode ? mode : "<null>");
+    apnd(post, sizeof post, "\"");
+    logline("fopen64", "", path, post, r ? 0 : -1, se, 0);
+    return r;
 }
 
-// ---------- stat family ----------
+// ---------- keluarga stat ----------
 int stat(const char *path, struct stat *st) {
     REAL(stat);
-    logline("stat", path, -1);
-    return real_stat(path, st);
+    errno = 0;
+    int r = real_stat(path, st);
+    int se = errno;
+    logline("stat", "", path, "", r, se, 1);
+    return r;
 }
 
 int lstat(const char *path, struct stat *st) {
     REAL(lstat);
-    logline("lstat", path, -1);
-    return real_lstat(path, st);
+    errno = 0;
+    int r = real_lstat(path, st);
+    int se = errno;
+    logline("lstat", "", path, "", r, se, 1);
+    return r;
 }
 
 int stat64(const char *path, struct stat64 *st) {
     REAL(stat64);
-    logline("stat64", path, -1);
-    return real_stat64(path, st);
+    errno = 0;
+    int r = real_stat64(path, st);
+    int se = errno;
+    logline("stat64", "", path, "", r, se, 1);
+    return r;
 }
 
-int fstatat(int fd, const char *path, struct stat *st, int flags) {
+int fstatat(int dirfd, const char *path, struct stat *st, int flags) {
     REAL(fstatat);
-    logline("fstatat", path, flags);
-    return real_fstatat(fd, path, st, flags);
+    errno = 0;
+    int r = real_fstatat(dirfd, path, st, flags);
+    int se = errno;
+    /* Isi struct tidak direkam (strace menampilkannya; deviation di dokumentasi):
+       bendera at-lang tapi tetap di depan hasil. */
+    char pre[24], post[96];
+    atPre(pre, sizeof pre, dirfd);
+    post[0] = 0;
+    fmtAtFlags(post + 0, sizeof post, flags); /* isi langsung: ", FLAG" */
+    if (post[0]) {
+        char tmp[96];
+        tmp[0] = 0;
+        apnd(tmp, sizeof tmp, ", ");
+        apnd(tmp, sizeof tmp, post);
+        post[0] = 0;
+        apnd(post, sizeof post, tmp);
+    }
+    logline("fstatat", pre, path, post, r, se, 1);
+    return r;
 }
 
-// glibc lama: __xstat / __xstat64 / __lxstat
+// varian glibc lama: __xstat / __xstat64 / __lxstat
 int __xstat(int ver, const char *path, struct stat *st) {
     REAL(__xstat);
-    logline("__xstat", path, -1);
-    return real___xstat(ver, path, st);
+    errno = 0;
+    int r = real___xstat(ver, path, st);
+    int se = errno;
+    logline("__xstat", "", path, "", r, se, 1);
+    return r;
 }
 
 int __xstat64(int ver, const char *path, struct stat64 *st) {
     REAL(__xstat64);
-    logline("__xstat64", path, -1);
-    return real___xstat64(ver, path, st);
+    errno = 0;
+    int r = real___xstat64(ver, path, st);
+    int se = errno;
+    logline("__xstat64", "", path, "", r, se, 1);
+    return r;
 }
 
 int __lxstat(int ver, const char *path, struct stat *st) {
     REAL(__lxstat);
-    logline("__lxstat", path, -1);
-    return real___lxstat(ver, path, st);
+    errno = 0;
+    int r = real___lxstat(ver, path, st);
+    int se = errno;
+    logline("__lxstat", "", path, "", r, se, 1);
+    return r;
 }
 
 // ---------- access ----------
 int access(const char *path, int mode) {
     REAL(access);
-    logline("access", path, mode);
-    return real_access(path, mode);
+    errno = 0;
+    int r = real_access(path, mode);
+    int se = errno;
+    char post[48];
+    post[0] = 0;
+    apnd(post, sizeof post, ", ");
+    fmtAccessFlags(post, sizeof post, mode);
+    logline("access", "", path, post, r, se, 1);
+    return r;
 }
 
-int faccessat(int fd, const char *path, int mode, int flags) {
+int faccessat(int dirfd, const char *path, int mode, int flags) {
     REAL(faccessat);
-    logline("faccessat", path, mode);
-    return real_faccessat(fd, path, mode, flags);
+    errno = 0;
+    int r = real_faccessat(dirfd, path, mode, flags);
+    int se = errno;
+    char pre[24], post[64];
+    atPre(pre, sizeof pre, dirfd);
+    post[0] = 0;
+    apnd(post, sizeof post, ", ");
+    fmtAccessFlags(post, sizeof post, mode);
+    if (flags) {
+        char at[64];
+        at[0] = 0;
+        fmtAtFlags(at, sizeof at, flags);
+        apnd(post, sizeof post, ", ");
+        apnd(post, sizeof post, at);
+    }
+    logline("faccessat", pre, path, post, r, se, 1);
+    return r;
 }
 
 // ---------- readlink ----------
 ssize_t readlink(const char *path, char *buf, size_t sz) {
     REAL(readlink);
-    logline("readlink", path, -1);
-    return real_readlink(path, buf, sz);
+    errno = 0;
+    ssize_t r = real_readlink(path, buf, sz);
+    int se = errno;
+    logline("readlink", "", path, "", r, se, 1);
+    return r;
 }
 
-ssize_t readlinkat(int fd, const char *path, char *buf, size_t sz) {
+ssize_t readlinkat(int dirfd, const char *path, char *buf, size_t sz) {
     REAL(readlinkat);
-    logline("readlinkat", path, -1);
-    return real_readlinkat(fd, path, buf, sz);
+    errno = 0;
+    ssize_t r = real_readlinkat(dirfd, path, buf, sz);
+    int se = errno;
+    char pre[24];
+    atPre(pre, sizeof pre, dirfd);
+    logline("readlinkat", pre, path, "", r, se, 1);
+    return r;
 }
 
 // ---------- opendir ----------
 DIR *opendir(const char *path) {
     REAL(opendir);
-    logline("opendir", path, -1);
-    return real_opendir(path);
+    errno = 0;
+    DIR *r = real_opendir(path);
+    int se = errno;
+    logline("opendir", "", path, "", r ? 0 : -1, se, 0);
+    return r;
 }

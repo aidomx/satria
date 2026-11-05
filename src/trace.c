@@ -147,14 +147,20 @@ static bool ensureTracer(const char *soOpt, char *so, size_t cap) {
 
 /* ---------- ringkasan ---------- */
 
-static int cmpStr(const void *a, const void *b) {
-  return strcmp(*(char *const *)a, *(char *const *)b);
-}
-
 typedef struct {
   size_t count;
+  size_t err; /* panggilan dengan hasil "= -1" dalam grup ini */
   const char *key;
 } Cnt;
+
+typedef struct {
+  char name[24];
+  size_t c;
+} ErrTally;
+
+static int cmpRec(const void *a, const void *b) {
+  return strcmp(((const Cnt *)a)->key, ((const Cnt *)b)->key);
+}
 
 static int cmpCnt(const void *a, const void *b) {
   const Cnt *x = a, *y = b;
@@ -162,72 +168,135 @@ static int cmpCnt(const void *a, const void *b) {
   return strcmp(x->key, y->key);
 }
 
-/* Op = bagian sebelum tab pertama. Key = "op\tpath" (flag di-drop). */
+/* Op = bagian sebelum '(' pada log gaya-strace; errno hasil "-1" dihitung
+   terpisah (kolom err, seperti strace -c). */
 static void summarize(const char *logPath, int top) {
   FILE *f = fopen(logPath, "r");
   if (!f) {
     fprintf(stderr, "satria trace: log '%s' tidak terbaca.\n", logPath);
     return;
   }
-  char **keys = NULL;
-  size_t n = 0, cap = 0;
+  Cnt *rs = NULL; /* key per baris: "op\tpath" */
+  size_t n = 0, cap = 0, nerr = 0;
+  ErrTally *et = NULL;
+  size_t net = 0, etcap = 0;
   char *line = NULL;
   size_t lcap = 0;
   ssize_t r;
   while ((r = getline(&line, &lcap, f)) >= 0) {
     if (r > 0 && line[r - 1] == '\n') line[--r] = '\0';
-    char *t1 = strchr(line, '\t');
-    if (!t1) continue;
-    char *t2 = strchr(t1 + 1, '\t');
-    size_t klen = t2 ? (size_t)(t2 - line) : strlen(line);
+    /* Baris gaya-strace: op(\"...\", ...) = hasil. Key = op + path. */
+    char *lb = strchr(line, '(');
+    if (!lb || lb == line) continue;
+    bool ok = true;
+    for (char *c = line; c < lb; c++) {
+      if (!((c[0] >= 'a' && c[0] <= 'z') || (c[0] >= 'A' && c[0] <= 'Z') ||
+            (c[0] >= '0' && c[0] <= '9') || c[0] == '_')) {
+        ok = false;
+        break;
+      }
+    }
+    if (!ok) continue;
+    char *q1 = strchr(lb, '"');
+    if (!q1) continue;
+    char *q2 = strchr(q1 + 1, '"');
+    if (!q2 || q2 == q1 + 1) continue; /* path wajib terpetakan */
+    /* error: " = -1 " hanya dicari SETELAH ')' — path bisa memuat teks itu */
+    char *rp = strchr(lb, ')');
+    const char *neg = rp ? strstr(rp, " = -1 ") : NULL;
+    bool fail = neg != NULL;
+    size_t olen = (size_t)(lb - line);
+    size_t plen = (size_t)(q2 - q1 - 1);
     if (n == cap) {
       size_t nc = cap ? cap * 2 : 1024;
-      char **nk = realloc(keys, nc * sizeof(char *));
-      if (!nk) break;
-      keys = nk;
+      Cnt *nr = realloc(rs, nc * sizeof(Cnt));
+      if (!nr) break;
+      rs = nr;
       cap = nc;
     }
-    char *k = malloc(klen + 1);
+    char *k = malloc(olen + 1 + plen + 1);
     if (!k) break;
-    memcpy(k, line, klen);
-    k[klen] = '\0';
-    keys[n++] = k;
+    memcpy(k, line, olen);
+    k[olen] = '\t';
+    memcpy(k + olen + 1, q1 + 1, plen);
+    k[olen + 1 + plen] = '\0';
+    rs[n].count = 1;
+    rs[n].err = fail ? 1 : 0;
+    rs[n].key = k;
+    n++;
+    if (fail) {
+      nerr++;
+      /* nama errno setelah " = -1 ": sampai spasi/'(' (mis. ENOENT). */
+      const char *nm = neg + 6;
+      size_t nl = 0;
+      while (nm[nl] && nm[nl] != ' ' && nm[nl] != '(') nl++;
+      if (nl == 0 || nl >= sizeof((ErrTally *)0)->name) continue;
+      size_t t;
+      for (t = 0; t < net; t++)
+        if (strncmp(et[t].name, nm, nl) == 0 && et[t].name[nl] == '\0') break;
+      if (t == net) {
+        if (net == etcap) {
+          size_t nc2 = etcap ? etcap * 2 : 8;
+          ErrTally *nt = realloc(et, nc2 * sizeof(ErrTally));
+          if (!nt) break;
+          et = nt;
+          etcap = nc2;
+        }
+        memcpy(et[net].name, nm, nl);
+        et[net].name[nl] = '\0';
+        et[net].c = 0;
+        net++;
+      }
+      et[t].c++;
+    }
   }
   free(line);
   fclose(f);
 
   if (n == 0) {
     printf("> trace   : log kosong (tidak ada akses openat/stat yang terekam)\n");
-    free(keys);
+    for (size_t i = 0; i < n; i++) free(rs[i].key);
+    free(rs);
+    free(et);
     return;
   }
-  qsort(keys, n, sizeof(char *), cmpStr);
+  qsort(rs, n, sizeof(Cnt), cmpRec);
 
   /* Run-length: key sama berdampingan setelah diurutkan. */
   Cnt *cs = malloc(n * sizeof(Cnt));
   size_t m = 0;
   for (size_t i = 0; i < n;) {
     size_t j = i;
-    while (j < n && strcmp(keys[j], keys[i]) == 0) j++;
+    while (j < n && strcmp(rs[j].key, rs[i].key) == 0) j++;
     cs[m].count = j - i;
-    cs[m].key = keys[i];
+    cs[m].key = rs[i].key;
+    cs[m].err = 0;
+    for (size_t e = i; e < j; e++) cs[m].err += rs[e].err;
     m++;
     i = j;
   }
 
   printf("> trace   : %zu akses, %zu pola unik  (log: %s)\n", n, m, logPath);
+  if (nerr > 0) {
+    printf("> trace   : %zu gagal", nerr);
+    for (size_t t = 0; t < net; t++)
+      printf("%s%s %zu", t == 0 ? " (errno: " : ", ", et[t].name, et[t].c);
+    printf(")\n");
+  }
 
-  /* Total per op: op contiguous setelah diurutkan (prefix "op\t"). */
+  /* Total per op: op contiguous setelah diurutkan (prefix "op\T"). */
   printf("  per op :");
   for (size_t i = 0; i < m;) {
     const char *t = strchr(cs[i].key, '\t');
     size_t olen = (size_t)(t - cs[i].key);
-    size_t tot = 0, j = i;
+    size_t tot = 0, erh = 0, j = i;
     while (j < m && strncmp(cs[j].key, cs[i].key, olen) == 0 && cs[j].key[olen] == '\t') {
       tot += cs[j].count;
+      erh += cs[j].err;
       j++;
     }
     printf("  %.*s %zu", (int)olen, cs[i].key, tot);
+    if (erh) printf(" (err %zu)", erh);
     i = j;
   }
   printf("\n");
@@ -240,16 +309,17 @@ static void summarize(const char *logPath, int top) {
     printf("  %7zu  %-8.*s %s\n", cs[i].count, (int)(t - cs[i].key), cs[i].key, t + 1);
   }
 
-  for (size_t i = 0; i < n; i++) free(keys[i]);
-  free(keys);
+  for (size_t i = 0; i < n; i++) free(rs[i].key);
+  free(rs);
   free(cs);
+  free(et);
 }
 
 /* ---------- entry point ---------- */
 
 int cmdTrace(const char *const *args, int nargs, const char *argv0) {
   const char *outOpt = NULL, *soOpt = NULL;
-  int top = 30;
+  int top = 30, raw = 0;
   int i = 0;
   for (; i < nargs; i++) {
     const char *a = args[i];
@@ -257,7 +327,8 @@ int cmdTrace(const char *const *args, int nargs, const char *argv0) {
       i++;
       break;
     }
-    if (strncmp(a, "--out=", 6) == 0) outOpt = a + 6;
+    if (strcmp(a, "--raw") == 0) raw = 1;
+    else if (strncmp(a, "--out=", 6) == 0) outOpt = a + 6;
     else if (strcmp(a, "--out") == 0 && i + 1 < nargs) outOpt = args[++i];
     else if (strncmp(a, "--so=", 5) == 0) soOpt = a + 5;
     else if (strcmp(a, "--so") == 0 && i + 1 < nargs) soOpt = args[++i];
@@ -333,6 +404,21 @@ int cmdTrace(const char *const *args, int nargs, const char *argv0) {
   }
 
   summarize(logPath, top);
+  if (raw) {
+    /* Strace default mencetak stream panggilan; --raw memutar isi log
+       (urutan kronologis antar proses) sesudah ringkasan. */
+    printf("> trace   : --- isi log %s ---\n", logPath);
+    FILE *rf = fopen(logPath, "rb");
+    if (rf) {
+      char b[8192];
+      size_t rn;
+      while ((rn = fread(b, 1, sizeof(b), rf)) > 0) fwrite(b, 1, rn, stdout);
+      fclose(rf);
+      fflush(stdout);
+    } else {
+      fprintf(stderr, "satria trace: log '%s' tidak terbaca.\n", logPath);
+    }
+  }
   return rc;
 }
 
