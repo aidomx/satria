@@ -1,0 +1,134 @@
+# Pengujian manual di Windows/MSVC (workflow_dispatch — TIDAK jalan di
+# push/PR/release; dipicu: `gh workflow run tests-manual.yml`).
+#
+# Tujuan (design/packaging.md §Catatan terbuka): unit suite + smoke pack
+# belum pernah diuji nyata di Windows/MSVC. Workflow ini menjalankannya
+# on-demand dari perangkat yang punya `gh`, tanpa menunggu release
+# (build.yml) atau trigger build-manual.yml.
+#
+# Yang diharapkan GAGAL di Windows (diabaikan dari verdict — jalur POSIX):
+#   - tests/unit/trace_summary.sh  → `satria trace` menolak (LD_PRELOAD
+#     / dlsym tidak ada di Windows; cmdTrace menolak dengan rc=2).
+#   - tests/unit/trace_src_sync.sh → murni regen header; seharusnya tetap
+#     PASS, dijadikan sanity tracer source.
+# Runner scripts/unit.sh menjalankan SELURUH tests/unit/*.sh — target arg
+# hanya fixture workspace, bukan filter; jadi anggap 2 FAIL trace di atas
+# baseline.
+name: Tests Manual (Windows/MSVC)
+
+on:
+  workflow_dispatch:
+    inputs:
+      suite:
+        type: string
+        description: "Fixture workspace untuk suite (dir; default tests/miniws)"
+        required: false
+        default: "tests/miniws"
+      suite2:
+        type: string
+        description: "Fixture kedua opsional; kosongkan bila tidak perlu (dibangun pending boleh)"
+        required: false
+        default: ""
+      jobs:
+        type: string
+        description: "Batas job satria per test (-j scripts/unit.sh; default 2)"
+        required: false
+        default: "2"
+
+jobs:
+  tests:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      # cl.exe tidak ada di PATH bash runner — impor env vcvars
+      # (PATH/INCLUDE/LIB) agar install.ps1 bisa memanggil cl langsung.
+      - name: Setup MSVC environment
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Bootstrap build (install.ps1 --dev)
+        shell: pwsh
+        run: ./install.ps1 --dev
+
+      - name: Smoke test version + help
+        shell: bash
+        run: |
+          ./bin/satria.exe version
+          ./bin/satria.exe help | head -20
+
+      # Windows mengunci binary yang sedang berjalan: self-host build tidak
+      # boleh menimpa binary-nya sendiri. Pola build.yml: salin bootstrap ke
+      # bin/satria-bootstrap.exe, bangun dari situ.
+      - name: Copy bootstrap binary
+        shell: bash
+        run: cp bin/satria.exe bin/satria-bootstrap.exe
+
+      # Di Windows/MSVC ini menguji jalur tanpa file .d (pemindai #include),
+      # translasi flag, dan link MSVC end-to-end.
+      - name: Self-host build (Buildfile)
+        shell: bash
+        run: ./bin/satria-bootstrap.exe -j4
+
+      - name: Self-host incremental (semua up-to-date)
+        shell: bash
+        run: ./bin/satria.exe
+
+      # ---- unit suite (satria membangun proyek-proyek fixture) ----
+      - name: Unit suite (scripts/unit.sh)
+        if: ${{ inputs.suite != '' }}
+        shell: bash
+        run: bash scripts/unit.sh -o unit-msvc-1.log -j "${{ inputs.jobs }}" "${{ inputs.suite }}"
+
+      - name: Unit suite kedua (opsional)
+        if: ${{ inputs.suite2 != '' }}
+        shell: bash
+        run: bash scripts/unit.sh -o unit-msvc-2.log -j "${{ inputs.jobs }}" "${{ inputs.suite2 }}"
+
+      # ---- smoke pack.optimize = true di MSVC ----
+      # Jalur pack TARBALL dua langkah (tar → gzip -1) perlu dibuktikan di
+      # Windows: fsRenameReplace (rename atomik) + mkparent + runCmd shell
+      # tar/gzip. Bukti "level ter-FASTEST" & dua langkah: FNAME field di
+      # header gzip berisi "out.tar.part" (nama file tar flat — hanya
+      # ditulis saat gzip menampung FILE, bukan lewat pipe `tar czf`).
+      - name: Smoke pack.optimize = true (single project)
+        shell: bash
+        run: |
+          mkdir -p smoke/src
+          {
+            printf 'use project\n\nsources = src\n\n'
+            printf 'pack.name = smoke\n'
+            printf 'pack.version = 1.0\n'
+            printf 'pack.files = bin/smoke\n'
+            printf 'pack.output = dist/{name}.tar.gz\n'
+            printf 'pack.compress = gzip\n'
+            printf 'pack.optimize = true\n'
+          } > smoke/Buildfile
+          printf 'int main(void){return 0;}\n' > smoke/src/main.c
+          cd smoke
+          ../bin/satria.exe -j2
+          # tarball valid & memuat binary. Entri `bin/smoke` di Windows
+          # di-resolve ke bin/smoke.exe oleh packResolveSource (entri
+          # portable tanpa akhiran .exe).
+          tar -tzf dist/smoke.tar.gz | grep -q 'smoke'
+          gzip -tv dist/smoke.tar.gz
+          # bukti jalur dua langkah: FNAME header gzip = out.tar.part
+          head -c 64 dist/smoke.tar.gz | grep -aq 'out.tar.part' \
+            && echo "SMOKE OK: optimize dua-langkah (FNAME=out.tar.part) + tarball valid"
+
+      # Selalu unggah log walau salah satu suite gagal
+      - name: Upload logs (always)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-logs-msvc
+          path: |
+            unit-msvc-1.log
+            unit-msvc-2.log
+          if-no-files-found: ignore
+          retention-days: 14
