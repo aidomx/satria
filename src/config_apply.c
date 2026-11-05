@@ -53,6 +53,7 @@ static void configApply(Config *c, const char *section, const char *sub, const c
        files/output proyek biasa tidak terpengaruh (pack tak aktif). */
     else if (strcmp(key, "name") == 0 || strcmp(key, "version") == 0 ||
              strcmp(key, "output") == 0 || strcmp(key, "compress") == 0 ||
+             strcmp(key, "optimize") == 0 ||
              strcmp(key, "checksum") == 0 || strcmp(key, "format") == 0 ||
              strcmp(key, "files") == 0 || strcmp(key, "exclude") == 0)
       packApply(c, key, value);

@@ -63,7 +63,7 @@ void packApplyDeb(Config *c, const char *key, const char *value) {
 
 /* Key pack.* tanpa sub — dipakai section `pack`, section `release`, maupun
    key bare di top-level (name, version, files, exclude, output, compress,
-   checksum, format). */
+   optimize, checksum, format). */
 void packApply(Config *c, const char *key, const char *value) {
   if (strcmp(key, "name") == 0)
     packSetStr(c->pack.name, sizeof(c->pack.name), value);
@@ -73,6 +73,14 @@ void packApply(Config *c, const char *key, const char *value) {
     packSetStr(c->pack.output, sizeof(c->pack.output), value);
   else if (strcmp(key, "compress") == 0)
     packSetStr(c->pack.compress, sizeof(c->pack.compress), value);
+  else if (strcmp(key, "optimize") == 0) {
+    /* kompresi level ter-FASTEST (trade ukuran); false (default) = tak berubah */
+    bool b;
+    if (!parseBool(value, &b))
+      fprintf(stderr, "satria: pack: optimize '%s' tidak valid (true/false)\n", value);
+    else
+      c->pack.optimize = b;
+  }
   else if (strcmp(key, "checksum") == 0)
     packSetStr(c->pack.checksum, sizeof(c->pack.checksum), value);
   else if (strcmp(key, "format") == 0)

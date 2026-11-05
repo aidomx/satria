@@ -46,6 +46,9 @@ typedef struct {
                               * diabaikan saat walk folder (pencocokan suffix
                               * & segmen, lihat packStageEntries) */
   char compress[16];         /* "" = dari ekstensi; gzip|none|xz|bz2 */
+  bool optimize;             /* release.optimize=true: kompresor level ter-FASTEST
+                              * (gzip -1 dll) — ukuran diserahkan ke user;
+                              * default false: perilaku tar czf tetap */
   char checksum[16];         /* "" = tanpa; sha256 */
   char format[16];           /* "" = tar; deb menambah artefak .deb */
   char debMaintainer[192];
