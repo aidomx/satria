@@ -180,6 +180,7 @@ compression (`gz`, `xz`, and so on).
 | `pack.checksum` | `sha256` (writes a `.sha256` file) or `none`. Any other value prints a warning. |
 | `pack.exclude` | Paths left out of the package. |
 | `pack.compress` | Compression for tar output, for example `gz` or `xz`. |
+| `pack.optimize` | `true` uses the fastest compression level (`gzip -1`, likewise `-1` for `xz` and `bzip2`) via a two-step tar then compressor. Trades archive size for build time. Default `false` keeps the standard single-step `tar czf` behavior. |
 | `pack.deb.install_prefix`, `pack.deb.maintainer`, `pack.deb.description`, `pack.deb.architecture` | Debian package metadata. |
 | `release.*` | Same keys as `pack.*`, applied to a whole workspace or project. Setting any `release.*` key enables the release phase. |
 
