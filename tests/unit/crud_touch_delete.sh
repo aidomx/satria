@@ -12,8 +12,17 @@ SRC=$(abspath "${2:-$(dirname "$0")/../miniws}")
 [ -d "$SRC" ] || { echo "fixture tidak ditemukan: $SRC"; exit 2; }
 export NO_COLOR=1
 
+export SATRIA_GATE_DEBUG=1
 pass=0; fail=0
-check() { if [ "$2" -eq 0 ]; then pass=$((pass+1)); echo "PASS  $1"; else fail=$((fail+1)); echo "FAIL  $1"; fi; }
+check() {
+  if [ "$2" -eq 0 ]; then
+    pass=$((pass+1)); echo "PASS  $1"
+  else
+    fail=$((fail+1)); echo "FAIL  $1"
+    echo "--- diagnostik out.txt ($1) ---"; cat out.txt 2>/dev/null; echo "--- akhir diagnostik ---"
+    ls -la .satria .satria/caches 2>&1 | head -20
+  fi
+}
 hit_ws() { grep -q "Nothing to build" "$1" && grep -q "Cache valid *:" "$1"; }
 ostamp() { stat -c '%y' .satria/opts.cache; }
 
