@@ -13,6 +13,7 @@ SRC=$(abspath "${2:-$(dirname "$0")/../miniws}")
 export NO_COLOR=1
 
 export SATRIA_GATE_DEBUG=1
+export SATRIA_CACHE_TRACE=1
 pass=0; fail=0
 check() {
   if [ "$2" -eq 0 ]; then
@@ -70,6 +71,10 @@ cd "$S" || exit 2
 run() { "$SAT" >"$S/out.txt" 2>&1; return $?; }
 
 run; check "single: cold build" $?
+echo "--- diagnostik cold.txt ---"; cat out.txt 2>/dev/null
+echo "--- isi fingerprint.cache (od) ---"
+od -c .satria/caches/fingerprint.cache 2>/dev/null | head -40
+echo "--- akhir diagnostik cold ---"
 a=$(ostamp); run; b=$(ostamp)
 [ "$a" = "$b" ]; check "single: no-op dasar (opts tak tertulis)" $?
 grep -q "Cache valid *: .satria/caches/fingerprint.cache" "$S/out.txt"
