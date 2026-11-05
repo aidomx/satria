@@ -238,11 +238,21 @@ const char *tarDetFlags(void) {
   static int state = 0; /* 0 belum dicek, 1 GNU, 2 bukan GNU */
   if (state == 0) {
     state = 2;
-    FILE *fp = popenRB("tar --version 2>/dev/null");
+    /* SUPPRESION stderr per platform: cmd.exe (_popen Windows) tidak
+       kenal /dev/null — pakai `2>nul`; POSIX pakai `2>/dev/null`.
+       pcloseRB: MSVC hanya punya _pclose (POSIX pclose, LNK2019 05/11). */
+#ifdef _WIN32
+    const char *supp = " 2>nul";
+#else
+    const char *supp = " 2>/dev/null";
+#endif
+    char cmd[32];
+    snprintf(cmd, sizeof(cmd), "tar --version%s", supp);
+    FILE *fp = popenRB(cmd);
     if (fp) {
       char line[160];
       if (fgets(line, sizeof(line), fp) && strstr(line, "GNU tar")) state = 1;
-      pclose(fp);
+      pcloseRB(fp);
     }
     if (state == 1)
       snprintf(flags, sizeof(flags),
