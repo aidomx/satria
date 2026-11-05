@@ -48,7 +48,7 @@ Revisi 2 membalik modelnya:
   pun (prefix ../<n>/...), artefak build, sumber, atau dokumen;
 - release.exclude mengeluarkan path/pola dari folder yang di-walk;
 - semua fitur pack ikut: name, version, output, format (tar|deb),
-  compress, checksum, deb.*;
+  compress, optimize, checksum, deb.*;
 - pack.* project TETAP berjalan seperti biasa (kemasan per-proyek ke
   dist/ project sendiri) — tidak diubah, tidakcampuradukkan.
 
@@ -67,6 +67,7 @@ release.exclude = build, .git, dist    # diabaikan saat walk folder
 release.output = dist/rupa-v{version}-{os}-{arch}.tar.gz
 release.format = deb                   # tar (default) atau deb
 release.compress = gzip
+release.optimize = true                  # kompresor level ter-FASTEST (gzip -1); default false
 release.checksum = sha256
 release.deb.maintainer = "Nama <email>"
 release.deb.description = ...
@@ -88,6 +89,16 @@ Aturan penting:
   entri file eksplisit.
 - release.output default: dist/{name}-v{version}.tar.gz — selalu
   dihitung dari root workspace/root proyek, BUKAN folder project.
+- release.optimize = true: kompresor memakai level ter-FASTEST —
+  gzip -1 / xz -1 / bzip2 -1 lewat dua langkah (tar flat dulu, lalu
+  compressor). Arsip lebih besar (user yang memilih), biaya kompresi
+  jauh lebih murah. Default false: perilaku satu langkah tar czf/cJf/cjf
+  TIDAK berubah. Memutar nilai false↔true tidak membatalkan no-op —
+  hapus artefak (atau touch input) untuk rebuild. Catatan run asal:
+  `tarDetFlags` membuat isi tar deterministik (mtime/owner tetap), jadi
+  rebuild yang berakhir identik menghasilkan arsip byte-sama. Cakupan:
+  hanya tarball — staging internal .deb tetap `tar czf`
+  (lihat design/packaging.md §Deb).
 - release tanpa release.* sama sekali TIDAK dijalankan (back-compat:
   workspace tanpa section release berperilaku seperti sebelumnya).
 

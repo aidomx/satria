@@ -33,6 +33,7 @@ Status: **selesai diimplementasi & teruji** (2 Okt 2026).
 | `pack.version` | versi | `0.0.0` |
 | `pack.output` | template artefak | `dist/{name}-v{version}.tar.gz` |
 | `pack.compress` | `gzip\|none\|xz\|bz2` (`"bzip2"` → `bz2`) | dari ekstensi output |
+| `pack.optimize` | `true` = kompresor level ter-FASTEST (`gzip -1`/`xz -1`/`bzip2 -1`, dua langkah tar lalu compressor) — arsip lebih besar, biaya jauh lebih murah; ukuran diserahkan ke user | `false` (perilaku `tar czf` tak berubah) |
 | `pack.checksum` | `sha256` | — |
 | `pack.format` | `tar\|none\|deb` (lain → error) | `tar` |
 | `pack.files` | entri yang dikemas (dir/file) | — |
@@ -40,6 +41,10 @@ Status: **selesai diimplementasi & teruji** (2 Okt 2026).
 
 ## Deb
 
+- `pack.optimize` hanya mengubah TARBALL (`packBuildTar`); staging internal
+  `.deb` (`control.tar.gz`, `data.tar.gz` via `debTar`, `pack_deb.c`) tetap
+  memakai `tar czf` default — ukuran .deb wilayah format distro, bukan knob
+  kecepatan release (keputusan scope 05/11/2026).
 - Pemetaan: tiap entri `pack.files` dipasang di `<install_prefix>/<entri>`.
 - Mode file: `0755` untuk komponen pertama `bin/` atau `*.so`; selain itu bit
   +x sumber dipertahankan (`fsGetMode`).
@@ -80,6 +85,25 @@ Menghapus staging `.satria/pack`; **tidak** menyentuh `dist/` (bisa dirujuk
 ## Catatan terbuka
 
 - Template tanpa `{version}` → nama file tanpa versi (diamankan, bukan error).
-- Windows/MSVC belum diuji nyata (jalur `_chmod` sudah disiapkan).
+- Windows/MSVC belum diuji nyata di lokal (jalur `_chmod` sudah disiapkan).
+  Pengujian on-demand: workflow **manual** `.github/workflows/tests-manual.yml`
+  (`workflow_dispatch`, windows-latest, hanya MSVC — `ilammy/msvc-dev-cmd`
+  + `install.ps1 --dev`): unit suite via `scripts/unit.sh` + smoke
+  `pack.optimize = true` (bukti dua-langkah lewat FNAME header gzip =
+  `out.tar.part`). Dipicu dari perangkat yang punya `gh`:
+  `gh workflow run tests-manual.yml [-f suite=tests/miniws -f suite2=<dir>
+  -f jobs=2]`. Log suite selalu diunggah sebagai artifact `unit-logs-msvc`.
+  Run pertama (05/11/2026), log `/tmp/tests-manual.log`:
+  * bootstrap + self-host MSVC LULUS setelah fix LNK2019 (`tarDetFlags`
+    memanggi `pclose` mentah → `pcloseRB`; `2>/dev/null` → `2>nul` untuk
+    cmd.exe, `src/util.c`).
+  * Kelas FAIL palsu unit suite (infrastruktur, bukan produk): input fixture
+    relatif + runner `cd` tmp (abspath test gagal) dan checkout CRLF runner
+    (gen_tracer hasil beda byte). Keduanya dibenahi di workflow:
+    fixture/log ikut absolut via `cygpath`, checkout `core.autocrlf false`.
+  * Sisa deviasi objek Windows (dianggap baseline, bukan regresi):
+    `trace_summary` (trace menolak — LD_PRELOAD tak ada), `build_resume` D
+    (semantik SIGINT git-bash tak 1:1), `faststate_external_header`
+    ("steady state is no-op") — satu-satunya yang perlu investigasi lanjut.
 - Ide lanjut: `pack.deb.depends`/`section`, mode deb-only eksplisit via key,
   penandatanganan `.deb`.
