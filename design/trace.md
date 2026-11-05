@@ -8,12 +8,15 @@ dengan ringkasan yang sama seperti pipeline manual:
 
 ## Bentuk
 
-    satria trace [--out FILE] [--top N] [--so FILE] [--] <args satria>
+     satria trace [--raw] [--out FILE] [--top N] [--so FILE] [--] <args satria>
 
 - Opsi trace harus di depan. Token pertama yang bukan opsi trace mulai argumen
   untuk satria (pola sama dengan `satria profile`: parsing opsi global berhenti).
 - Default log: `.satria/trace/openat.log`, dikosongkan setiap run.
 - Default top: 30.
+- `--raw`: sesudah ringkasan, isi log diputar ke stdout (stream panggilan,
+  seperti strace default; urutan kronologis antar proses).
+- Bentuk:
 
 ## Tracer
 
@@ -25,9 +28,24 @@ tracernya sendiri dan tidak membaca berkas luar.
 
 Hook (LD_PRELOAD, POSIX): open/open64/openat, fopen/fopen64,
 stat/lstat/stat64/fstatat (+ __xstat varian lama), access/faccessat,
-readlink/readlinkat, opendir. Setiap panggilan ditulis satu baris:
-`fungsi<TAB>path[<TAB>flags]`.
+readlink/readlinkat, opendir. Setiap panggilan ditulis SATU baris gaya-strace:
 
+    <op>(<args>) = <hasil>
+
+Contoh:
+
+    openat(AT_FDCWD, ".satria/opts.cache", O_RDONLY) = 5
+    openat(AT_FDCWD, "build/x.h", O_RDONLY|O_CREAT|O_TRUNC, 0644) = 3
+    stat(".satria/caches/fp.format") = 0
+    openat("/tmp/x", O_RDONLY) = -1 ENOENT (No such file or directory)
+
+- Bendera didekode (`O_RDONLY|O_CREAT|O_TRUNC`, mode `0644`, akses `R_OK|X_OK`);
+  bit asing dicetak hex. dirfd `*at` ditulis `AT_FDCWD` atau angka fd.
+- Hasil: `= <fd>` sukses (persis strace), `= ok` bila nilai balik bukan fd
+  (fopen/opendir — modestring tetap ditulis), `= -1 ENAME (pesan strerror)`
+  bila gagal.
+- Deviasi dari strace sungguhan: stat hanya menampilkan path (tanpa dump
+  struct), fopen/opendir mencetak `= ok`, dan tidak ada waktu per panggilan.
 - Lokasi log: env `SATRIA_TRACE_LOG` (diset `satria trace`); fallback `/tmp/trace.log`.
 - Log ditulis lewat syscall `openat` langsung di constructor, supaya tidak
   rekursi ke hook sendiri.
@@ -44,10 +62,15 @@ header belum digenerate ulang.
 
 ## Ringkasan
 
-- Key = `op<TAB>path` (kolom flag dibuang). Diurutkan (qsort), lalu run-length:
-  setara `sort | uniq -c`. Urutan teratas: hitungan turun, lalu path naik.
+- Baris diparsing: op = teks sebelum `(`; path = antara pasangan kutip pertama;
+  gagal = hasil ` = -1 ` setelah `)`. Key = `op<TAB>path` (flags/hasil dibuang).
+  Diurutkan (qsort), lalu run-length: setara `sort | uniq -c`. Urutan teratas:
+  hitungan turun, lalu path naik.
+- Baris keempat mencetak total gagal + tally errno (gaya `strace -c` kolom errors).
 - Total per op dihitung dari run yang sama: setelah diurutkan, key dengan op
-  yang sama berdampingan (prefix `op<TAB>`), sehingga tidak perlu map.
+  yang sama berdampingan (prefix `op<TAB>`), sehingga tidak perlu map; kelompok
+  op dengan err>0 dicetak `(err N)`.
+- `--raw` memutar isi log ke stdout sesudah ringkasan.
 - Exit code = exit code child (satria). Ringkasan tetap dicetak walau child gagal.
 
 ## Batasan yang diterima
@@ -72,5 +95,6 @@ No-op `satria -w core` menghasilkan ~90–230 akses. Yang dominan:
 ## Tes
 
 `tests/unit/trace_summary.sh`: total akses = `wc -l` log, dan hitungan teratas
-= `sort | uniq -c | sort -rn | head -1`, pada log yang sama.
+= key `op+path` (dikstrak dari baris strace-gaya lalu `sort | uniq -c`), pada
+log yang sama.
 `tests/unit/trace_src_sync.sh`: `tracer_src.h` sama dengan hasil generate dari `tracer.src`.
