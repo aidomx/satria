@@ -79,6 +79,20 @@ done
 # Default target jika tidak diberikan
 target="${target:-$ROOT_DIR/tests/miniws}"
 
+# Target WAJIB path absolut. Runner pindah ke salinan temp (cd di bawah) sebelum
+# menjalankan tes, sehingga path relatif (mis. tests/miniws) tidak lagi valid di
+# dalam tes. Di-resolve di sini, sebelum cd. Target "/" ditolak: tes menyalin
+# target dengan `cp -a "$MW/."`; target kosong/"/" akan menyalin seluruh root.
+if [ ! -d "$target" ]; then
+  echo "target tidak ditemukan: $target" >&2
+  exit 1
+fi
+target="$(cd "$target" && pwd)"
+if [ "$target" = "/" ]; then
+  echo "target tidak valid: / (berikan direktori fixture, mis. tests/miniws)" >&2
+  exit 1
+fi
+
 # Validasi -j: harus bilangan bulat >= 0.
 case $JOBS in
   '' | *[!0-9]*)

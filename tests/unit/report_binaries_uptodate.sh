@@ -20,6 +20,9 @@ check() {
 "$SAT" > "$W/cold.txt" 2>&1
 "$SAT" > "$W/noop1.txt" 2>&1
 check "setelah build dingin: 1 linked, 0 up-to-date" "$(grep -c 'Binaries   : 1 linked, 0 up-to-date' "$W/noop1.txt" || true)" "1"
+[ "$(grep -c 'Binaries   : 1 linked, 0 up-to-date' "$W/noop1.txt" || true)" = "1" ] || {
+  echo "--- isi noop1.txt (diagnostik) ---"; tail -n 25 "$W/noop1.txt"; echo "--- isi cold.txt (diagnostik) ---"; tail -n 25 "$W/cold.txt"
+}
 # 2) source dikompilasi ulang tetapi object identik -> link dilewati (up-to-date)
 printf '/* komentar */\n' >> src/main.c
 "$SAT" > "$W/touch.txt" 2>&1
