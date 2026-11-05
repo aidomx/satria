@@ -54,6 +54,9 @@ jobs:
 
       - name: Bootstrap build (install.ps1 --dev)
         shell: pwsh
+        env:
+          CC: cl
+          SATRIA_VERSION: ${{ github.ref_name }}
         run: ./install.ps1 --dev
 
       - name: Smoke test version + help
