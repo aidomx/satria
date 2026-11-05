@@ -173,6 +173,17 @@ bool wsParse(WsModel *m, const char *path) {
       continue;
     }
     aliasResolve(&aliases, key, sizeof(key));
+    /* cdeps.<kunci> (mis. cdeps.preshared): kebijakan workspace yang belum
+       didukung. Ditolak eksplisit, bukan diterima diam-diam sebagai proyek
+       implisit bernama `cdeps` (lihat problems/05_11_2026_cdeps.md). */
+    if (strncmp(key, "cdeps.", 6) == 0) {
+      if (!wsGuardQuiet)
+        fprintf(stderr, "satria: %s:%d: '%s' belum didukung (kebijakan cdeps belum tersedia)\n",
+                path, lineno, key);
+      fclose(fp);
+      listFree(&aliases);
+      return false;
+    }
     wsRecordLine(m, key, v);
   }
   fclose(fp);
