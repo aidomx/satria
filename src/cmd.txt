@@ -283,14 +283,20 @@ Buildfile may need edits for non-standard setups.
 ---trace
 Trace file access (POSIX, LD_PRELOAD)
 
-  satria trace [--out FILE] [--top N] [--so FILE] [--] <args satria>
+  satria trace [--raw] [--out FILE] [--top N] [--so FILE] [--] <args satria>
 
 Runs satria with a tracer that logs each open/stat/access/... call of the
-process and its children, then prints a summary (same as
-`sort log | uniq -c | sort -rn | head`).
+process and its children, in strace-like form:
 
-  satria trace -- -w core       Trace a workspace build of `core`
-  satria trace --top 50 -- -w   Show the 50 most frequent accesses
+  openat(AT_FDCWD, ".satria/opts.cache", O_RDONLY) = 5
+  openat(AT_FDCWD, "build/missing.h", O_RDONLY) = -1 ENOENT (No such file or directory)
+
+then prints a summary (total per op with error counts, like strace -c, plus
+the most frequent accesses). `--raw` also replays the full call stream.
+
+  satria trace -- -w core        Trace a workspace build of `core`
+  satria trace --top 50 -- -w    Show the 50 most frequent accesses
+  satria trace --raw -- -w core  Stream + summary
 
 Options must come before the satria arguments. The first token that is not
 a trace option starts the arguments for satria.
@@ -304,6 +310,9 @@ Use --so FILE to supply a prebuilt tracer (for example for another arch).
 Log: .satria/trace/openat.log (or --out). Each run starts a new log.
 Child processes (gcc, ld, ar) inherit the tracer, so their accesses are
 included; the summary is not filtered by process.
+
+Deviations from real strace: stat shows the path only (no struct dump),
+fopen/opendir print `= ok` instead of a pointer, and no per-call timing.
 
 Not supported on Windows (uses LD_PRELOAD/dlsym).
 ---endtrace
