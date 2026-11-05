@@ -255,7 +255,7 @@ static void summarize(const char *logPath, int top) {
 
   if (n == 0) {
     printf("> trace   : log kosong (tidak ada akses openat/stat yang terekam)\n");
-    for (size_t i = 0; i < n; i++) free(rs[i].key);
+    for (size_t i = 0; i < n; i++) free((void *)rs[i].key);
     free(rs);
     free(et);
     return;
@@ -309,7 +309,7 @@ static void summarize(const char *logPath, int top) {
     printf("  %7zu  %-8.*s %s\n", cs[i].count, (int)(t - cs[i].key), cs[i].key, t + 1);
   }
 
-  for (size_t i = 0; i < n; i++) free(rs[i].key);
+  for (size_t i = 0; i < n; i++) free((void *)rs[i].key);
   free(rs);
   free(cs);
   free(et);
