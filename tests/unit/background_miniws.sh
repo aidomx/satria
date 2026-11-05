@@ -106,15 +106,26 @@ check "no-op ws: pesan router inline" $?
 check "no-op ws: tidak ada child yang di-spawn" $?
 
 # §4.1: PID hidup -> build berikutnya DITOLAK dengan pesan dari desain.
-echo $$ > .satria/workspace.pid
-"$SAT" -w > dup.txt 2>&1
-[ $? -ne 0 ] && grep -q "Background build is already running" dup.txt
-check "deteksi build ganda: ditolak + pesan desain" $?
-
 # §4.4: clean DIBLOKIR selama build background berjalan.
-"$SAT" -w clean > clean.txt 2>&1
-[ $? -ne 0 ] && grep -q "diblokir" clean.txt
-check "clean diblokir saat build background berjalan" $?
+# Di Windows liveness diperiksa OpenProcess atas PID NATIVE, sedangkan `$$`
+# shell MSYS bukan PID native (namespace berbeda) — "build masih berjalan"
+# tidak bisa disimulasikan dari skrip uji, jadi kedua asersi dilewati di sana.
+case "$(uname -s 2>/dev/null)" in
+  MINGW*|MSYS*|CYGWIN*)
+    echo "SKIP: deteksi build ganda + clean diblokir (PID shell MSYS bukan PID native Windows)"
+    rm -f .satria/workspace.pid
+    ;;
+  *)
+    echo $$ > .satria/workspace.pid
+    "$SAT" -w > dup.txt 2>&1
+    [ $? -ne 0 ] && grep -q "Background build is already running" dup.txt
+    check "deteksi build ganda: ditolak + pesan desain" $?
+
+    "$SAT" -w clean > clean.txt 2>&1
+    [ $? -ne 0 ] && grep -q "diblokir" clean.txt
+    check "clean diblokir saat build background berjalan" $?
+    ;;
+esac
 
 # watch tanpa build sama sekali: rc=1 + pesan jelas.
 rm -f .satria/workspace.pid .satria/background.status
@@ -167,11 +178,19 @@ check "single no-op: pesan router inline" $?
 [ ! -f .satria/build.pid ]
 check "single no-op: tidak ada child yang di-spawn" $?
 
-echo $$ > .satria/build.pid
-"$SAT" clean > s_clean.txt 2>&1
-[ $? -ne 0 ] && grep -q "diblokir" s_clean.txt
-check "single: clean diblokir" $?
-rm -f .satria/build.pid
+# Alasan sama seperti §4.1 di atas: `$$` bukan PID native Windows.
+case "$(uname -s 2>/dev/null)" in
+  MINGW*|MSYS*|CYGWIN*)
+    echo "SKIP: single clean diblokir (PID shell MSYS bukan PID native Windows)"
+    ;;
+  *)
+    echo $$ > .satria/build.pid
+    "$SAT" clean > s_clean.txt 2>&1
+    [ $? -ne 0 ] && grep -q "diblokir" s_clean.txt
+    check "single: clean diblokir" $?
+    rm -f .satria/build.pid
+    ;;
+esac
 
 echo "---"
 echo "lulus: $pass  gagal: $fail  (folder uji: $W)"

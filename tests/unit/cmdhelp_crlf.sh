@@ -34,9 +34,20 @@ topic=$(SATRIA_CMD="$tmp/cmd.txt" "$S" help workspace 2>&1) ||
 [ -n "$topic" ] || fail "'help workspace' kosong pada cmd.txt CRLF"
 printf '%s' "$topic" | grep -q 'workspace' || fail "'help workspace' bukan isi topik"
 
+# Di Windows, stdout mode teks menerjemahkan '\n' -> '\r\n', jadi CR ada di
+# keluaran SETIAP perintah — itu terjemahan platform, bukan sisa '\r' dari
+# cmd.txt. Yang diuji: help tetap utuh dan tidak ada CR tambahan dari sumber,
+# sehingga di sana keluaran dinormalkan dulu sebelum dibandingkan.
+case "$(uname -s 2>/dev/null)" in
+  MINGW*|MSYS*|CYGWIN*) out=$(printf '%s' "$out" | tr -d '\r'); topic=$(printf '%s' "$topic" | tr -d '\r') ;;
+esac
+
 [ "$(printf '%s%s' "$out" "$topic" | tr -cd '\r' | wc -c | tr -d ' ')" -eq 0 ] || fail "keluaran masih memuat CR"
 
 outlf=$(SATRIA_CMD="$SRC" "$S" help 2>&1) || fail "'help' rc!=0 pada cmd.txt LF"
+case "$(uname -s 2>/dev/null)" in
+  MINGW*|MSYS*|CYGWIN*) outlf=$(printf '%s' "$outlf" | tr -d '\r') ;;
+esac
 [ "$outlf" = "$out" ] || fail "keluaran CRLF berbeda dari LF"
 
 echo "PASS cmdhelp_crlf"

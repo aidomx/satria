@@ -39,9 +39,20 @@ grep -q 'EMBED_MODULES_SYMBOL_LEN' build/bade/embedded.h || fail "makro kompat E
 # ---------- 2. runtime getEmbed ----------
 ./bin/bade >run1 2>&1 || fail "bin/bade gagal dijalankan"
 grep -q 'bade=7' run1 || fail "output bin/bade berubah"
-[ -f "$EXTRACT/rupa_modules.tar" ] || fail "ekstraksi via getEmbed tidak terjadi"
-a=$(wc -c < modules/rupa_modules.tar); b=$(wc -c < "$EXTRACT/rupa_modules.tar")
-[ "$a" -eq "$b" ] || fail "ukuran ekstraksi ($b) != arsip ($a)"
+# Ekstraksi memakai path POSIX dari fixture (`bademod.extract = /tmp/...`) dan
+# `system()` shell POSIX di bade/src/embed_use.c; bin/bade adalah proses native
+# Windows, jadi langkah runtime ini tidak bisa diuji dari shell MSYS. Codegen
+# dan no-op di bawah tetap diuji di semua platform.
+case "$(uname -s 2>/dev/null)" in
+  MINGW*|MSYS*|CYGWIN*)
+    echo "SKIP: ekstraksi runtime getEmbed (path .extract + system() POSIX di fixture)"
+    ;;
+  *)
+    [ -f "$EXTRACT/rupa_modules.tar" ] || fail "ekstraksi via getEmbed tidak terjadi"
+    a=$(wc -c < modules/rupa_modules.tar); b=$(wc -c < "$EXTRACT/rupa_modules.tar")
+    [ "$a" -eq "$b" ] || fail "ukuran ekstraksi ($b) != arsip ($a)"
+    ;;
+esac
 
 # ---------- 3. no-op run ulang ----------
 "$SAT" -w >out 2>err || fail "run no-op"
