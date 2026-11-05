@@ -66,29 +66,39 @@ check "C: perbaikan link tidak mengompilasi ulang object (hanya g.c baru)" "$(gr
 check "C: binary ter-link setelah perbaikan" "$([ -f bin/c ] && echo 1 || echo 0)" "1"
 
 # D. Ctrl+C di tengah build -> progres tersimpan, build ulang tidak mengulang dari awal
-mkproj "$W/d"
-rm -f src/f*.c
-i=1
-while [ $i -le 8 ]; do
-  awk -v n=$i 'BEGIN{for(j=0;j<4000;j++) printf "static int h%d_%d(int a){int s=a; for(int k=0;k<%d;k++) s+=k*%d; return s;}\n", n, j, j%7+1, j; print "int f" n "(void){return 0;}"}' > "src/f$i.c"
-  i=$((i + 1))
-done
-"$SAT" -j1 > "$W/d1.txt" 2>&1 &
-pid=$!
-sleep 2
-kill -INT "$pid" 2> /dev/null || true
-wait "$pid" && rc=0 || rc=$?
-check "D: Ctrl+C menghentikan build (rc 130)" "$rc" "130"
-"$SAT" -j1 > "$W/d2.txt" 2>&1 || true
-n2=$(grep -c 'OK ' "$W/d2.txt")
-total=9
-if [ "$n2" -lt "$total" ]; then
-  pass=$((pass + 1))
-  echo "PASS: D: build ulang tidak mengulang dari awal ($n2 < $total)"
-else
-  fail=$((fail + 1))
-  echo "FAIL: D: build ulang mengompilasi $n2 dari $total (mengulang dari awal)"
-fi
+# Ctrl+C dikirim dengan kill -INT ke proses latar; di shell MSYS/MINGW/CYGWIN
+# sinyal itu tidak sampai ke proses Windows native, sehingga build selesai normal
+# (rc 0). Tes ini dilewati di sana dan dicatat jelas (lihat todos/).
+case "$(uname -s 2>/dev/null)" in
+  MINGW*|MSYS*|CYGWIN*)
+    echo "SKIP: D Ctrl+C (kill -INT tidak sampai ke proses native Windows dari shell MSYS)"
+    ;;
+  *)
+  mkproj "$W/d"
+  rm -f src/f*.c
+  i=1
+  while [ $i -le 8 ]; do
+    awk -v n=$i 'BEGIN{for(j=0;j<4000;j++) printf "static int h%d_%d(int a){int s=a; for(int k=0;k<%d;k++) s+=k*%d; return s;}\n", n, j, j%7+1, j; print "int f" n "(void){return 0;}"}' > "src/f$i.c"
+    i=$((i + 1))
+  done
+  "$SAT" -j1 > "$W/d1.txt" 2>&1 &
+  pid=$!
+  sleep 2
+  kill -INT "$pid" 2> /dev/null || true
+  wait "$pid" && rc=0 || rc=$?
+  check "D: Ctrl+C menghentikan build (rc 130)" "$rc" "130"
+  "$SAT" -j1 > "$W/d2.txt" 2>&1 || true
+  n2=$(grep -c 'OK ' "$W/d2.txt")
+  total=9
+  if [ "$n2" -lt "$total" ]; then
+    pass=$((pass + 1))
+    echo "PASS: D: build ulang tidak mengulang dari awal ($n2 < $total)"
+  else
+    fail=$((fail + 1))
+    echo "FAIL: D: build ulang mengompilasi $n2 dari $total (mengulang dari awal)"
+  fi
+    ;;
+esac
 
 echo "lulus: $pass  gagal: $fail"
 [ "$fail" -eq 0 ]

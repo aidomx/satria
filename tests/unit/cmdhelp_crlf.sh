@@ -23,7 +23,7 @@ trap 'rm -rf "$tmp"' EXIT
 # Salinan CRLF, seperti hasil checkout Windows.
 awk '{ printf "%s\r\n", $0 }' "$SRC" > "$tmp/cmd.txt" || fail "gagal menulis cmd.txt CRLF"
 CR=$(printf '\r')
-grep -q "$CR" "$tmp/cmd.txt" || { od -c "$tmp/cmd.txt" | head -n 8 >&2; fail "salinan uji bukan CRLF"; }
+[ "$(tr -cd '\r' < "$tmp/cmd.txt" | wc -c | tr -d ' ')" -gt 0 ] || { od -c "$tmp/cmd.txt" | head -n 8 >&2; fail "salinan uji bukan CRLF"; }
 
 out=$(SATRIA_CMD="$tmp/cmd.txt" "$S" help 2>&1) || fail "'help' rc!=0 pada cmd.txt CRLF"
 [ -n "$out" ] || fail "'help' kosong pada cmd.txt CRLF"
@@ -34,7 +34,7 @@ topic=$(SATRIA_CMD="$tmp/cmd.txt" "$S" help workspace 2>&1) ||
 [ -n "$topic" ] || fail "'help workspace' kosong pada cmd.txt CRLF"
 printf '%s' "$topic" | grep -q 'workspace' || fail "'help workspace' bukan isi topik"
 
-printf '%s%s' "$out" "$topic" | grep -q "$CR" && fail "keluaran masih memuat CR"
+[ "$(printf '%s%s' "$out" "$topic" | tr -cd '\r' | wc -c | tr -d ' ')" -eq 0 ] || fail "keluaran masih memuat CR"
 
 outlf=$(SATRIA_CMD="$SRC" "$S" help 2>&1) || fail "'help' rc!=0 pada cmd.txt LF"
 [ "$outlf" = "$out" ] || fail "keluaran CRLF berbeda dari LF"

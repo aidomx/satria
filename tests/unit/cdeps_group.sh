@@ -34,7 +34,10 @@ mkws() { # $1 = nama direktori, $2 = isi tambahan Buildfile.ws
 compdb() { # $1 = direktori, hasil ke $1/compile_commands.json
   (cd "$tmp/$1" && rm -rf .satria bin build lib modules dist compile_commands.json \
      && "$S" -w -g compdb > "$tmp/$1.log" 2>&1) || fail "-g compdb gagal di $1: $(tail -3 "$tmp/$1.log")"
-  sed "s#$tmp/$1#/WS#g" "$tmp/$1/compile_commands.json" > "$tmp/$1.norm"
+  # Normalisasi: path di compile_commands.json bisa memakai "/" atau "\\" (Windows,
+  # di-escape JSON). Nama direktori uji (grup/manual) diganti token netral,
+  # tanpa bergantung pada bentuk path.
+  sed -e "s#$tmp/$1#/WS#g" -e "s#$1#WS#g" "$tmp/$1/compile_commands.json" > "$tmp/$1.norm"
 }
 
 # 1. kesetaraan: grup vs per proyek
