@@ -8,13 +8,16 @@ shared
 problems/*
 !.gitkeep
 !problems/02_11_2026_build_report_review.md
+!problems/15_10_2026_audit_v94_optimasi.md
+!problems/19_10_2026_startup.md
 
 todos/*
-!.gitkeep
+!todos/.gitkeep
+!todos/2_10_2026.md
+!todos/4_11_2026_optimizer.md
 
 
 dist
-todos
 tests/rupaws
 trash
 RELEASE_*.md
