@@ -1,0 +1,13 @@
+# Line endings: teks selalu LF di repo dan di checkout (termasuk Windows),
+# agar skrip bash (sh, CI) dan perbandingan byte (trace_src_sync) tidak
+# terpengaruh core.autocrlf. Biner tidak dinormalisasi.
+* text=auto eol=lf
+*.zip binary
+*.gz binary
+*.tar binary
+*.webp binary
+*.png binary
+*.jpg binary
+*.o binary
+*.a binary
+*.so binary
