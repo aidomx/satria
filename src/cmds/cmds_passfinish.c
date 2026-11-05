@@ -37,6 +37,27 @@
 #include "../uses/workspace.h"
 #include "../util.h"
 
+/* Driver di Windows menambahkan ".exe" sendiri (cl dan gcc/ld), jadi path
+   yang diminta Buildfile belum tentu sama dengan file hasil link. State no-op
+   mencatat path output APA ADANYA: menyimpan path tanpa ".exe" membuat
+   fastStampNsSize gagal ("stamp target gagal"), save dibatalkan, dan run
+   berikutnya selalu rebuild. Sebelum perbaikan ini, no-op pertama sesudah
+   cold build di Windows tidak pernah HIT (object dikompilasi ulang sekali
+   lagi) karena file target baru ada SETELAH link. Panggil sekali sebelum
+   keputusan link (target lama sudah ada) dan sekali sesudah link sukses. */
+static void resolveLinkTarget(char *target, size_t cap) {
+#ifdef _WIN32
+  if (fsFileExists(target)) return;
+  char withExe[SATRIA_MAX_PATH * 2 + 16];
+  snprintf(withExe, sizeof(withExe), "%s.exe", target);
+  if (fsFileExists(withExe) && strlen(withExe) < cap)
+    memcpy(target, withExe, strlen(withExe) + 1);
+#else
+  (void)target;
+  (void)cap;
+#endif
+}
+
 int cmdsBuildPassFinish(CmdsPassTail *t) {
   /* Buka konteks serah dari cmds_pass.c — nama lokal dipertahankan agar
      badan di bawah bisa dipindah verbatim. */
@@ -112,14 +133,7 @@ int cmdsBuildPassFinish(CmdsPassTail *t) {
      final yang utuh, bukan path yang kehilangan sufiksnya. */
   char target[SATRIA_MAX_PATH * 2 + 8];
   snprintf(target, sizeof(target) - 8, "%s/%s", c.outBinaryDir, c.outBinaryName);
-#ifdef _WIN32
-  /* Windows dapat menambahkan .exe otomatis saat link. */
-  if (!fsFileExists(target)) {
-    char withExe[sizeof(target) + 4];
-    snprintf(withExe, sizeof(withExe), "%s.exe", target);
-    if (fsFileExists(withExe)) memcpy(target, withExe, strlen(withExe) + 1);
-  }
-#endif
+  resolveLinkTarget(target, sizeof(target));
 
   bool phaseObjectsChanged = false;
   bool phaseObjectVerdict = compiled == 0 && wsPhaseObjectChangeGet(&phaseObjectsChanged);
@@ -318,6 +332,10 @@ int cmdsBuildPassFinish(CmdsPassTail *t) {
     if (linked) remove(oldPath);                       /* best effort */
     else if (!fsFileExists(outPath)) rename(oldPath, outPath); /* kembalikan exe lama */
   }
+  /* Link sukses: target aktual (dengan ".exe" di Windows) baru ada sekarang.
+     Semua pencatat sesudah titik ini — state no-op, Build Report, pack —
+     memakai path yang benar-benar ada di disk. */
+  if (linked) resolveLinkTarget(target, sizeof(target));
 
   free(inc);
   free(wf);

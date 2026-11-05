@@ -167,7 +167,7 @@ void wsCacheSave(const WsModel *m, const char *wsName);
    menolak run penuh sampai semua proyek tercatat lewat build selektif. */
 void wsCacheSaveSel(const WsModel *m, const char *wsName, const int *onlyIdx,
                     int onlyN);
-long long wsCacheStampNs(const struct stat *sb);
+long long wsCacheStampNs(const char *path, const struct stat *sb);
 bool wsCleanRootOutputs(const char *wsDir);
 bool wsCompdbRefresh(const WsModel *m);
 WsProject *wsEnsureProject(WsModel *m, const char *name);

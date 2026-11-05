@@ -74,13 +74,27 @@ const WsCachePath *wsCacheMapFind(const WsCacheMap *m, uint64_t key) {
 }
 /* Tulis satu path ke tabel dan catat entri-nya. false = path tak bisa distat. */
 /* Nanosecond timestamps avoid permanent false misses when a directory and
-   fingerprint.cache are written during the same wall-clock second. */
-long long wsCacheStampNs(const struct stat *sb) {
+   fingerprint.cache are written during the same wall-clock second.
+   Windows: struct stat dari MinGW hanya memberi st_mtime ber-resolusi DETIK.
+   Dengan epoch detik, entri yang ditulis build (direktori bin/lib/build,
+   target, objek) selalu tampak "racy" terhadap fingerprint.cache yang
+   ditulis beberapa milidetik kemudian (e->time == cacheMtime), sehingga gate
+   menolaknya dan no-op pertama sesudah cold build tidak pernah HIT.
+   fsMTimeNs() memakai FILETIME (100 ns) — epoch sama dengan fsStampNsSize,
+   jadi memo stat ikut konsisten. `sb` tetap dipakai di POSIX/Mach-O (tidak
+   ada syscall tambahan) dan sebagai fallback bila FILETIME tak terbaca. */
+long long wsCacheStampNs(const char *path, const struct stat *sb) {
 #if defined(_WIN32)
+  if (path && *path) {
+    int64_t ns = fsMTimeNs(path);
+    if (ns >= 0) return (long long)ns;
+  }
   return (long long)sb->st_mtime * 1000000000LL;
 #elif defined(__APPLE__)
+  (void)path;
   return (long long)sb->st_mtimespec.tv_sec * 1000000000LL + sb->st_mtimespec.tv_nsec;
 #else
+  (void)path;
   return (long long)sb->st_mtim.tv_sec * 1000000000LL + sb->st_mtim.tv_nsec;
 #endif
 }
@@ -288,7 +302,7 @@ static int wsCachePFast(WsCacheMap *m, long long srcMtime) {
     WsCachePath *r = &m->recs[i];
     struct stat sb;
     if (stat(r->path, &sb) != 0) return -1;
-    long long now = wsCacheStampNs(&sb);
+    long long now = wsCacheStampNs(r->path, &sb);
     long long size = (long long)sb.st_size;
 #if !defined(_WIN32)
     /* Isi memo stat (audit 30/10 — kandidat save-walk): path input ini distat
@@ -304,7 +318,7 @@ static int wsCachePFast(WsCacheMap *m, long long srcMtime) {
       if (now == r->time && r->time < srcMtime) continue;
       if (!wsCacheDirEntriesMatch(m, r->path)) return -1;
       struct stat after;
-      if (stat(r->path, &after) != 0 || wsCacheStampNs(&after) != now) return -1;
+      if (stat(r->path, &after) != 0 || wsCacheStampNs(r->path, &after) != now) return -1;
       if (r->time != now) {
         r->time = now;
         metadataChanged = true;
@@ -327,7 +341,7 @@ static int wsCachePFast(WsCacheMap *m, long long srcMtime) {
     }
     /* Cegah menerima file yang berubah saat hash sedang dibaca. */
     struct stat after;
-    if (stat(r->path, &after) != 0 || wsCacheStampNs(&after) != now ||
+    if (stat(r->path, &after) != 0 || wsCacheStampNs(r->path, &after) != now ||
         (long long)after.st_size != size) return -1;
     if (r->time != now || r->size != size) {
       r->time = now;
@@ -478,17 +492,17 @@ static bool wsCacheVisit(const CsEntry *e, CsOp op, void *ctx) {
 #if !defined(_WIN32)
   /* Isi memo stat — lihat catatan di wsCachePFast (kandidat save-walk). */
   if (r->type != 'D' && r->type != 'O')
-    cmdsStatMemoPut(r->path, wsCacheStampNs(&sb), (long long)sb.st_size);
+    cmdsStatMemoPut(r->path, wsCacheStampNs(r->path, &sb), (long long)sb.st_size);
 #endif
   /* Direktori tak bisa di-hash: mtime harus sama DAN tidak racy. Racy (diubah
      dalam detik yang sama dengan penulisan cache) -> invalid, jalur normal. */
   if (r->type == 'D') {
-    bool valid = wsCacheStampNs(&sb) == e->time && e->time < c->cacheMtime;
+    bool valid = wsCacheStampNs(r->path, &sb) == e->time && e->time < c->cacheMtime;
     if (!valid && wsCacheTrace()) fprintf(stderr, "satria cache: directory changed/racy %s\n", r->path);
     return c->ok = valid;
   }
   /* Fast path: size dan time cocok dan tidak racy -> tanpa membaca isi. */
-  if ((long long)sb.st_size == e->size && wsCacheStampNs(&sb) == e->time &&
+  if ((long long)sb.st_size == e->size && wsCacheStampNs(r->path, &sb) == e->time &&
       e->time < (long long)c->cacheMtime)
     return true;
   /* Time/size beda ATAU racy: hitung hash isi. Sama (mis. touch) -> valid;
@@ -499,10 +513,10 @@ static bool wsCacheVisit(const CsEntry *e, CsOp op, void *ctx) {
      fast-state (kandidat 5). Hash tak terbaca / tanpa hash tersimpan = tetap
      tidak pasti, tanpa rekaman. */
   if (!valid && h && e->content) wsGateStaleMark(r->path);
-  if (valid && (e->time != wsCacheStampNs(&sb) || e->size != (long long)sb.st_size)) {
+  if (valid && (e->time != wsCacheStampNs(r->path, &sb) || e->size != (long long)sb.st_size)) {
     CsPatch patch = {0};
     patch.hasTime = true;
-    patch.time = wsCacheStampNs(&sb);
+    patch.time = wsCacheStampNs(r->path, &sb);
     patch.hasSize = true;
     patch.size = (long long)sb.st_size;
     if (!csPatch(c->store, e->proj, e->file, &patch)) return c->ok = false;
@@ -541,7 +555,7 @@ bool wsCacheNoopValid(const WsModel *m, const unsigned char *need) {
   profMark("gate-map"); /* profil */
   /* Fast path (§4): semua baris P + stat cocok -> selesai tanpa membuka
      fingerprint.cache. Menolak di sini bukan vonis — jalur penuh menilai. */
-  int pfast = coverFull ? wsCachePFast(&map, wsCacheStampNs(&ssb)) : -1;
+  int pfast = coverFull ? wsCachePFast(&map, wsCacheStampNs(WS_CACHE_SOURCES, &ssb)) : -1;
   if (!coverFull && wsCacheTrace())
     fprintf(stderr, "satria cache: coverage partial - P-fast dilewati\n");
   profMark("gate-pfast"); /* profil */
@@ -596,7 +610,7 @@ bool wsCacheNoopValid(const WsModel *m, const unsigned char *need) {
       return false;
     }
   }
-  WsCacheCheck c = {&map, wsCacheStampNs(&fsb), true, 0, st, false};
+  WsCacheCheck c = {&map, wsCacheStampNs(WS_CACHE_FP, &fsb), true, 0, st, false};
   bool walked = csForEach(st, wsCacheVisit, &c);
   bool valid = walked && c.ok && c.seen > 0;
   if (valid && c.patched) {

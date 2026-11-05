@@ -82,7 +82,7 @@ static bool wsProjectHasChangedInputs(const WsModel *m, int idx,
     if (!wsProjectOwnsPath(m, idx, r->path)) continue;
     struct stat sb;
     if (stat(r->path, &sb) != 0) return true;
-    if ((long long)sb.st_size == r->size && wsCacheStampNs(&sb) == r->time)
+    if ((long long)sb.st_size == r->size && wsCacheStampNs(r->path, &sb) == r->time)
       continue;
     uint64_t hash = wsStartupHash(r->path);
     if (!hash || hash != r->content) return true;

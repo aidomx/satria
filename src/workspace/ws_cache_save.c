@@ -125,7 +125,7 @@ static bool wsCacheInputStamp(const char *path, long long *mtimeNs, long long *s
   g_aInMs += portMonoMs() - t0;
   g_aIn++;
   if (!ok) return false;
-  *mtimeNs = wsCacheStampNs(&sb);
+  *mtimeNs = wsCacheStampNs(path, &sb);
   *size = (long long)sb.st_size;
   return true;
 #else
@@ -155,7 +155,7 @@ static bool wsCacheAdd(FILE *pf, CsStore *st, uint64_t proj, const char *path, c
     g_aOutMs += portMonoMs() - t0;
     g_aOut++;
     if (!okO) return false; /* output: stat segar, jangan memo */
-    mtimeNs = wsCacheStampNs(&sb);
+    mtimeNs = wsCacheStampNs(path, &sb);
     fsize = (long long)sb.st_size;
   } else if (!wsCacheInputStamp(path, &mtimeNs, &fsize)) {
     return false;
@@ -318,7 +318,7 @@ static bool wsCacheAddObjectTree(FILE *pf, CsStore *st, uint64_t proj,
     }
     if (!dstat) {
       dr = 0;
-    } else if (wsCacheStampNs(&dst) < g_prevFpMtime) {
+    } else if (wsCacheStampNs(dfile, &dst) < g_prevFpMtime) {
       g_aDSkip++;
       dr = 1;
     } else {
@@ -534,7 +534,7 @@ void wsCacheSaveSel(const WsModel *m, const char *wsName, const int *onlyIdx,
   g_aIn = g_aDSCheck = g_aOut = 0;
   wsPrevHFree();
   if (stat(WS_CACHE_FP, &pfs) == 0) {
-    g_prevFpMtime = wsCacheStampNs(&pfs);
+    g_prevFpMtime = wsCacheStampNs(WS_CACHE_FP, &pfs);
     g_prevFp = csOpen(WS_CACHE_FP);
   }
   wsPrevHLoad(); /* daftar header save sebelumnya (disalin di wsCacheSaveBody) */
