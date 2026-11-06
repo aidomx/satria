@@ -33,6 +33,11 @@ printf "flags = MMD, MP\n" >> "$W/Buildfile.ws"
 cd "$W" || exit 2
 # Tata letak miniws: source proyek core berada di core/src.
 ENGDIR=core/src
+# Source yang benar-benar ada di fixture: core.c milik miniws; workspace
+# lain (mis. rupaws) bisa tidak memilikinya — jangan biarkan `touch`
+# memBESAR jadi create file baru (size 0) yang memang HARUS di-recompile.
+CRUDFILE="$ENGDIR/core.c"
+[ -f "$CRUDFILE" ] || CRUDFILE="$ENGDIR/main.c"
 
 run() { "$SAT" -w >"$W/out.txt" 2>&1; return $?; }
 
@@ -41,7 +46,7 @@ run; hit_ws out.txt; check "ws: no-op dasar" $?
 
 # update: sentuh sumber -> PATCH fingerprint, TANPA rebuild
 sleep 1.1
-touch "$ENGDIR/core.c"
+touch "$CRUDFILE"
 run
 hit_ws out.txt; check "ws: sentuh sumber = no-op (tanpa rebuild)" $?
 
