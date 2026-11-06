@@ -2,136 +2,179 @@
 set -uo pipefail
 
 # =============================================================================
-# scripts/unit.sh — Test runner untuk Satria
+# scripts/unit.sh  Test runner Satria (satu base direktori)
 # =============================================================================
 #
-# Contoh pemakaian:
-#   bash scripts/unit.sh                                    # test default (miniws)
-#   bash scripts/unit.sh tests/miniws                       # target spesifik
-#   bash scripts/unit.sh -o /tmp/unit.log                   # output ke file log
-#   bash scripts/unit.sh -b                                 # jalankan di background
-#   bash scripts/unit.sh -b -o /tmp/unit.log                # background + log file
-#   bash scripts/unit.sh -o /tmp/unit.log tests/miniws      # kombinasi dengan target
-#   bash scripts/unit.sh -j4                                # batasi satria ke 4 job
-#   CLEAN_VERBOSE=1 bash scripts/unit.sh                    # tampilkan detail clean()
+# Pemakaian:
+#   bash scripts/unit.sh [binary] [target] [opsi]
+#
+#   binary  path satria yang diuji       (default: <root>/bin/satria)
+#   target  direktori fixture            (default: <root>/tests/miniws)
+#
+#   Catatan: satu argumen posisi dianggap TARGET (kompatibel dengan pemanggilan
+#   CI lama: `scripts/unit.sh -o log -j N <suite>`).
 #
 # Opsi:
-#   -o <file>   Simpan semua output ke file log (stdout + stderr) via tee
-#   -b          Jalankan di background (detached). PID ditulis ke file .pid
-#   -j <N>      Batasi job satria per test (default 2). -j 0 = tanpa batas (core).
-#               Banyak test memanggil satria tanpa -j (jatuh ke cpuCount());
-#               wrapper menyisipkan -jN agar ringan, terutama saat -b di proot.
+#   -o <file>   Simpan output ringkasan ke file (default: $BASE/log/unit.log)
+#   -j <N>      Batasi job satria per tes (default 2). -j 0 = tanpa batas.
+#   -b          Jalankan di background (PID di $BASE/log/unit.pid)
+#   -h          Tampilkan bantuan ini
+#
+# Base direktori (satu-satunya tempat artefak runner):
+#   UNIT_BASE   default /tmp/miniws. Di dalamnya:
+#     fixture/  salinan target (dibersihkan & disalin ulang tiap run)
+#     t/        folder temp per tes (menggantikan mktemp; dihapus tiap tes)
+#     bin/      wrapper satria-j (pembatas -j)
+#     log/      log per tes (<nama>.log), ringkasan (unit.log), pid
 #
 # Environment:
-#   CLEAN_VERBOSE=1   Tampilkan detail setiap item yang dihapus oleh clean()
+#   CLEAN_VERBOSE=1   tampilkan detail clean()
+#   UNIT_BASE         ganti base direktori
 #
+# Tes di tests/unit/*.sh menerima:  $1 = binary, $2 = target
+# dan memakai $UNIT_TMP/<nama> (di-set runner) sebagai folder kerjanya.
 # =============================================================================
 
-# ---------------------------- konfigurasi ----------------------------------
+usage() {
+  # Cetak blok komentar header (dari baris kedua sampai sebelum `set`)
+  awk 'NR==1{next} /^usage\(\)/{exit} /^set /{next} /^# =+$/{next} {sub(/^# ?/,""); print}' "$0"
+}
+
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-SATRIA="$ROOT_DIR/bin/satria"
+DEFAULT_BIN="$ROOT_DIR/bin/satria"
+DEFAULT_TARGET="$ROOT_DIR/tests/miniws"
 
-TMP_DIR="$(mktemp -d /tmp/tmp_XXX)"
-
-# Sortir agar urutan eksekusi test konsisten
-units=$(find "$ROOT_DIR/tests/unit" -name "*.sh" | sort)
+BASE="${UNIT_BASE:-/tmp/miniws}"
+FIX="$BASE/fixture"
+TDIR="$BASE/t"
+WRAPDIR="$BASE/bin"
+LOGDIR="$BASE/log"
 
 # ---------------------------- parsing argumen ------------------------------
 LOG_FILE=""
 BACKGROUND=0
-JOBS=2                     # default pembatas: ringan di proot; -j 0 = tanpa batas
-target=""
+JOBS=2
+positional=()
 
 while [ $# -gt 0 ]; do
   case "$1" in
     -o)
-      if [ $# -lt 2 ]; then
-        echo "Error: -o memerlukan argumen file path" >&2
-        exit 1
-      fi
-      LOG_FILE="$2"
-      shift 2
-      ;;
+      [ $# -ge 2 ] || { echo "Error: -o memerlukan argumen file" >&2; exit 1; }
+      LOG_FILE="$2"; shift 2 ;;
     -b)
-      BACKGROUND=1
-      shift
-      ;;
+      BACKGROUND=1; shift ;;
     -j)
-      if [ $# -lt 2 ]; then
-        echo "Error: -j memerlukan argumen angka" >&2
-        exit 1
-      fi
-      JOBS="$2"
-      shift 2
-      ;;
+      [ $# -ge 2 ] || { echo "Error: -j memerlukan argumen angka" >&2; exit 1; }
+      JOBS="$2"; shift 2 ;;
+    -h|--help)
+      usage; exit 0 ;;
     -*)
       echo "Opsi tidak dikenal: $1" >&2
-      echo "Pemakaian: $0 [-o <file>] [-b] [-j <N>] [target]" >&2
-      exit 1
-      ;;
+      echo "Pemakaian: $0 [binary] [target] [-o <file>] [-j <N>] [-b]" >&2
+      exit 1 ;;
     *)
-      target="$1"
-      shift
-      ;;
+      positional+=("$1"); shift ;;
   esac
 done
 
-# Default target jika tidak diberikan
-target="${target:-$ROOT_DIR/tests/miniws}"
-
-# Target WAJIB path absolut. Runner pindah ke salinan temp (cd di bawah) sebelum
-# menjalankan tes, sehingga path relatif (mis. tests/miniws) tidak lagi valid di
-# dalam tes. Di-resolve di sini, sebelum cd. Target "/" ditolak: tes menyalin
-# target dengan `cp -a "$MW/."`; target kosong/"/" akan menyalin seluruh root.
-if [ ! -d "$target" ]; then
-  echo "target tidak ditemukan: $target" >&2
-  exit 1
-fi
-target="$(cd "$target" && pwd)"
-if [ "$target" = "/" ]; then
-  echo "target tidak valid: / (berikan direktori fixture, mis. tests/miniws)" >&2
-  exit 1
-fi
-
-# Validasi -j: harus bilangan bulat >= 0.
-case $JOBS in
-  '' | *[!0-9]*)
-    echo "Error: -j harus bilangan bulat >= 0 (dapat '$JOBS')" >&2
-    exit 1
-    ;;
+case ${#positional[@]} in
+  0) SAT_IN="$DEFAULT_BIN"; TARGET_IN="$DEFAULT_TARGET" ;;
+  1)
+    if [ -d "${positional[0]}" ]; then
+      SAT_IN="$DEFAULT_BIN"; TARGET_IN="${positional[0]}"
+    else
+      echo "Error: argumen tunggal harus direktori target: ${positional[0]}" >&2
+      echo "       untuk binary + target: $0 <binary> <target>" >&2
+      exit 1
+    fi ;;
+  2) SAT_IN="${positional[0]}"; TARGET_IN="${positional[1]}" ;;
+  *) echo "Error: terlalu banyak argumen posisi (maks: binary target)" >&2; exit 1 ;;
 esac
 
-# ---------------------------- pembatas jobs (-j) ---------------------------
-# Banyak test memanggil "$SAT" TANPA -j, sehingga satria jatuh ke cpuCount()
-# (paralel sebanyak core) — ini yang membuat -b berat di proot. Wrapper
-# menyisipkan -jN di depan SETIAP pemanggilan satria. Parse satria mengambil
-# -j TERAKHIR, jadi -j1/-j2 yang eksplisit di sebagian test tetap menang.
-# -j 0 = tanpa wrapper (perilaku lama: paralel sebanyak core).
-if [ "$JOBS" -ge 1 ]; then
-  SATRIA_WRAP="$TMP_DIR/satria-j"
-  printf '#!/bin/sh\nexec "%s" -j%d "$@"\n' "$SATRIA" "$JOBS" > "$SATRIA_WRAP"
-  chmod +x "$SATRIA_WRAP"
-  SATRIA="$SATRIA_WRAP"
+# Binary: harus file yang dapat dieksekusi; dijadikan path absolut
+if [ ! -x "$SAT_IN" ] || [ -d "$SAT_IN" ]; then
+  echo "Error: binary tidak ditemukan/dapat dieksekusi: $SAT_IN" >&2
+  exit 1
+fi
+SATRIA="$(cd "$(dirname "$SAT_IN")" && pwd)/$(basename "$SAT_IN")"
+
+# Target: direktori; path absolut; '/' ditolak (tes menyalin target)
+if [ ! -d "$TARGET_IN" ]; then
+  echo "Error: target tidak ditemukan: $TARGET_IN" >&2
+  exit 1
+fi
+TARGET="$(cd "$TARGET_IN" && pwd)"
+if [ "$TARGET" = "/" ]; then
+  echo "Error: target tidak valid: / (berikan direktori fixture, mis. tests/miniws)" >&2
+  exit 1
 fi
 
-# ---------------------------- setup environment ----------------------------
-# Daftar artifact yang harus dibersihkan sebelum test
+case "$JOBS" in
+  '' | *[!0-9]*)
+    echo "Error: -j harus bilangan bulat >= 0 (dapat '$JOBS')" >&2
+    exit 1 ;;
+esac
+
+# Proses anak (mode background): kill <PID> harus menghentikan seluruh grup,
+# termasuk tes dan satria yang dijalankan tes.
+if [ -n "${UNIT_CHILD:-}" ]; then
+  # Hanya grup proses sendiri (dibuat oleh job control di pemanggil); JANGAN kill 0.
+  trap 'kill -- -$$ 2> /dev/null' TERM INT
+fi
+
+# ---------------------------- background ----------------------------------
+if [ "$BACKGROUND" -eq 1 ] && [ -z "${UNIT_CHILD:-}" ]; then
+  mkdir -p "$LOGDIR"
+  [ -n "$LOG_FILE" ] || LOG_FILE="$LOGDIR/unit.log"
+  PID_FILE="$LOGDIR/unit.pid"
+  # set -m: proses anak dapat grup proses sendiri (kill <PID> hanya mengenainya)
+  set -m
+  UNIT_CHILD=1 nohup bash "$0" "$SATRIA" "$TARGET" -o "$LOG_FILE" -j "$JOBS" \
+    > /dev/null 2>&1 &
+  set +m
+  BG_PID=$!
+  echo "$BG_PID" > "$PID_FILE"
+  echo "=========================================="
+  echo "Running in background"
+  echo "  PID  : $BG_PID"
+  echo "  Log  : $LOG_FILE"
+  echo "  PID  : $PID_FILE"
+  echo "  Stop : kill $BG_PID"
+  echo "=========================================="
+  exit 0
+fi
+
+# ---------------------------- setup base -----------------------------------
+mkdir -p "$TDIR" "$LOGDIR" "$WRAPDIR"
+[ -n "$LOG_FILE" ] || LOG_FILE="$LOGDIR/unit.log"
+
+# Pembatas -j: wrapper di base/bin. Parse satria mengambil -j TERAKHIR,
+# jadi -j eksplisit di tes tetap menang.
+if [ "$JOBS" -ge 1 ]; then
+  SATRIA_WRAP="$WRAPDIR/satria-j"
+  printf '#!/bin/sh\nexec "%s" -j%d "$@"\n' "$SATRIA" "$JOBS" > "$SATRIA_WRAP"
+  chmod +x "$SATRIA_WRAP"
+  SATRIA_ARG="$SATRIA_WRAP"
+else
+  SATRIA_ARG="$SATRIA"
+fi
+
+# Fixture: salinan target di base/fixture (dibersihkan & disalin ulang)
+rm -rf "$FIX" 2> /dev/null
+cp -a "$TARGET" "$FIX" || { echo "Error: gagal menyalin target ke $FIX" >&2; exit 1; }
+
+export UNIT_BASE="$BASE"
+export UNIT_TMP="$TDIR"
+
+# Daftar artefak yang dibersihkan dari fixture sebelum tes
 clean_cands=("bin" "build" "dist" "lib" "modules" ".satria" "compile_commands.json")
 cands=()
 for c in "${clean_cands[@]}"; do
-  cands+=("$TMP_DIR/$(basename "$target")/$c")
+  cands+=("$FIX/$c")
 done
 
 # =============================================================================
-# clean() — versi robust: menangani semua edge case
-# =============================================================================
-# Edge case yang ditangani:
-#   1. File/direktori tidak ada              → skip tanpa error
-#   2. Broken symlink                        → tetap dihapus (via -L)
-#   3. File read-only                        → chmod +rm (fallback)
-#   4. Permission denied                     → error message jelas
-#   5. File "busy" (open oleh proses lain)   → retry 1x setelah delay singkat
-#   6. Verbose mode (via env CLEAN_VERBOSE)  → tampilkan detail
+# clean()  dari versi sebelumnya (tidak berubah perilakunya)
 # =============================================================================
 clean() {
   local removed=0
@@ -203,82 +246,39 @@ clean() {
   [ "$failed" -eq 0 ]
 }
 
-create_tmp() {
-  [ -d "$TMP_DIR" ] || mkdir -p "$TMP_DIR"
-}
-
-copy_target() {
-  if [ ! -d "$target" ]; then
-    echo "Error: $target is not found!"
-    exit 1
-  fi
-  cp -r "$target" "$TMP_DIR/"
-}
-
-# ---------------------------- eksekusi setup -------------------------------
-create_tmp
-copy_target
-
-cd "$TMP_DIR/$(basename "$target")" || exit 1
-
 # ---------------------------- fungsi utama ---------------------------------
-run() {
-  echo "========================================="
-  echo "Running tests for: $(basename "$target")"
-  echo "========================================="
+units=$(find "$ROOT_DIR/tests/unit" -name "*.sh" | sort)
 
+run() {
+  echo "=========================================="
+  echo "Running tests for: $(basename "$TARGET")"
+  echo "  binary : $SATRIA"
+  echo "  base   : $BASE"
+  echo "=========================================="
+  local u name
   for u in $units; do
-    printf "> %s\n" "Running $(basename "$u")..."
-    sh "$u" "$SATRIA" "$target"
+    name="$(basename "$u" .sh)"
+    printf "> Running %s...\n" "$name.sh"
+    # Satu folder temp per tes: dikosongkan sebelum & sesudah tes
+    rm -rf "$TDIR" 2> /dev/null
+    mkdir -p "$TDIR"
+    sh "$u" "$SATRIA_ARG" "$TARGET" 2>&1 | tee "$LOGDIR/$name.log"
+    rm -rf "$TDIR" 2> /dev/null
   done
+  echo "=========================================="
+  echo "Ringkasan: PASS=$(grep -h '^PASS' "$LOGDIR"/*.log 2> /dev/null | wc -l | tr -d ' ')" \
+       "FAIL=$(grep -h '^FAIL' "$LOGDIR"/*.log 2> /dev/null | wc -l | tr -d ' ')"
+  echo "Log per tes: $LOGDIR/<nama>.log"
+  echo "=========================================="
 }
 
-# ---------------------------- mode background ------------------------------
-if [ "$BACKGROUND" -eq 1 ]; then
-  # Tentukan file log default jika -o tidak diberikan
-  if [ -z "$LOG_FILE" ]; then
-    LOG_FILE="/tmp/unit_$(basename "$target")_$$.log"
-  fi
+# ---------------------------- eksekusi -------------------------------------
+echo "> Logging to : $LOG_FILE"
+mkdir -p "$(dirname "$LOG_FILE")"
+exec > >(tee "$LOG_FILE") 2>&1
 
-  PID_FILE="${LOG_FILE%.log}.pid"
+cd "$FIX" || exit 1
 
-  # Pastikan direktori log ada
-  mkdir -p "$(dirname "$LOG_FILE")"
-
-  # Export variabel dan fungsi yang dibutuhkan subshell
-  export TMP_DIR SATRIA target units LOG_FILE
-  export -f clean create_tmp copy_target run 2> /dev/null || true
-
-  # Jalankan fungsi run di subshell background dengan nohup
-  nohup bash -c '
-    cd "$TMP_DIR/$(basename "$target")" || exit 1
-    clean > /dev/null 2>&1
-    run
-  ' > "$LOG_FILE" 2>&1 &
-
-  BG_PID=$!
-  echo "$BG_PID" > "$PID_FILE"
-
-  echo "========================================="
-  echo "Running in background"
-  echo "  PID  : $BG_PID"
-  echo "  Log  : $LOG_FILE"
-  echo "  PID  : $PID_FILE"
-  echo "  Stop : kill $BG_PID"
-  echo "========================================="
-  exit 0
-fi
-
-# ---------------------------- mode foreground ------------------------------
-# Jika -o diberikan, redirect semua output ke file + tampilkan di terminal
-if [ -n "$LOG_FILE" ]; then
-  # Pastikan direktori log ada
-  mkdir -p "$(dirname "$LOG_FILE")"
-  # Redirect stdout+stderr ke file, sekaligus tampilkan di terminal (tee)
-  exec > >(tee "$LOG_FILE") 2>&1
-  echo "> Logging to : $LOG_FILE"
-fi
-
-# Jalankan clean, tunggu selesai, baru jalankan run
+# Jalankan clean, tunggu selesai, baru jalankan run (perilaku sama dengan versi lama)
 clean > /dev/null 2>&1 &
 wait $! && run
