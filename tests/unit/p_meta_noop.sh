@@ -39,7 +39,8 @@ fast() {
 }
 meta_re() { grep -cE '^P [0-9a-f]{16} [SDOWH] [0-9a-f]{16} [0-9]+ [0-9]+ ' "$1"; }
 
-W=$(mktemp -d /tmp/pmeta_XXXX)
+: "${UNIT_TMP:=${UNIT_BASE:-/tmp/miniws}/t}"
+W="$UNIT_TMP/p_meta_noop"; rm -rf "${W}"; mkdir -p "${W}" || exit 1
 cp -r "$SRC/." "$W/" || exit 2
 printf "flags = MMD, MP\n" >> "$W/Buildfile.ws"
 cd "$W" || exit 2

@@ -31,7 +31,8 @@ mkproj() { # mkproj <dir>: 30 source + main, single-project
   done
   printf 'int main(void){return 0;}\n' > src/main.c
 }
-W=$(mktemp -d /tmp/satria-resume-XXXXXX)
+: "${UNIT_TMP:=${UNIT_BASE:-/tmp/miniws}/t}"
+W="$UNIT_TMP/build_resume"; rm -rf "${W}"; mkdir -p "${W}" || exit 1
 trap 'rm -rf "$W"' EXIT HUP INT TERM
 
 # A. cold gagal di satu source

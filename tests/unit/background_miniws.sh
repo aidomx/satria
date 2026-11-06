@@ -15,7 +15,8 @@ abspath() { (cd "$(dirname "$1")" 2>/dev/null && printf '%s/%s\n' "$(pwd)" "$(ba
 [ -n "$1" ] && [ -x "$1" ] || { echo "satria tidak ditemukan: ${1:-<kosong>}"; exit 2; }
 SAT=$(abspath "$1")
 SRC=$(abspath "${2:-$(dirname "$0")/../miniws}")
-W=$(mktemp -d /tmp/bg_ws_XXXXXX) || exit 2
+: "${UNIT_TMP:=${UNIT_BASE:-/tmp/miniws}/t}"
+W="$UNIT_TMP/background_miniws"; rm -rf "${W}"; mkdir -p "${W}" || exit 1
 cp -r "$SRC/." "$W/" || exit 2
 printf "flags = MMD, MP\nbackground = true\n" >> "$W/Buildfile.ws"
 cd "$W" || exit 2
@@ -134,7 +135,7 @@ rm -f .satria/workspace.pid .satria/background.status
 check "watch tanpa build: rc=1 + pesan" $?
 
 echo "== satu proyek (background = true di Buildfile) =="
-S=$(mktemp -d /tmp/bg_single_XXXXXX) || exit 2
+S="$UNIT_TMP/background_miniws-2"; rm -rf "${S}"; mkdir -p "${S}" || exit 1
 mkdir -p "$S/src"
 printf 'use project\n\nbackground = true\n' > "$S/Buildfile"
 printf '#include <stdio.h>\nint main(void) { puts("bg"); return 0; }\n' > "$S/src/main.c"

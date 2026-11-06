@@ -4,7 +4,8 @@ set -eu
 SAT="$1"; SRC="${2:-tests/miniws}"
 case "$SAT" in /*) ;; *) SAT="$(pwd)/$SAT";; esac
 case "$SRC" in /*) ;; *) SRC="$(pwd)/$SRC";; esac
-W=$(mktemp -d /tmp/satria-buildlog-test-XXXXXX)
+: "${UNIT_TMP:=${UNIT_BASE:-/tmp/miniws}/t}"
+W="$UNIT_TMP/build_log_miniws"; rm -rf "${W}"; mkdir -p "${W}" || exit 1
 trap 'rm -rf "$W"' EXIT HUP INT TERM
 cp -R "$SRC/." "$W/"
 cd "$W"

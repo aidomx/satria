@@ -11,7 +11,8 @@ SRC="${2:-$(dirname "$0")/../miniws}"
   echo "satria tidak ditemukan: $SAT"
   exit 2
 }
-W=$(mktemp -d /tmp/cache_noop_XXXXXX) || exit 2
+: "${UNIT_TMP:=${UNIT_BASE:-/tmp/miniws}/t}"
+W="$UNIT_TMP/cache_noop_miniws"; rm -rf "${W}"; mkdir -p "${W}" || exit 1
 cp -rf "$SRC/." "$W/" || exit 2
 printf "flags = MMD, MP\n" >> "$W/Buildfile.ws" # cache butuh .d (-MMD)
 cd "$W" || exit 2

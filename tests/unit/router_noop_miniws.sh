@@ -5,7 +5,8 @@ abspath() { (cd "$(dirname "$1")" 2>/dev/null && printf '%s/%s\n' "$(pwd)" "$(ba
 [ -n "$1" ] && [ -x "$1" ] || { echo "satria tidak ditemukan: ${1:-<kosong>}"; exit 2; }
 SAT=$(abspath "$1")
 SRC=$(abspath "${2:-$(dirname "$0")/../miniws}")
-W=$(mktemp -d /tmp/router_noop_XXXX)
+: "${UNIT_TMP:=${UNIT_BASE:-/tmp/miniws}/t}"
+W="$UNIT_TMP/router_noop_miniws"; rm -rf "${W}"; mkdir -p "${W}" || exit 1
 cp -r "$SRC/." "$W/" || exit 2
 # Cache butuh file .d (-MMD) untuk dependensi header; tanpa itu cache tidak ditulis.
 printf "flags = MMD, MP\n" >> "$W/Buildfile.ws"

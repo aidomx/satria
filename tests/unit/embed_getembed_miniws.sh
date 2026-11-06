@@ -15,7 +15,8 @@ set -eu
 SAT="$1"; SRC="${2:-tests/miniws}"
 case "$SAT" in /*) ;; *) SAT="$(pwd)/$SAT";; esac
 case "$SRC" in /*) ;; *) SRC="$(pwd)/$SRC";; esac
-W=$(mktemp -d /tmp/satria-embed-test-XXXXXX)
+: "${UNIT_TMP:=${UNIT_BASE:-/tmp/miniws}/t}"
+W="$UNIT_TMP/embed_getembed_miniws"; rm -rf "${W}"; mkdir -p "${W}" || exit 1
 # .extract fixture Buildfile.ws = /tmp/satria-miniws-system (dipakai embed_use.c)
 EXTRACT=/tmp/satria-miniws-system
 trap 'rm -rf "$W"; rm -rf "$EXTRACT"' EXIT HUP INT TERM

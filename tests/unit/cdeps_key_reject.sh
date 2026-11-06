@@ -11,7 +11,8 @@ fail() { echo "FAIL cdeps_key_reject: $1"; exit 1; }
 [ -x "$S" ] || fail "binary tidak ditemukan: $S"
 [ -d "$MW" ] || fail "fixture tidak ditemukan: $MW"
 
-tmp=$(mktemp -d) || fail "mktemp gagal"
+: "${UNIT_TMP:=${UNIT_BASE:-/tmp/miniws}/t}"
+tmp="$UNIT_TMP/cdeps_key_reject"; rm -rf "${tmp}"; mkdir -p "${tmp}" || exit 1
 trap 'rm -rf "$tmp"' EXIT
 cp -a "$MW/." "$tmp/" || fail "salin miniws gagal"
 cd "$tmp" || fail "cd gagal"

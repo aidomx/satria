@@ -26,7 +26,8 @@ hit_ws() { grep -q "Nothing to build" "$1" && grep -q "Cache valid *:" "$1"; }
 ostamp() { stat -c '%y' .satria/opts.cache; }
 
 # ============================ MODE WORKSPACE ============================
-W=$(mktemp -d /tmp/crud_ws_XXXX)
+: "${UNIT_TMP:=${UNIT_BASE:-/tmp/miniws}/t}"
+W="$UNIT_TMP/crud_touch_delete"; rm -rf "${W}"; mkdir -p "${W}" || exit 1
 cp -r "$SRC/." "$W/" || exit 2
 printf "flags = MMD, MP\n" >> "$W/Buildfile.ws"
 cd "$W" || exit 2
@@ -60,7 +61,7 @@ check "ws: entri sumber terhapus dari sources.cache" $?
 run; hit_ws out.txt; check "ws: no-op pulih setelah delete" $?
 
 # ============================ MODE SINGLE ============================
-S=$(mktemp -d /tmp/crud_s_XXXX)
+S="$UNIT_TMP/crud_touch_delete-2"; rm -rf "${S}"; mkdir -p "${S}" || exit 1
 mkdir -p "$S/src"
 printf 'use project\n\nsources = src\n' > "$S/Buildfile"
 printf 'int main(void){return 0;}\n' > "$S/src/main.c"

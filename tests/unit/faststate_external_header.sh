@@ -5,7 +5,8 @@ abspath() { (cd "$(dirname "$1")" 2>/dev/null && printf '%s/%s\n' "$(pwd)" "$(ba
 [ -n "$1" ] && [ -x "$1" ] || { echo "satria tidak ditemukan: ${1:-<kosong>}"; exit 2; }
 SAT=$(abspath "$1")
 export NO_COLOR=1
-W=$(mktemp -d /tmp/faststate-header-XXXX) || exit 2
+: "${UNIT_TMP:=${UNIT_BASE:-/tmp/miniws}/t}"
+W="$UNIT_TMP/faststate_external_header"; rm -rf "${W}"; mkdir -p "${W}" || exit 1
 pass=0
 fail=0
 check() {

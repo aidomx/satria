@@ -6,7 +6,8 @@ set -eu
 SAT="$1"
 case "$SAT" in /*) ;; *) SAT="$(pwd)/$SAT" ;; esac
 SRC_ROOT=$(cd "$(dirname "$0")/../.." && pwd)
-W=$(mktemp -d /tmp/satria-embstamp-XXXXXX)
+: "${UNIT_TMP:=${UNIT_BASE:-/tmp/miniws}/t}"
+W="$UNIT_TMP/embed_stamp_skip"; rm -rf "${W}"; mkdir -p "${W}" || exit 1
 trap 'rm -rf "$W"' EXIT HUP INT TERM
 cp -a "$SRC_ROOT/tests/miniws/." "$W/"
 cd "$W"

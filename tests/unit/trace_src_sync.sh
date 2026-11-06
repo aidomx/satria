@@ -4,7 +4,8 @@
 # Gagal bila tracer.src diubah tanpa menjalankan scripts/gen_tracer_src.sh.
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
-W=$(mktemp -d /tmp/satria-tracersync-XXXXXX)
+: "${UNIT_TMP:=${UNIT_BASE:-/tmp/miniws}/t}"
+W="$UNIT_TMP/trace_src_sync"; rm -rf "${W}"; mkdir -p "${W}" || exit 1
 trap 'rm -rf "$W"' EXIT HUP INT TERM
 cd "$ROOT"
 sh scripts/gen_tracer_src.sh src/trace/tracer.src "$W/tracer_src.h"

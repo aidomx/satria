@@ -23,7 +23,8 @@ v1=$("$S" version 2>&1) || fail "'version' rc!=0"
 v2=$("$S" --version 2>&1) || fail "'--version' rc!=0"
 [ "$v1" = "$v2" ] || fail "'version' ($v1) != '--version' ($v2)"
 
-tmp=$(mktemp -d) || fail "mktemp gagal"
+: "${UNIT_TMP:=${UNIT_BASE:-/tmp/miniws}/t}"
+tmp="$UNIT_TMP/version_alias"; rm -rf "${tmp}"; mkdir -p "${tmp}" || exit 1
 trap 'rm -rf "$tmp"' EXIT
 cp -a "$MW/." "$tmp/" || fail "salin miniws gagal"
 cd "$tmp" || fail "cd gagal"

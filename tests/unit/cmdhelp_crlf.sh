@@ -17,7 +17,8 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 SRC="$ROOT/src/cmd.txt"
 [ -f "$SRC" ] || fail "cmd.txt tidak ditemukan: $SRC"
 
-tmp=$(mktemp -d) || fail "mktemp gagal"
+: "${UNIT_TMP:=${UNIT_BASE:-/tmp/miniws}/t}"
+tmp="$UNIT_TMP/cmdhelp_crlf"; rm -rf "${tmp}"; mkdir -p "${tmp}" || exit 1
 trap 'rm -rf "$tmp"' EXIT
 
 # Salinan CRLF, seperti hasil checkout Windows.

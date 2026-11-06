@@ -6,7 +6,8 @@
 set -eu
 SAT="$1"
 case "$SAT" in /*) ;; *) SAT="$(pwd)/$SAT" ;; esac
-W=$(mktemp -d /tmp/satria-binuptodate-XXXXXX)
+: "${UNIT_TMP:=${UNIT_BASE:-/tmp/miniws}/t}"
+W="$UNIT_TMP/report_binaries_uptodate"; rm -rf "${W}"; mkdir -p "${W}" || exit 1
 trap 'rm -rf "$W"' EXIT HUP INT TERM
 mkdir -p "$W/src"
 cd "$W"

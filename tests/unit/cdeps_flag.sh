@@ -10,7 +10,8 @@ case "${1:-}" in
 esac
 SRC=${2:-"$(dirname "$0")/../miniws"}
 [ -x "$SAT" ] || { echo "satria tidak ditemukan: $SAT" >&2; exit 2; }
-TMP=$(mktemp -d /tmp/ws_cdeps_flag_XXXXXX)
+: "${UNIT_TMP:=${UNIT_BASE:-/tmp/miniws}/t}"
+TMP="$UNIT_TMP/cdeps_flag"; rm -rf "${TMP}"; mkdir -p "${TMP}" || exit 1
 trap 'rm -rf "$TMP"' EXIT HUP INT TERM
 cp -a "$SRC/." "$TMP/"
 rm -rf "$TMP/.satria" "$TMP/build" "$TMP/bin" "$TMP/lib" "$TMP/modules" "$TMP/compile_commands.json"

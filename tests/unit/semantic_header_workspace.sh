@@ -9,7 +9,8 @@ case "${1:-}" in
 esac
 SRC=${2:-"$(dirname "$0")/../miniws"}
 [ -x "$SAT" ] || { echo "satria tidak ditemukan: $SAT" >&2; exit 2; }
-TMP=$(mktemp -d /tmp/semantic_header_ws_XXXXXX)
+: "${UNIT_TMP:=${UNIT_BASE:-/tmp/miniws}/t}"
+TMP="$UNIT_TMP/semantic_header_workspace"; rm -rf "${TMP}"; mkdir -p "${TMP}" || exit 1
 trap 'rm -rf "$TMP"' EXIT HUP INT TERM
 
 prepare() {

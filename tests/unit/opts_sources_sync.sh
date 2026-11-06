@@ -51,10 +51,11 @@ PYEOF
 }
 
 export NO_COLOR=1
-BK=$(mktemp /tmp/opts_sync_bak_XXXX)
+BK="$UNIT_TMP/opts_sources_sync-bak"; : > "$BK"
 
 # ============================= MODE WORKSPACE =============================
-W=$(mktemp -d /tmp/opts_sync_ws_XXXX)
+: "${UNIT_TMP:=${UNIT_BASE:-/tmp/miniws}/t}"
+W="$UNIT_TMP/opts_sources_sync"; rm -rf "${W}"; mkdir -p "${W}" || exit 1
 cp -r "$SRC/." "$W/" || exit 2
 printf "flags = MMD, MP\n" >> "$W/Buildfile.ws"
 cd "$W" || exit 2
@@ -99,7 +100,7 @@ head -1 .satria/sources.cache | grep -q "^SATRIASRC2 "; check "ws: sources.cache
 run; valid; check "ws: no-op setelah indeks dibangun ulang" $?
 
 # ============================ MODE SINGLE-PROJECT ============================
-S=$(mktemp -d /tmp/opts_sync_s_XXXX)
+S="$UNIT_TMP/opts_sources_sync-2"; rm -rf "${S}"; mkdir -p "${S}" || exit 1
 mkdir -p "$S/src"
 printf 'use project\n\nsources = src\n' > "$S/Buildfile"
 printf 'int main(void){return 0;}\n' > "$S/src/main.c"

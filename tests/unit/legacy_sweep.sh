@@ -47,7 +47,8 @@ legacy_left() { # $1 = folder .satria; echo jumlah sisa legacy
 }
 
 # ============================ MODE WORKSPACE ============================
-W=$(mktemp -d /tmp/leg_ws_XXXX)
+: "${UNIT_TMP:=${UNIT_BASE:-/tmp/miniws}/t}"
+W="$UNIT_TMP/legacy_sweep"; rm -rf "${W}"; mkdir -p "${W}" || exit 1
 cp -r "$SRC/." "$W/" || exit 2
 printf "flags = MMD, MP\n" >> "$W/Buildfile.ws"
 cd "$W" || exit 2
@@ -70,7 +71,7 @@ plant .satria
 "$SAT" -w > c5 2>&1; hit_ws c5; check "ws: no-op pulih pasca-clean" $?
 
 # ============================ MODE SINGLE ============================
-S=$(mktemp -d /tmp/leg_s_XXXX)
+S="$UNIT_TMP/legacy_sweep-2"; rm -rf "${S}"; mkdir -p "${S}" || exit 1
 mkdir -p "$S/src"
 printf 'use project\n\nsources = src\nflags = Wall\n' > "$S/Buildfile"
 printf 'int main(void){return 0;}\n' > "$S/src/main.c"

@@ -18,7 +18,8 @@ check() { if [ "$2" -eq 0 ]; then pass=$((pass+1)); echo "PASS  $1"; else fail=$
 hit_ws() { grep -q "Nothing to build" "$1" && grep -q "Cache valid *:" "$1"; }
 
 # ===================== workspace miniws: report.blob =====================
-W=$(mktemp -d /tmp/rpt_ws_XXXX)
+: "${UNIT_TMP:=${UNIT_BASE:-/tmp/miniws}/t}"
+W="$UNIT_TMP/report_artifact"; rm -rf "${W}"; mkdir -p "${W}" || exit 1
 cp -r "$MWS/." "$W/" || exit 2
 printf "flags = MMD, MP\n" >> "$W/Buildfile.ws"
 cd "$W" || exit 2
@@ -42,7 +43,7 @@ check "miniws: urutan output = STATUS dulu, ringkasan sesudah" $?
 
 # ===================== workspace miniws + release: release + artifact =====================
 # Salinan miniws ditambahi konfigurasi release (fixture asli tidak diubah).
-R=$(mktemp -d /tmp/rpt_rel_XXXX)
+R="$UNIT_TMP/report_artifact-2"; rm -rf "${R}"; mkdir -p "${R}" || exit 1
 cp -r "$MWS/." "$R/" || exit 2
 cd "$R" || exit 2
 rm -rf build bin lib modules dist .satria
@@ -59,8 +60,8 @@ REL
 "$SAT" -w > rc0.txt 2>&1; check "release: cold build (release)" $?
 grep -q "Releases   : 1 created" .satria/report.blob
 check "release: LAST BUILD SUMMARY berisi baris Releases (blob)" $?
-grep -c "dist/rupa-v" .satria/artifact.cache > /tmp/rpt_cnt.$$
-[ "$(cat /tmp/rpt_cnt.$$)" -gt 0 ]; check "release: artefak dist tercatat di artifact.cache" $?
+grep -c "dist/rupa-v" .satria/artifact.cache > "$tmp/rpt_cnt"
+[ "$(cat "$tmp/rpt_cnt")" -gt 0 ]; check "release: artefak dist tercatat di artifact.cache" $?
 grep -q "cmd.txt" .satria/artifact.cache
 check "release: input release (cmd.txt) tercatat di artifact.cache" $?
 grep -q "rupa_modules.tar" .satria/artifact.cache
@@ -92,10 +93,10 @@ sleep 1.1
 touch dist/*.tar.gz
 "$SAT" -w > rc6.txt 2>&1
 hit_ws rc6.txt; check "release: sentuh artefak tetap no-op (PATCH hash)" $?
-rm -f /tmp/rpt_cnt.$$
+rm -f "$tmp/rpt_cnt"
 
 # ===================== release.optimize: jalur gzip -1 dua langkah =====================
-O=$(mktemp -d /tmp/rpt_opt_XXXX)
+O="$UNIT_TMP/report_artifact-3"; rm -rf "${O}"; mkdir -p "${O}" || exit 1
 cp -r "$MWS/." "$O/" || exit 2
 cd "$O" || exit 2
 rm -rf build bin lib modules dist .satria
@@ -133,7 +134,7 @@ hit_ws oc2.txt; check "optimize: no-op HIT (gerbang terbuka)" $?
 tar tzf dist/*.tar.gz >/dev/null 2>&1; check "optimize: tarball tetap valid setelah no-op" $?
 
 # ===================== single-project =====================
-S=$(mktemp -d /tmp/rpt_s_XXXX)
+S="$UNIT_TMP/report_artifact-4"; rm -rf "${S}"; mkdir -p "${S}" || exit 1
 mkdir -p "$S/src"
 printf 'use project\n\nsources = src\n' > "$S/Buildfile"
 printf 'int main(void){return 0;}\n' > "$S/src/main.c"

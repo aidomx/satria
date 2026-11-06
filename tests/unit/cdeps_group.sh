@@ -19,7 +19,8 @@ MW=$(abspath "$MW")
 
 [ -x "$S" ] || fail "binary tidak ditemukan: $S"
 
-tmp=$(mktemp -d) || fail "mktemp gagal"
+: "${UNIT_TMP:=${UNIT_BASE:-/tmp/miniws}/t}"
+tmp="$UNIT_TMP/cdeps_group"; rm -rf "${tmp}"; mkdir -p "${tmp}" || exit 1
 trap 'rm -rf "$tmp"' EXIT
 
 # Buildfile.ws = fixture tanpa baris cdeps, ditambah blok yang diuji
