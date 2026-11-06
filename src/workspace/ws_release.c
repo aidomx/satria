@@ -135,9 +135,6 @@ int wsRelease(WsModel *m, int jobs, const char *wsDir) {
   if (!c.pack.debInstallPrefix[0])
     copyStr(c.pack.debInstallPrefix, sizeof(c.pack.debInstallPrefix), "/usr/local");
 
-  printf("\n%s Release : %s (workspace%s%s)\n", repPrefix(), c.pack.name,
-         c.pack.format[0] ? ", format " : "", c.pack.format[0] ? c.pack.format : "");
-
   /* packRunAt berjalan di CWD sekarang — pastikan itu root workspace. */
   if (!fsSetCwd(wsDir)) {
     fprintf(stderr, "satria: cannot enter workspace root\n");
