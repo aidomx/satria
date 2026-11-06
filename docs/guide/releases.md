@@ -84,8 +84,21 @@ project's own `dist/` and is untouched by release.
 dist/
 ├── rupa-v0.2.2.tar.gz
 ├── rupa-v0.2.2.tar.gz.sha256
-└── (or .deb when release.format = deb)
 ```
+
+`release.format = deb` **adds** a `.deb` beside the tarball (both artifacts
+are built, each with its own `.sha256`); it does not replace it:
+
+```text
+dist/
+├── rupa-v0.2.2.tar.gz
+├── rupa-v0.2.2.tar.gz.sha256
+├── rupa-v0.2.2.deb
+└── rupa-v0.2.2.deb.sha256
+```
+
+Deb-only mode is explicit: make the output template end in `.deb`
+(`release.output = dist/{name}-v{version}.deb`) and the tarball is skipped.
 
 ## Pipeline
 
