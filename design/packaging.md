@@ -105,5 +105,11 @@ Menghapus staging `.satria/pack`; **tidak** menyentuh `dist/` (bisa dirujuk
     `trace_summary` (trace menolak — LD_PRELOAD tak ada), `build_resume` D
     (semantik SIGINT git-bash tak 1:1), `faststate_external_header`
     ("steady state is no-op") — satu-satunya yang perlu investigasi lanjut.
+  * Run kedua (06/11, setelah fix fixture absolut + autocrlf, commit
+    `9040438`): **PASS=241 FAIL=0** (24 file test) + self-host MSVC lulus +
+    smoke `pack.optimize = true` lulus (`SMOKE OK: FNAME=out.tar.part`,
+    tarball valid; binary smoke.exe di-resolve dari entri `bin/smoke`).
+    Baseline FAIL di atas nyatanya tak muncul — trace test lompat sendiri
+    lewat jalur ya-tolak. Windows/MSVC resmi diuji.
 - Ide lanjut: `pack.deb.depends`/`section`, mode deb-only eksplisit via key,
   penandatanganan `.deb`.
