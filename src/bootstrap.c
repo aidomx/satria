@@ -283,7 +283,21 @@ int bootstrapParse(int argc, const char *argv[], Bootstrap *bs) {
     fprintf(stderr, "satria: --with-cdeps requires -w (workspace mode)\n");
     return 2;
   }
-  if (bs->jobs < 1) bs->jobs = cpuCount(); /* tanpa -j: paralel sebanyak core */
+  if (bs->jobs < 1) {
+    /* Tanpa -j: default dari env SATRIA_JOBS bila di-set (penyemat untuk
+       perangkat lambat — solo/threaded tanpa batas nproc meledak), selain
+       itu paralel sebanyak core (nproc). Nilai tidak valid -> fallback. */
+    const char *ej = getenv("SATRIA_JOBS");
+    if (ej && *ej) {
+      char *e = NULL;
+      long n = strtol(ej, &e, 10);
+      if (e != ej && *e == '\0' && n >= 1)
+        bs->jobs = (int)n;
+      else
+        fprintf(stderr, "satria: SATRIA_JOBS tidak valid ('%s'), pakai jumlah core\n", ej);
+    }
+    if (bs->jobs < 1) bs->jobs = cpuCount();
+  }
   bs->have_f = haveF;
   bs->cmd_token = cmd;
   (void)convSet;

@@ -1,37 +1,33 @@
 #!/bin/sh
-# Uji cache no-op pada tests/miniws. Default AKTIF (tukar default
-# 2026-10-19); nonaktifkan dengan SATRIA_CACHE_NOOP=0.
-# Pemakaian: sh tests/unit/cache_noop_miniws.sh <path-ke-satria> [path-ke-miniws]
+# Uji cache no-op pada fixture workspace (default: tests/miniws). Default AKTIF
+# (tukar default 2026-10-19); nonaktifkan dengan SATRIA_CACHE_NOOP=0.
+# Pemakaian: sh tests/unit/common/cache_noop.sh <path-ke-satria> [path-ke-workspace]
 case "${1:-}" in
   /*) SAT="$1" ;;
   *) SAT="$(pwd)/${1:-bin/satria}" ;;
 esac
-SRC="${2:-$(dirname "$0")/../miniws}"
+SRC="${2:-$(dirname "$0")/../../miniws}"
+. "$(dirname "$0")/../lib/layout.sh"
 [ -x "$SAT" ] || {
   echo "satria tidak ditemukan: $SAT"
   exit 2
 }
 : "${UNIT_TMP:=${UNIT_BASE:-/tmp/miniws}/t}"
-W="$UNIT_TMP/cache_noop_miniws"; rm -rf "${W}"; mkdir -p "${W}" || exit 1
+W="$UNIT_TMP/cache_noop"; rm -rf "${W}"; mkdir -p "${W}" || exit 1
 cp -rf "$SRC/." "$W/" || exit 2
 printf "flags = MMD, MP\n" >> "$W/Buildfile.ws" # cache butuh .d (-MMD)
 cd "$W" || exit 2
 export NO_COLOR=1
 # Jeda agar mtime salinan tidak racy terhadap build pertama (lihat workspace.c, wsCacheVisit).
-sleep 1
-# Gunakan source proyek core pada fixture miniws.
-if [ -f core/src/core.c ]; then
-  SOURCE=core/src/core.c
-  EXTRA=core/src/cache_noop_extra.c
-  OUTPUT=bin/rupa
-elif [ -f a/src/main.c ]; then
-  SOURCE=a/src/main.c
-  EXTRA=a/src/cache_noop_extra.c
-  OUTPUT=bin/a
-else
-  echo "fixture tidak dikenali: tidak ada source untuk mutasi" >&2
-  exit 2
+wait_tick
+# Sumber yang dimutasi diambil dari Buildfile.ws: nama berkasnya berbeda antar
+# target (miniws: core/src/core.c, rupaws: core/src/main.c).
+SOURCE=$(unit_project_source . core)
+OUTPUT=$(unit_project_binary . core)
+if [ -z "$SOURCE" ]; then
+  unit_precondition "fixture tidak dikenali: tidak ada source untuk mutasi"
 fi
+EXTRA="$(dirname "$SOURCE")/cache_noop_extra.c"
 pass=0
 fail=0
 check() { # $1 = nama, $2 = kondisi (0 = benar)
@@ -68,14 +64,14 @@ SATRIA_CACHE_NOOP=0 "$SAT" -w > "$W/out_off.txt" 2>&1
 check "SATRIA_CACHE_NOOP=0: jalur lama, tidak memakai cache" $?
 
 # touch: isi sama -> tetap valid
-sleep 1
+wait_tick
 touch "$SOURCE" || exit 2
 run
 valid
 check "touch (isi sama) tetap no-op" $?
 
 # edit sumber -> tidak valid, build jalan, lalu valid lagi
-sleep 1
+wait_tick
 echo "/* edit */" >> "$SOURCE"
 run
 ! valid
@@ -96,7 +92,7 @@ valid
 check "setelah output pulih: no-op lagi" $?
 
 # Buildfile.ws berubah -> tidak valid
-sleep 1
+wait_tick
 echo "# x" >> Buildfile.ws
 run
 ! valid
@@ -106,7 +102,7 @@ valid
 check "setelah Buildfile disimpan ulang: no-op lagi" $?
 
 # file sumber baru -> direktori berubah -> tidak valid
-sleep 1
+wait_tick
 echo "/* baru */" > "$EXTRA"
 run
 ! valid

@@ -1,11 +1,14 @@
 #!/bin/sh
-# Usage: sh tests/unit/build_log_miniws.sh /absolute/path/to/satria [miniws-dir]
+# requires: cold  -- asersi 'tidak ada build.log/relay' harus diuji pada build cold; snapshot membuat asersi ini vakum
+# source helper sebelum cd: path relatif skrip hanya valid di direktori pemanggil
+. "$(dirname "$0")/../lib/layout.sh"
+# Usage: sh tests/unit/common/build_log.sh /absolute/path/to/satria [miniws-dir]
 set -eu
-SAT="$1"; SRC="${2:-tests/miniws}"
+SAT="$1"; SRC="${2:-${UNIT_REPO:?UNIT_REPO tidak di-set}/tests/miniws}"
 case "$SAT" in /*) ;; *) SAT="$(pwd)/$SAT";; esac
 case "$SRC" in /*) ;; *) SRC="$(pwd)/$SRC";; esac
 : "${UNIT_TMP:=${UNIT_BASE:-/tmp/miniws}/t}"
-W="$UNIT_TMP/build_log_miniws"; rm -rf "${W}"; mkdir -p "${W}" || exit 1
+W="$UNIT_TMP/build_log"; rm -rf "${W}"; mkdir -p "${W}" || exit 1
 trap 'rm -rf "$W"' EXIT HUP INT TERM
 cp -R "$SRC/." "$W/"
 cd "$W"
@@ -13,8 +16,10 @@ cd "$W"
 # meninggalkan .satria/build.log di repo) — buang dulu supaya asersi
 # "cold build tanpa log" di bawah deterministik.
 rm -rf .satria
-# Tata letak miniws: source proyek core berada di core/src.
-ENG=core/src/core.c
+# Source proyek core diambil dari Buildfile.ws (lihat lib/layout.sh): nama
+# berkas berbeda antar target (miniws: core/src/core.c, rupaws: core/src/main.c).
+ENG=$(unit_project_source .)
+[ -n "$ENG" ] || unit_precondition "fixture tidak punya sumber .c untuk dimutasi"
 
 # Default must not create a log or a relay, even on a cold build.
 "$SAT" -w >out 2>err

@@ -1,4 +1,6 @@
 #!/bin/sh
+# source helper sebelum cd: path relatif skrip hanya valid di direktori pemanggil
+. "$(dirname "$0")/../lib/layout.sh"
 # Unit test metadata P + optimasi pemeriksaan no-op (design/startup.md §4):
 #   - Format baris P: <alamat> <tipe> <content> <time> <size> <path>
 #   - Steady state: no-op lewat P-fast (sources.cache + stat saja, tanpa
@@ -9,14 +11,14 @@
 #   - Baris P rusak: no-op ditolak (jalur normal), pulih pada run berikutnya.
 #   - Format lama (tanpa metadata): no-op tetap valid via jalur penuh lalu
 #     metadata di-upgrade otomatis -> run berikutnya P-fast.
-# Pemakaian: sh tests/unit/p_meta_noop.sh <path-ke-satria> [path-ke-miniws]
+# Pemakaian: sh tests/unit/common/p_meta_noop.sh <path-ke-satria> [path-ke-miniws]
 abspath() { (cd "$(dirname "$1")" 2> /dev/null && printf '%s/%s\n' "$(pwd)" "$(basename "$1")"); }
 [ -n "$1" ] && [ -x "$1" ] || {
   echo "satria tidak ditemukan: ${1:-<kosong>}"
   exit 2
 }
 SAT=$(abspath "$1")
-SRC=$(abspath "${2:-$(dirname "$0")/../miniws}")
+SRC=$(abspath "${2:-$(dirname "$0")/../../miniws}")
 [ -d "$SRC" ] || {
   echo "fixture tidak ditemukan: $SRC"
   exit 2
@@ -57,8 +59,13 @@ check "ws: no-op steady = P-fast hit" $?
 hit_ws out.txt
 check "ws: pesan no-op tampil" $?
 
-sleep 1.1
-touch core/src/core.c
+wait_tick
+# Touch pada berkas yang tidak ada akan MEMBUAT sumber baru, dan build memang
+# harus jalan — jadi pakai berkas yang benar-benar ada, dari Buildfile.ws
+# (miniws: core/src/core.c, rupaws: core/src/main.c).
+CRUDFILE=$(unit_project_source . core)
+[ -n "$CRUDFILE" ] || unit_precondition "fixture tidak punya sumber .c proyek core"
+touch "$CRUDFILE"
 SATRIA_CACHE_TRACE=1 "$SAT" -w > t1 2>&1
 rc=$?
 hit_ws t1
@@ -74,8 +81,10 @@ hit_ws out.txt
 check "ws: route sources.cache tetap valid setelah rewrite" $?
 
 # Touch the archive root without changing its entries: metadata refresh only.
-sleep 1.1
-touch rupamod
+wait_tick
+# Proyek archive (yang memaket `.`) — bukan nama fixture tertentu.
+ARCHDIR=$(unit_archive_project .)
+touch "${ARCHDIR:-.}"
 SATRIA_CACHE_TRACE=1 "$SAT" -w > td1 2>&1
 hit_ws td1
 check "ws: touch direktori archive = Nothing to build" $?
@@ -86,7 +95,9 @@ check "ws: touch direktori tidak menjalankan fase archive" $?
 fast out.txt
 check "ws: touch direktori berikutnya kembali P-fast" $?
 
-printf '\nint pmeta_x(void){return 9;}\n' >> bade/src/bade.c
+BSRC=$(unit_project_source . bade)
+[ -n "$BSRC" ] || { echo "FAIL bade: tidak ada source untuk proyek bade (layout)" >&2; exit 1; }
+printf '\nint pmeta_x(void){return 9;}\n' >> "$BSRC"
 "$SAT" -w > e1 2>&1
 check "ws: edit isi -> build" $?
 ! hit_ws e1

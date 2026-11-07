@@ -1,14 +1,16 @@
 #!/bin/sh
+# source helper sebelum cd: path relatif skrip hanya valid di direktori pemanggil
+. "$(dirname "$0")/../lib/layout.sh"
 # Unit test CRUD per-source (design/startup.md §4; opsi minimal terpilih):
 #   update = SENTUH file -> stamp di-PATCH via hash isi, TANPA rebuild
 #   delete = sumber dihapus -> entri hilang dari cache, no-op pulih
 #   create = sumber ditambah -> tercatat + rebuild (kontrol)
 # Kedua mode (workspace & single-project). Router = opts.cache + cache store.
-# Pemakaian: sh tests/unit/crud_touch_delete.sh <path-ke-satria> [path-ke-miniws]
+# Pemakaian: sh tests/unit/common/crud_touch_delete.sh <path-ke-satria> [path-ke-miniws]
 abspath() { (cd "$(dirname "$1")" 2>/dev/null && printf '%s/%s\n' "$(pwd)" "$(basename "$1")"); }
 [ -n "$1" ] && [ -x "$1" ] || { echo "satria tidak ditemukan: ${1:-<kosong>}"; exit 2; }
 SAT=$(abspath "$1")
-SRC=$(abspath "${2:-$(dirname "$0")/../miniws}")
+SRC=$(abspath "${2:-$(dirname "$0")/../../miniws}")
 [ -d "$SRC" ] || { echo "fixture tidak ditemukan: $SRC"; exit 2; }
 export NO_COLOR=1
 
@@ -31,13 +33,12 @@ W="$UNIT_TMP/crud_touch_delete"; rm -rf "${W}"; mkdir -p "${W}" || exit 1
 cp -r "$SRC/." "$W/" || exit 2
 printf "flags = MMD, MP\n" >> "$W/Buildfile.ws"
 cd "$W" || exit 2
-# Tata letak miniws: source proyek core berada di core/src.
-ENGDIR=core/src
-# Source yang benar-benar ada di fixture: core.c milik miniws; workspace
-# lain (mis. rupaws) bisa tidak memilikinya — jangan biarkan `touch`
-# memBESAR jadi create file baru (size 0) yang memang HARUS di-recompile.
-CRUDFILE="$ENGDIR/core.c"
-[ -f "$CRUDFILE" ] || CRUDFILE="$ENGDIR/main.c"
+# Source proyek core dari Buildfile.ws (miniws: core/src/core.c, rupaws:
+# core/src/main.c) supaya tes tidak bergantung pada nama fixture.
+ENG=$(unit_project_source . core)
+[ -n "$ENG" ] || unit_precondition "fixture tidak punya sumber .c untuk dimutasi"
+ENGDIR=$(dirname "$ENG")
+ENGBASE=$(basename "$ENG")
 
 run() { "$SAT" -w >"$W/out.txt" 2>&1; return $?; }
 
@@ -45,8 +46,8 @@ run; check "ws: cold build" $?
 run; hit_ws out.txt; check "ws: no-op dasar" $?
 
 # update: sentuh sumber -> PATCH fingerprint, TANPA rebuild
-sleep 1.1
-touch "$CRUDFILE"
+wait_tick
+touch "$ENG"
 run
 hit_ws out.txt; check "ws: sentuh sumber = no-op (tanpa rebuild)" $?
 
@@ -83,7 +84,7 @@ pt=$(grep -ac '^P ' .satria/opts.cache); pm=$(grep -acE '^P [0-9a-f]{16} [0-9a-f
 [ "$pt" -gt 0 ] && [ "$pm" -eq "$pt" ]; check "single: P opts.cache bermetadata ($pm/$pt)" $?
 
 # update: sentuh -> fast path TETAP dipakai (opts tak berubah) + build.state di-PATCH
-sleep 1.1
+wait_tick
 touch src/crud2.c
 s1=$(stat -c '%y' .satria/caches/fingerprint.cache)
 a=$(ostamp); run; b=$(ostamp); s2=$(stat -c '%y' .satria/caches/fingerprint.cache)
