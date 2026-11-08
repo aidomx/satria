@@ -88,8 +88,10 @@ fi
 # ---------------------------------------------------------------- background
 if [ "$BG" -eq 1 ] && [ -z "${UNIT_V1_CHILD:-}" ]; then
   set -m
+  SELARGS=()
+  for s in "${SEL[@]}"; do SELARGS+=(-t "$s"); done
   UNIT_V1_CHILD=1 nohup bash "$0" "$BIN_IN" "$TNAME" -j "$JOBS" -o "$LOG" \
-    > /dev/null 2>&1 &
+    "${SELARGS[@]}" > /dev/null 2>&1 &
   CPID=$!
   set +m
   echo "$CPID" > "$LOGDIR/bg.pid"
