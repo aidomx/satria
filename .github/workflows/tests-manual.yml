@@ -22,9 +22,9 @@
 #   - trace_src_sync.sh & cmdhelp_crlf → PASS palsu ikut hilang bersama
 #     core.autocrlf (lihat atas).
 #
-# Runner scripts/unit.sh menjalankan SELURUH tests/unit/*.sh — input arg
-# hanya FIXTURE workspace, bukan filter; jadi masukkan baseline fail di atas
-# saat membaca result.
+# Runner scripts/unit.sh menjalankan semua tes terdaftar di classes.conf
+# — CLI: <binary> <target-nama> [-j N] [-o log]; tes di tests/unit/common
+# + tes khusus fixture di tests/unit/<target-nama>/.
 name: Tests Manual (Windows/MSVC)
 
 on:
@@ -124,12 +124,16 @@ jobs:
       - name: Unit suite (scripts/unit.sh)
         if: ${{ inputs.suite != '' }}
         shell: bash
-        run: bash scripts/unit.sh -o "${{ steps.suite.outputs.log1 }}" -j "${{ inputs.jobs }}" "${{ steps.suite.outputs.suite }}"
+        run: |
+          T1="$(basename "${{ inputs.suite }}")"
+          bash scripts/unit.sh bin/satria.exe "$T1" -j "${{ inputs.jobs }}" -o "${{ steps.suite.outputs.log1 }}"
 
       - name: Unit suite kedua (opsional)
         if: ${{ steps.suite.outputs.suite2 != '' }}
         shell: bash
-        run: bash scripts/unit.sh -o "${{ steps.suite.outputs.log2 }}" -j "${{ inputs.jobs }}" "${{ steps.suite.outputs.suite2 }}"
+        run: |
+          T2="$(basename "${{ inputs.suite2 }}")"
+          bash scripts/unit.sh bin/satria.exe "$T2" -j "${{ inputs.jobs }}" -o "${{ steps.suite.outputs.log2 }}"
 
       # ---- smoke pack.optimize = true di MSVC ----
       # Jalur pack TARBALL dua langkah (tar → gzip -1) perlu dibuktikan di
