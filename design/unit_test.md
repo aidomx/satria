@@ -31,7 +31,6 @@ Runner untuk menjalankan unit test secara massal.
 
 Fitur:
 
-- Interactive configuration.
 - Background execution.
 - Watcher.
 - Snapshot (internal: dipilih dari classes.conf, bukan flag).
@@ -153,7 +152,7 @@ Lock dan reaper berlaku per target, bukan per base:
 - Reaper: hanya menghentikan proses yang cwd-nya berada di dalam targets/<nama>/. Proses run target lain tidak disentuh.
 - --clean: hanya menghapus targets/<nama>/, tidak menyentuh target lain atau common/, lib/, classes.conf, dan test.state.
 
-Dampak ke -w tanpa argumen: bila lebih dari satu run aktif, watcher harus memilih atau menampilkan semua run (lihat 10.5).
+Dampak ke -w tanpa argumen: bila lebih dari satu run aktif, watcher harus memilih atau menampilkan semua run (lihat 9.5).
 
 2.6 Binary staging, pinning per run, dan -w multi-target
 
@@ -407,42 +406,7 @@ Format interface dapat berupa environment file atau format lain yang sesuai deng
 
 `"common/*.sh"` tidak perlu membaca ulang Buildfile.ws atau melakukan discovery konfigurasi secara independen.
 
-7. Interactive Configuration
-
-Runner mendukung interactive configuration untuk penggunaan lokal.
-
-Contoh:
-```bash
-bash scripts/unit.sh bin/satria rupaws
-```
-
-Contoh interaksi:
-```text
-Unit Test Configuration
-
-Workspace : rupaws
-
-Project list? [all]: rupa,ruka
-
-Header location? [auto]:
-
-Preflight:
-  Workspace configuration : OK
-  Project selection       : OK
-  Header discovery        : OK
-  Fixture validation      : OK
-
-Start unit tests? [Y/n]:
-```
-
-Runner hanya meminta konfigurasi yang memang memerlukan keputusan pengguna.
-
-Default:
-
-- Project list: "all".
-- Header location: "auto".
-
-8. Non-interactive Configuration
+7. Non-interactive Configuration
 
 Runner tetap harus mendukung CI dan otomatisasi tanpa terminal interaktif.
 
@@ -457,7 +421,7 @@ Background execution harus menjalankan preflight sebelum proses dipindahkan ke b
 
 Proses background tidak boleh menunggu input terminal.
 
-9. Failure Classification
+8. Failure Classification
 
 Kegagalan harus dibedakan menjadi tiga kategori:
 
@@ -475,7 +439,7 @@ Perilaku Satria tidak sesuai dengan ekspektasi test.
 
 Ketiganya tidak boleh dicampur menjadi satu kegagalan assertion.
 
-10. Watcher
+9. Watcher
 
 Watcher digunakan untuk memantau perubahan dan menjalankan ulang unit test secara otomatis.
 
@@ -490,7 +454,7 @@ Contoh tampilan:
 process: <unit_test_name> n% <time:hh:mm:ss>
 ```
 
-10.1 Watcher Lifecycle
+9.1 Watcher Lifecycle
 
 Watcher harus:
 
@@ -503,7 +467,7 @@ Watcher harus:
 
 Watcher tetap berjalan sampai dihentikan pengguna atau prosesnya dihentikan.
 
-10.2 Change Detection
+9.2 Change Detection
 
 Perubahan yang dipantau mencakup:
 
@@ -515,7 +479,7 @@ Perubahan yang dipantau mencakup:
 
 Perubahan artefak hasil build, log, temporary files, dan snapshot tidak boleh memicu watcher secara berulang.
 
-10.3 Test Execution
+9.3 Test Execution
 
 Watcher harus mempertahankan warm state selama masih valid.
 
@@ -525,13 +489,13 @@ Jika perubahan memengaruhi konfigurasi workspace atau shared helper, cakupan tes
 
 Perubahan konfigurasi yang memengaruhi preflight harus memicu validasi ulang sebelum test dijalankan.
 
-10.4 Test Isolation in Watcher
+9.4 Test Isolation in Watcher
 
 Setiap siklus watcher harus tetap menghormati precondition test.
 
 State sebelumnya boleh dipertahankan selama valid, tetapi tidak boleh menyebabkan hasil test bergantung pada urutan atau siklus sebelumnya.
 
-10.5 Watcher Status
+9.5 Watcher Status
 
 Watcher harus menampilkan:
 
@@ -552,7 +516,7 @@ process: selective_noop 65% 00:00:01
 ```
 Status harus diperbarui tanpa menghilangkan informasi penting dari siklus sebelumnya.
 
-11. Snapshot
+10. Snapshot
 
 Snapshot digunakan untuk menyimpan kondisi tertentu yang diperlukan oleh pengujian.
 
@@ -567,7 +531,7 @@ Snapshot tidak boleh dianggap sebagai pengganti assertion.
 
 Snapshot harus memiliki identitas dan konteks yang jelas, termasuk konfigurasi workspace serta kondisi fixture yang relevan.
 
-12. Reporting
+11. Reporting
 
 Setiap unit test memiliki log tersendiri.
 
@@ -589,7 +553,7 @@ Logs:
 
 Laporan harus membedakan kegagalan test dan kegagalan precondition atau infrastruktur.
 
-13. Design Principles
+12. Design Principles
 
 1. Cold start hanya ketika diperlukan.
 2. Warmstart menjadi kondisi normal.
@@ -609,7 +573,7 @@ Laporan harus membedakan kegagalan test dan kegagalan precondition atau infrastr
 
 Tujuan akhirnya adalah menghasilkan pengujian yang fleksibel, reproducible, workspace-aware, dan mampu menemukan regresi nyata tanpa melakukan pekerjaan build yang tidak diperlukan.
 
-## 14. Status Implementasi (scripts/unit_dev.sh)
+## 13. Status Implementasi (scripts/unit_dev.sh)
 
 Implementasi mengikuti nomor bagian di atas. Runner: `scripts/unit_dev.sh` (dev,
 versi stabil disalin ke `scripts/unit.sh`).
@@ -626,15 +590,14 @@ versi stabil disalin ke `scripts/unit.sh`).
 | 3.3 | Fase cold lalu snap; reset work per tes | ✅ | |
 | 4 | Test isolation (folder work, UNIT_TMP per tes) | ✅ | |
 | 5.1–5.2 | Fixture-aware helpers tanpa asumsi nama file | ✅ | `unit_project_source`, `unit_project_binary` dll. di `lib/layout.sh` |
-| 5.3 | PRECONDITION kategori sendiri | ✅ | `unit_precondition()` verdict + talli `PRE` (bukan FAIL), design §9 |
+| 5.3 | PRECONDITION kategori sendiri | ✅ | `unit_precondition()` verdict + talli `PRE` (bukan FAIL), design §8 |
 | 5.4 | Helpers reusable antar fixture | ✅ | |
 | 6 | Workspace-aware configuration (parser Buildfile.ws via Satria) | ✅ | discovery runner = `-w -g compdb` (mekanisme satria, query-only) pada salinan throwaway fixture → `discovery/sources.tsv` (proyek/sumber/objek); `lib/layout.sh` makan TSV (skip `embedded.c`, prefer `src/`); tanpa runner → string kosong → PRECONDITION. `unit_project_binary`/`unit_archive_project` masih micro-read Buildfile.ws (interim, tunggu query targets native) |
-| 7 | Preflight interaktif (§7) | ⏸ | v1.5 |
-| 8 | Non-interactive (argumen/env penuh) | ✅ | `-b`, `-j`, `-o`, `-t`, `--clean` — tanpa prompt |
-| 9 | Klasifikasi kegagalan 3 kategori | ✅ | FAIL / PRE / infra (exit 2) |
-| 10 | Watcher (`-w`) | ⏸ | ditunda, v1.5 |
-| 11 | Reporting: ringkasan + `timing.tsv` per tes | ✅ | pass/fail/pre, total, tunggu vs kerja via shim sleep; 5 tes terlama |
-| 12 | Contoh laporan + log per tes | ✅ | `log/unit.log`, `log/<tes>.log` |
+| 7 | Non-interactive (argumen/env penuh) | ✅ | `-b`, `-j`, `-o`, `-t`, `--clean` — tanpa prompt (interactive configuration dihapus dari design — menambah beban kode runner tanpa nilai) |
+| 8 | Klasifikasi kegagalan 3 kategori | ✅ | FAIL / PRE / infra (exit 2) |
+| 9 | Watcher (`-w`) | ⏸ | ditunda, v1.5 |
+| 10 | Reporting: ringkasan + `timing.tsv` per tes | ✅ | pass/fail/pre, total, tunggu vs kerja via shim sleep; 5 tes terlama |
+| 11 | Contoh laporan + log per tes | ✅ | `log/unit.log`, `log/<tes>.log` |
 | — | `-t <tes>` seleksi run | ✅ | ekstra di luar design: jalankan subset, snap hanya bila ada tes [snap] terpilih |
 
 Batasan `-j` tiga lapis (out of band):

@@ -349,7 +349,7 @@ run_phase() {
     PASS=$((PASS+p)); FAILN=$((FAILN+f)); PREN=$((PREN+pc))
     printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$name" "$mode" "$ms" "$p" "$f" "$pc" "$sl" "$wk" >> "$TIMING"
     printf '> Selesai %s [%s] %s.%03ds\n' "$name" "$mode" "$((ms/1000))" "$((ms%1000))"
-    # Design §9: precondition BUKAN kegagalan Satria — kategorinya sendiri.
+    # Design §8: precondition BUKAN kegagalan Satria — kategorinya sendiri.
     if [ "$f" -gt 0 ]; then RESULTS+=("FAIL $name ($f)")
     elif [ "$pc" -gt 0 ]; then RESULTS+=("PRE $name ($pc)")
     else RESULTS+=("OK   $name ($p)"); fi

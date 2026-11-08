@@ -76,7 +76,7 @@ unit_archive_project() {
 }
 
 # unit_precondition <pesan>
-#   Verdict prasyarat (design unit_test.md §5.3 + §9): fixture tidak menyediakan
+#   Verdict prasyarat (design unit_test.md §5.3 + §8): fixture tidak menyediakan
 #   kebutuhan tes. Bukan kegagalan Satria — cetak verdict sendiri lalu akhiri tes
 #   dengan rc 0. Runner menghitungnya sebagai kategori PRE, bukan FAIL.
 unit_precondition() {
