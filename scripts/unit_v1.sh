@@ -260,7 +260,7 @@ fi
 TIMING="$LOGDIR/timing.tsv"
 : > "$TIMING"
 printf 'operasi\tfase\tms\tpass\tfail\tpre\tsleep_ms\twork_ms\n' >> "$TIMING"
-[ -f "$SNAPD/snap.env" ] && printf 'snap-build\tsnap\t%s\t-\t-\t-\t-\n' \
+[ -f "$SNAPD/snap.env" ] && printf 'snap-build\tsnap\t%s\t-\t-\t-\t-\t-\n' \
   "$(( $(grep '^SNAP_BUILT_S=' "$SNAPD/snap.env" | cut -d= -f2) * 1000 ))" >> "$TIMING"
 
 # run.env (manifest, K5)
