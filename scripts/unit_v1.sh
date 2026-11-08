@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # scripts/unit_v1.sh - runner unit test v1 (design/unit_test.md, Ruang lingkup v1)
 #
-#   bash scripts/unit_v1.sh <binary> <target> [-b] [-j N] [-o <log>]
+#   bash scripts/unit_v1.sh <binary> <target> [-b] [-j N] [-o <log>] [-t <tes>]
 #
 # Tahap: discovery -> staging (common/, lib/, classes.conf, test.state)
 #        -> validasi klasifikasi -> fixture -> snap (bila ada tes [snap])
@@ -32,12 +32,13 @@ say() { echo "$*"; }
 usage() { sed -n '2,6p' "$0"; }
 
 # ---------------------------------------------------------------- argumen
-BG=0; JOBS=2; LOG=""; CLEAN=0; POS=()
+BG=0; JOBS=2; LOG=""; CLEAN=0; POS=(); SEL=()
 while [ $# -gt 0 ]; do
   case "$1" in
     -b) BG=1; shift ;;
     -j) [ $# -ge 2 ] || die "-j memerlukan angka"; JOBS="$2"; shift 2 ;;
     -o) [ $# -ge 2 ] || die "-o memerlukan path log"; LOG="$2"; shift 2 ;;
+    -t) [ $# -ge 2 ] || die "-t memerlukan nama tes"; SEL+=("$2"); shift 2 ;;
     --clean) CLEAN=1; shift ;;
     -h|--help) usage; exit 0 ;;
     -*) die "opsi tidak dikenal: $1" ;;
@@ -205,6 +206,24 @@ for t in "${SNAP[@]}"; do
 done
 
 say "> Klasifikasi : ${#COLD[@]} cold, ${#SNAP[@]} snap (dari ${#ALL_TESTS[@]} tes)"
+
+# Seleksi: -t <tes> (boleh berulang) mempersempit run ke tes terpilih saja.
+# Validasi tetap penuh: nama tak dikenal atau tak terdaftar digagalkan.
+# Snap hanya dibangun bila ada tes [snap] yang terpilih.
+if [ "${#SEL[@]}" -gt 0 ]; then
+  NC=(); NS=()
+  for s in "${SEL[@]}"; do
+    ok=0
+    for t in "${COLD[@]}"; do [ "$t" = "$s" ] && ok=1 && break; done
+    for t in "${SNAP[@]}"; do [ "$t" = "$s" ] && ok=1 && break; done
+    [ "$ok" -eq 1 ] || die "tes '-t $s' tidak ada di tests/unit/common atau tidak terdaftar di classes.conf"
+    for t in "${COLD[@]}"; do [ "$t" = "$s" ] && { NC+=("$t"); break; }; done
+    for t in "${SNAP[@]}"; do [ "$t" = "$s" ] && { NS+=("$t"); break; }; done
+  done
+  say "> Seleksi : ${#SEL[@]} tes (-t: ${SEL[*]}), cold $((${#SEL[@]} - ${#NS[@]})), snap ${#NS[@]}"
+  if [ "${#NC[@]}" -gt 0 ]; then COLD=("${NC[@]}"); else COLD=(); fi
+  if [ "${#NS[@]}" -gt 0 ]; then SNAP=("${NS[@]}"); else SNAP=(); fi
+fi
 
 # ---------------------------------------------------------------- fixture & snap
 FIX="$T/fixture"; SNAPD="$T/snap"; W="$T/work"; TMPD="$T/t"
