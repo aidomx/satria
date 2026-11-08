@@ -3,7 +3,7 @@
 # src/trace/tracer_src.h harus hasil generate dari src/trace/tracer.src.
 # Gagal bila tracer.src diubah tanpa menjalankan scripts/gen_tracer_src.sh.
 set -eu
-ROOT="${UNIT_REPO:?UNIT_REPO tidak di-set: jalankan lewat scripts/unit_v1.sh}"
+ROOT="${UNIT_REPO:?UNIT_REPO tidak di-set: jalankan lewat scripts/unit_dev.sh}"
 : "${UNIT_TMP:=${UNIT_BASE:-/tmp/miniws}/t}"
 W="$UNIT_TMP/trace_src_sync"
 rm -rf "${W}"

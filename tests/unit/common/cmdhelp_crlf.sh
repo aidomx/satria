@@ -13,7 +13,7 @@ fail() { echo "FAIL cmdhelp_crlf: $1"; exit 1; }
 
 [ -x "$S" ] || fail "binary tidak ditemukan: $S"
 
-ROOT="${UNIT_REPO:?UNIT_REPO tidak di-set: jalankan lewat scripts/unit_v1.sh}"
+ROOT="${UNIT_REPO:?UNIT_REPO tidak di-set: jalankan lewat scripts/unit_dev.sh}"
 SRC="$ROOT/src/cmd.txt"
 [ -f "$SRC" ] || fail "cmd.txt tidak ditemukan: $SRC"
 

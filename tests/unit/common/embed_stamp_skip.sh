@@ -6,7 +6,7 @@
 set -eu
 SAT="$1"
 case "$SAT" in /*) ;; *) SAT="$(pwd)/$SAT" ;; esac
-SRC_ROOT="${UNIT_REPO:?UNIT_REPO tidak di-set: jalankan lewat scripts/unit_v1.sh}"
+SRC_ROOT="${UNIT_REPO:?UNIT_REPO tidak di-set: jalankan lewat scripts/unit_dev.sh}"
 SRC="${2:-$SRC_ROOT/tests/miniws}"
 : "${UNIT_TMP:=${UNIT_BASE:-/tmp/miniws}/t}"
 W="$UNIT_TMP/embed_stamp_skip"; rm -rf "${W}"; mkdir -p "${W}" || exit 1

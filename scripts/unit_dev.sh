@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# scripts/unit_v1.sh - runner unit test v1 (design/unit_test.md, Ruang lingkup v1)
+# scripts/unit_dev.sh - runner unit test dev (design/unit_test.md)
 #
-#   bash scripts/unit_v1.sh <binary> <target> [-b] [-j N] [-o <log>] [-t <tes>]
+#   bash scripts/unit_dev.sh <binary> <target> [-b] [-j N] [-o <log>] [-t <tes>]
 #
 # Tahap: discovery -> staging (common/, lib/, classes.conf, test.state)
 #        -> validasi klasifikasi -> fixture -> snap (bila ada tes [snap])
