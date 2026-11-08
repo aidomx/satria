@@ -306,7 +306,7 @@ run_phase() {
     rm -rf "$TMPD"; mkdir -p "$TMPD"
     : > "$SLEEP_LOG"
     ( cd "$W" && UNIT_TEST_NAME="$name" UNIT_TMP="$TMPD" UNIT_BASE="$T" \
-        sh "$STAGE/common/$name.sh" "$WRAP" "$TGT_SRC" ) \
+        sh "$STAGE/common/$name.sh" "$WRAP" "$FIX" ) \
       2>&1 | tee "$LOGDIR/$name.log"
     t1="$(now_ms)"; ms=$((t1 - t0))
     sl="$(awk '{s+=$2} END{printf "%d", s*1000}' "$SLEEP_LOG")"; sl=${sl:-0}
