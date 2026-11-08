@@ -619,6 +619,7 @@ versi stabil disalin ke `scripts/unit.sh`).
 | 2.1–2.2 | Staging `targets/<nama>/` + `test.state` fingerprint | ✅ | common/, lib/, classes.conf disalin; tak disalin ulang bila sama |
 | 2.3 | `test.state` | ✅ | sinkronisasi staging per run |
 | 2.4 | Penamaan & resolusi target | ✅ | `<target>` = nama → `tests/<nama>` |
+| — | `unit.sh` = konsumen tipis `unit_dev.sh` | ✅ | unit.sh menyalin `unit_dev.sh` ke `.unit.$$` di `scripts/` lalu menjalankan salinan itu: edit `unit_dev.sh` tak lagi mengganggu run aktif (bash lazy-parse memegang snapshot), dan unit.sh tak perlu ditimpa lagi — insiden "ditimpa saat run rupaws, parsing run aktif rusak" tak terulang |
 | 2.5 | Lock & reaper per target; `-b` background pasca-preflight; `--clean` per target | ✅ | `log/run.pid`, reaper rekursif, `--clean` hanya `targets/<nama>/` |
 | 2.6 | Binary pinning `satria-<hash8>` | ✅ | `run.env`: `RUN_BINARY` (path pin) + `RUN_ORIGINAL` |
 | 3.2 | Snap ber-identitas (`SNAP_ID` dari hash biner+target+fixture) | ✅ | identitas cocok → tidak dibangun ulang |

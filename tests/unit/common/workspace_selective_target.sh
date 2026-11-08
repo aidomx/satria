@@ -16,7 +16,7 @@ rm -rf "$TMP/.satria" "$TMP/build" "$TMP/bin" "$TMP/lib" "$TMP/modules" "$TMP/co
 . "$(dirname "$0")/../lib/layout.sh"
 CORE_SRC=$(unit_project_source "$TMP" core)
 BADE_SRC=$(unit_project_source "$TMP" bade)
-[ -n "$CORE_SRC" ] && [ -n "$BADE_SRC" ] || { echo "fixture butuh proyek core dan bade bersumber .c" >&2; exit 2; }
+[ -n "$CORE_SRC" ] && [ -n "$BADE_SRC" ] || unit_precondition "fixture butuh proyek core dan bade bersumber .c"
 (cd "$TMP" && "$SAT" -j2 -w) > "$TMP/cold.log" 2>&1 || {
   cat "$TMP/cold.log" >&2
   exit 1
@@ -60,7 +60,7 @@ rm -rf "$TMP/.satria" "$TMP/build" "$TMP/bin" "$TMP/lib" "$TMP/modules" "$TMP/co
 . "$(dirname "$0")/../lib/layout.sh"
 CORE_SRC=$(unit_project_source "$TMP" core)
 BADE_SRC=$(unit_project_source "$TMP" bade)
-[ -n "$CORE_SRC" ] && [ -n "$BADE_SRC" ] || { echo "fixture butuh proyek core dan bade bersumber .c" >&2; exit 2; }
+[ -n "$CORE_SRC" ] && [ -n "$BADE_SRC" ] || unit_precondition "fixture butuh proyek core dan bade bersumber .c"
 (cd "$TMP" && "$SAT" -j2 -w) > "$TMP/cold.log" 2>&1 || {
   cat "$TMP/cold.log" >&2
   exit 1
