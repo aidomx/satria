@@ -1,9 +1,9 @@
 #!/bin/sh
-# Usage: sh tests/unit/miniws/embed_getembed.sh /absolute/path/to/satria [miniws-dir]
+# Usage: sh tests/unit/common/embed_getembed.sh /absolute/path/to/satria [miniws-dir]
 #
-# Khusus fixture tests/miniws: memakai contoh `bade` di fixture (bade/src/embed_use.c)
-# dan path ekstraksi /tmp/satria-miniws-system dari Buildfile.ws-nya. Target lain
-# (proyek nyata) tidak punya program contoh ini, jadi tes tidak dijalankan di sana.
+# Khusus fixture dengan tabel embed (miniws: contoh `bade`, bade/src/embed_use.c,
+# path ekstraksi /tmp/satria-miniws-system dari Buildfile.ws). Fixture lain
+# (proyek nyata) tidak punya itu — berhenti dengan PRECONDITION, bukan FAIL.
 #
 # Verifikasi design/embedded.md (codegen sebagai satu-satunya mekanisme):
 #   1. codegen     : build/bade/embedded.c + embedded.h (struct Embedded,
@@ -16,6 +16,7 @@
 #   5. konten      : ubah isi arsip -> embedded.c diregenerasi -> hanya
 #                    embedded.c yang recompile lalu relink
 set -eu
+. "$(dirname "$0")/../lib/layout.sh"
 SAT="$1"; SRC="${2:-$(cd "$(dirname "$0")/../../.." && pwd)/tests/miniws}"
 case "$SAT" in /*) ;; *) SAT="$(pwd)/$SAT";; esac
 case "$SRC" in /*) ;; *) SRC="$(pwd)/$SRC";; esac
@@ -27,6 +28,12 @@ trap 'rm -rf "$W"; rm -rf "$EXTRACT"' EXIT HUP INT TERM
 cp -R "$SRC/." "$W/"
 cd "$W"
 rm -rf "$EXTRACT"
+
+# Kebutuhan embed (bademod.extract + project bade): hanya miniws.
+# Tanpa itu: PRECONDITION (design unit_test.md §5.3) — bukan kegagalan satria.
+if ! grep -q 'extract' Buildfile.ws || [ -z "$(unit_project_source . bade)" ]; then
+  unit_precondition "fixture tidak punya bade + bademod.extract (spek embed khusus miniws)"
+fi
 
 fail() { echo "FAIL: $*"; [ -f err ] && tail -20 err; exit 1; }
 
