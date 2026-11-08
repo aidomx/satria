@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # scripts/unit.sh - runner unit test stabil (salinan unit_dev.sh; design/unit_test.md)
 #
-#   bash scripts/unit.sh <binary> <target> [-b] [-j N] [-o <log>] [-t <tes>]
+#   bash scripts/unit_dev.sh <binary> <target> [-b] [-j N] [-o <log>] [-t <tes>]
 #
 # Tahap: discovery -> staging (common/, lib/, classes.conf, test.state)
 #        -> validasi klasifikasi -> fixture -> snap (bila ada tes [snap])
@@ -257,6 +257,39 @@ if [ "${#SNAP[@]}" -gt 0 ]; then
     say "> Snap : selesai dalam $(( $(date +%s) - T0 )) s"
   fi
 fi
+
+# -------------------------------------------------------------- discovery
+# design §6: konfigurasi workspace dibaca lewat MEKANISME SATRIA sendiri —
+# `-w -g compdb` (query-only, tanpa build, tanpa state), bukan parser kedua.
+# Salinan throwaway fixture dipakai agar artefak CompDB tidak masuk jalur tes
+# (tes cold mengharapkan tidak ada compile_commands.json sejak awal).
+# Output: discovery/sources.tsv = proyek<TAB>sumber<TAB>objek (path rel fixture).
+# Path rel dihitung dari segmen `/build/` — aman lintas platform (prefix drive
+# Windows berbeda tidak ikut tersimpan).
+export UNIT_DISCOVERY="$T/discovery"
+mkdir -p "$UNIT_DISCOVERY"
+rm -rf "$T/discw"
+cp -a "$FIX" "$T/discw" || die "gagal menyiapkan salinan discovery"
+if ( cd "$T/discw" && "$WRAP" -w -g compdb ) > "$LOGDIR/discovery.log" 2>&1; then
+  awk '
+    function cl(p) { gsub(/\\/, "/", p); sub(/^ *"[^:]+": *"/, "", p); sub(/",?$/, "", p); return p }
+    /"file":/   { f = cl($0) }
+    /"output":/ {
+      o = cl($0)
+      obj = o; sub(/^.*\/build\//, "", obj)
+      proj = obj; sub(/\/.*$/, "", proj)
+      src = f; sub("^.*/" proj "/", "", src)
+      if (src == f) { src = f; sub(/^.+\//, "", src) } # fallback: nama berkas saja
+      print proj "\t" src "\t" obj
+    }' "$T/discw/compile_commands.json" > "$UNIT_DISCOVERY/sources.tsv"
+  [ -s "$UNIT_DISCOVERY/sources.tsv" ] \
+    || die "discovery: compdb tanpa entri (lihat $LOGDIR/discovery.log)"
+  NP=$(awk -F'\t' '{print $1}' "$UNIT_DISCOVERY/sources.tsv" | sort -u | wc -l)
+  say "> Discovery : $NP proyek, $(wc -l < "$UNIT_DISCOVERY/sources.tsv") unit kompilasi (-w -g compdb)"
+else
+  die "discovery compdb gagal, lihat $LOGDIR/discovery.log"
+fi
+rm -rf "$T/discw"
 
 # timing per operasi (ms): snap-build dan setiap tes
 TIMING="$LOGDIR/timing.tsv"

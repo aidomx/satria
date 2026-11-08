@@ -1,38 +1,57 @@
 #!/bin/sh
 # Helper tata letak proyek untuk tes workspace.
 #
-# Tes di tests/unit/common dijalankan terhadap target apa pun (tests/miniws untuk
-# eksplorasi cepat, atau proyek nyata seperti rupaws). Karena itu nama berkas
-# TIDAK boleh di-hardcode: ambil dari Buildfile.ws lewat fungsi di bawah.
-# Semua fungsi menerima direktori proyek sebagai $1 (default: direktori kerja)
-# dan mencetak path relatif terhadap direktori itu (kosong bila tidak ada).
+# Sumber truth = discovery dari RUNNER (design unit_test.md §6): runner
+# mengeksekusi `-w -g compdb` (mekanisme satria sendiri, query-only, tanpa
+# parser kedua) dan menulis
+#
+#   "$UNIT_DISCOVERY/sources.tsv" = proyek<TAB>sumber<TAB>objek
+#
+# dengan `sumber` path rel terhadap akar fixture. Tes di tests/unit/common
+# dijalankan terhadap target apa pun (miniws / complexws / rupaws), jadi nama
+# berkas TIDAK boleh di-hardcode — selalu lewat fungsi di bawah.
+#
+# Ketika TSV tidak tersedia (tes dijalankan manual tanpa runner), fungsi
+# mengembalikan string kosong; pemanggil memutus PRECONDITION:
+#
+#   src="$(unit_project_source "$W" core)"
+#   [ -z "$src" ] && unit_precondition "layout.sh: butuh UNIT_DISCOVERY"
+#
+# Surface dipertahankan: semua fungsi menerima direktori akar fixture sebagai
+# $1 (default: direktori kerja) dan mencetak path relatif terhadap akar itu.
 
 # unit_project_source <root> [proyek]
-#   Satu berkas .c milik <proyek> (default: core). `<proyek>.sources` di
-#   Buildfile.ws berisi direktori RELATIF terhadap direktori proyek, jadi dicari
-#   di `<proyek>/<dir>`. Dipakai tes yang perlu "sentuh/edit satu source" tanpa
-#   mengasumsikan nama berkas fixture.
+#   Satu berkas .c milik <proyek> (default: core) dari sources.tsv.
+#   - baris hasil codegen (`embedded.c`) di-skip: berkasnya ditulis ulang tiap
+#     build, bukan input yang dapat disentuh.
+#   - nama direktori `src` diprioritaskan.
+#   - bila <proyek> tidak ada di TSV, pakai proyek pertama di TSV (supaya tes
+#     "sentuh satu source" tetap bermakna pada fixture 1-proyek).
 unit_project_source() {
   _root=${1:-.}
   _want=${2:-core}
-  _dirs=$(sed -n "s/^$_want\.sources *= *//p" "$_root/Buildfile.ws" 2> /dev/null | head -1)
-  [ -n "$_dirs" ] || _dirs=$(sed -n 's/^[A-Za-z0-9_]*\.sources *= *//p' "$_root/Buildfile.ws" 2> /dev/null | head -1)
-  # Direktori `src` diprioritaskan: direktori lain bisa berisi berkas hasil
-  # codegen (mis. `bade/manager/embedded.c`) yang ditulis ulang tiap build.
-  printf '%s\n' "$_dirs" | tr ',' '\n' | tr -d ' \t' |
-    awk '{ print ($0 == "src" || $0 ~ /\/src$/ ? 0 : 1), $0 }' | sort | cut -d' ' -f2- |
-    while IFS= read -r _d; do
-    [ -n "$_d" ] || continue
-    [ -d "$_root/$_want/$_d" ] || continue
-    _f=$(find "$_root/$_want/$_d" -maxdepth 3 -name '*.c' 2> /dev/null | sort | head -1)
-    [ -n "$_f" ] || continue
-    printf '%s\n' "${_f#"$_root"/}"
-    break
-  done
+  _tsv="${UNIT_DISCOVERY:-}/sources.tsv"
+  [ -s "$_tsv" ] || return 0
+  # proyek yang diminta ada di TSV? (tanpa baris embedded.c)
+  _have=$(awk -F'\t' -v w="$_want" '$1==w { found=1 } END { print found+0 }' "$_tsv")
+  [ "$_have" = "1" ] || _want=$(awk -F'\t' '{ print $1 }' "$_tsv" | head -1)
+  [ -n "$_want" ] || return 0
+  awk -F'\t' -v w="$_want" '
+    $1 == w && $2 !~ /(^|\/)embedded\.c$/ {
+      print ( ($2 ~ /^src\// || $2 ~ /\/src\//) ? 0 : 1 ), $2
+    }
+  ' "$_tsv" | sort | cut -d' ' -f2- | head -1 | {
+    _src2=$(cat)
+    [ -n "$_src2" ] || return 0
+    printf '%s/%s\n' "$_want" "$_src2"
+  }
+  return 0
 }
 
 # unit_project_binary <root> [proyek]
 #   Path binary hasil proyek, dari `X.output as A` + `A.binaryName = N` -> bin/N
+#   INTERIM: micro-read Buildfile.ws sampai ada query targets native satria
+#   (design §6); hanya membaca DUA key sederhana, bukan parser.
 unit_project_binary() {
   _root=${1:-.}
   _want=${2:-core}
@@ -47,6 +66,7 @@ unit_project_binary() {
 #   Nama proyek yang memaket direktori (`<proyek>.archive.src`), mis. rupamod.
 #   Kunci di Buildfile bisa berupa alias (`projects.rupamod as mod`), sedangkan
 #   direktori proyek memakai nama proyek — alias dipetakan balik ke nama proyek.
+#   INTERIM: micro-read Buildfile.ws sampai ada query targets native satria.
 unit_archive_project() {
   _root=${1:-.}
   _key=$(sed -n 's/^\([A-Za-z0-9_]*\)\.archive\.src *= *\. *$/\1/p' "$_root/Buildfile.ws" 2> /dev/null | head -1)
