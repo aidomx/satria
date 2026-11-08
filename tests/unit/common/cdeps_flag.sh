@@ -23,7 +23,7 @@ CORE_SRC=$(unit_project_source "$TMP" core)
 fail() { echo "FAIL: $1" >&2; [ -f "$TMP/last.log" ] && cat "$TMP/last.log" >&2; exit 1; }
 
 # 1) Flag tanpa -w harus ditolak (rc 2).
-if (cd "$TMP" && "$SAT" --with-cdeps) > "$TMP/last.log" 2>&1; then
+if (cd "$TMP" && "$SAT" -j${UNIT_JOBS:-2} --with-cdeps) > "$TMP/last.log" 2>&1; then
   fail "--with-cdeps without -w must fail"
 fi
 grep -q 'requires -w' "$TMP/last.log" || fail "missing --with-cdeps/-w validation message"

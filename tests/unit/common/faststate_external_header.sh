@@ -1,4 +1,5 @@
 #!/bin/sh
+. "$(dirname "$0")/../lib/layout.sh"
 # Regression: single-project fast-state must include actual header dependencies
 # outside sources/includeDirs, e.g. #include "../shared.h".
 abspath() { (cd "$(dirname "$1")" 2>/dev/null && printf '%s/%s\n' "$(pwd)" "$(basename "$1")"); }
@@ -32,21 +33,21 @@ cat > "$W/src/main.c" <<'SOURCE'
 int main(void) { return EXTERNAL_VALUE == 1 ? 0 : 1; }
 SOURCE
 cd "$W" || exit 2
-"$SAT" > cold.log 2>&1
+"$SAT" -j${UNIT_JOBS:-2} > cold.log 2>&1
 check "cold build compiles source" "$(grep -q 'src/main.c' cold.log; echo $?)"
-"$SAT" > noop.log 2>&1
+"$SAT" -j${UNIT_JOBS:-2} > noop.log 2>&1
 check "steady state is no-op" "$(grep -q 'Nothing to build' noop.log; echo $?)"
 # Same-length content edit: must invalidate fast-state and recompile consumer.
 cat > shared.h <<'HEADER'
 #define EXTERNAL_VALUE 2
 HEADER
-"$SAT" > edit.log 2>&1
+"$SAT" -j${UNIT_JOBS:-2} > edit.log 2>&1
 check "external header edit rejects fast-state" "$( ! grep -q 'Nothing to build' edit.log; echo $?)"
 check "external header edit recompiles consumer" "$(grep -q 'src/main.c' edit.log; echo $?)"
 # Touch only: same content should be proven by hash and remain a no-op.
-sleep 1
+wait_tick
 touch shared.h
-"$SAT" > touch.log 2>&1
+"$SAT" -j${UNIT_JOBS:-2} > touch.log 2>&1
 check "touch without content change stays no-op" "$(grep -q 'Nothing to build' touch.log; echo $?)"
 echo "lulus: $pass  gagal: $fail"
 [ "$fail" -eq 0 ]

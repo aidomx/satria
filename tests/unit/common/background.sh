@@ -1,4 +1,6 @@
 #!/bin/sh
+. "$(dirname "$0")/../lib/layout.sh"
+# requires: cold  -- startup direkam saat build cold; replay watch bergantung pada rekaman itu
 # Uji background build + watch (design/background.md) pada fixture miniws
 # (workspace) dan proyek minimal satu-proyek (Buildfile).
 # Perilaku kunci (masalah 26_10_2026, item Startup/Background):
@@ -10,13 +12,13 @@
 #   - `watch` yang dibuka SETELAH build selesai DITOLAK: tidak ada pekerjaan
 #     yang berjalan di background.
 #   - run tanpa startup (warm) membuang rekaman lama.
-# Pemakaian: sh tests/unit/background_miniws.sh <path-ke-satria> [path-ke-miniws]
+# Pemakaian: sh tests/unit/common/background.sh <path-ke-satria> [path-ke-miniws]
 abspath() { (cd "$(dirname "$1")" 2>/dev/null && printf '%s/%s\n' "$(pwd)" "$(basename "$1")"); }
 [ -n "$1" ] && [ -x "$1" ] || { echo "satria tidak ditemukan: ${1:-<kosong>}"; exit 2; }
 SAT=$(abspath "$1")
-SRC=$(abspath "${2:-$(dirname "$0")/../miniws}")
+SRC=$(abspath "${2:-$(dirname "$0")/../../miniws}")
 : "${UNIT_TMP:=${UNIT_BASE:-/tmp/miniws}/t}"
-W="$UNIT_TMP/background_miniws"; rm -rf "${W}"; mkdir -p "${W}" || exit 1
+W="$UNIT_TMP/background"; rm -rf "${W}"; mkdir -p "${W}" || exit 1
 cp -r "$SRC/." "$W/" || exit 2
 printf "flags = MMD, MP\nbackground = true\n" >> "$W/Buildfile.ws"
 cd "$W" || exit 2
@@ -33,7 +35,7 @@ cont_bg() { kill -s CONT "$(cat "$1" 2>/dev/null)" 2>/dev/null; }
 echo "== workspace (background = true di Buildfile.ws) =="
 
 # §3A: spawn mengembalikan kontrol segera, tanpa output build di induk.
-"$SAT" -w > out.txt 2>&1
+"$SAT" -j${UNIT_JOBS:-2} -w > out.txt 2>&1
 check "spawn: rc=0 (berhasil memulai)" $?
 ! grep -q "Project :" out.txt
 check "spawn: induk tidak menjalankan build sendiri" $?
@@ -47,7 +49,7 @@ check "spawn: startup direkam (cold)" $?
 # §3B: watch terpasang SAAT build berjalan -> replay startup + progres,
 #   lalu summary + status saat child menutup run.
 stop_bg .satria/workspace.pid
-"$SAT" -w watch > watch.txt 2>&1 &
+"$SAT" -j${UNIT_JOBS:-2} -w watch > watch.txt 2>&1 &
 wp=$!
 sleep 1
 cont_bg .satria/workspace.pid
@@ -68,25 +70,27 @@ check "teardown: PID dihapus setelah selesai" $?
 check "log: background.log berisi output build" $?
 
 # Watch BARU setelah run final: DITOLAK (tidak ada pekerjaan berjalan).
-"$SAT" -w watch > done.txt 2>&1
+"$SAT" -j${UNIT_JOBS:-2} -w watch > done.txt 2>&1
 [ $? -eq 1 ] && grep -q "tidak ada build background" done.txt
 check "watch setelah selesai: ditolak (rc=1)" $?
-"$SAT" -w watch --full > done_full.txt 2>&1
+"$SAT" -j${UNIT_JOBS:-2} -w watch --full > done_full.txt 2>&1
 [ $? -eq 1 ] && grep -q "tidak ada build background" done_full.txt
 check "watch --full setelah selesai: ditolak (rc=1)" $?
 
 # §3C: --full men-stream log live SELAMA build berjalan. Run baru dengan
 #   sumber berubah = warm (startup.state sudah ada): tanpa blok startup dan
 #   rekaman lama wajib sudah dibuang.
-printf '\n/* perubahan uji background */\n' >> bade/src/bade.c
-"$SAT" -w > warm.txt 2>&1
+BSRC=$(unit_project_source . bade)
+[ -n "$BSRC" ] || { echo "FAIL bade: tidak ada source untuk proyek bade (layout)" >&2; exit 1; }
+printf '\n/* perubahan uji background */\n' >> "$BSRC"
+"$SAT" -j${UNIT_JOBS:-2} -w > warm.txt 2>&1
 check "run warm: rc=0 (spawn)" $?
 ! grep -q "^startup$" warm.txt
 check "run warm: tetap tanpa blok startup" $?
 [ ! -f .satria/background.startup ]
 check "run warm: rekaman startup lama dibuang" $?
 stop_bg .satria/workspace.pid
-"$SAT" -w watch --full > full.txt 2>&1 &
+"$SAT" -j${UNIT_JOBS:-2} -w watch --full > full.txt 2>&1 &
 fp=$!
 sleep 1
 cont_bg .satria/workspace.pid
@@ -99,7 +103,7 @@ check "watch --full: men-stream isi log" $?
 
 # No-op: run berikutnya TIDAK boleh masuk jalur background — dilayani inline
 # oleh jalur router (fingerprint.cache), tanpa child dan tanpa output kosong.
-"$SAT" -w > noop.out 2>&1
+"$SAT" -j${UNIT_JOBS:-2} -w > noop.out 2>&1
 check "no-op ws: rc=0" $?
 grep -q "Nothing to build" noop.out && grep -q "Cache valid" noop.out
 check "no-op ws: pesan router inline" $?
@@ -118,11 +122,11 @@ case "$(uname -s 2>/dev/null)" in
     ;;
   *)
     echo $$ > .satria/workspace.pid
-    "$SAT" -w > dup.txt 2>&1
+    "$SAT" -j${UNIT_JOBS:-2} -w > dup.txt 2>&1
     [ $? -ne 0 ] && grep -q "Background build is already running" dup.txt
     check "deteksi build ganda: ditolak + pesan desain" $?
 
-    "$SAT" -w clean > clean.txt 2>&1
+    "$SAT" -j${UNIT_JOBS:-2} -w clean > clean.txt 2>&1
     [ $? -ne 0 ] && grep -q "diblokir" clean.txt
     check "clean diblokir saat build background berjalan" $?
     ;;
@@ -130,18 +134,18 @@ esac
 
 # watch tanpa build sama sekali: rc=1 + pesan jelas.
 rm -f .satria/workspace.pid .satria/background.status
-"$SAT" -w watch > none.txt 2>&1
+"$SAT" -j${UNIT_JOBS:-2} -w watch > none.txt 2>&1
 [ $? -eq 1 ] && grep -q "tidak ada build background" none.txt
 check "watch tanpa build: rc=1 + pesan" $?
 
 echo "== satu proyek (background = true di Buildfile) =="
-S="$UNIT_TMP/background_miniws-2"; rm -rf "${S}"; mkdir -p "${S}" || exit 1
+S="$UNIT_TMP/background-2"; rm -rf "${S}"; mkdir -p "${S}" || exit 1
 mkdir -p "$S/src"
 printf 'use project\n\nbackground = true\n' > "$S/Buildfile"
 printf '#include <stdio.h>\nint main(void) { puts("bg"); return 0; }\n' > "$S/src/main.c"
 cd "$S" || exit 2
 
-"$SAT" > s_out.txt 2>&1
+"$SAT" -j${UNIT_JOBS:-2} > s_out.txt 2>&1
 check "single: spawn rc=0" $?
 ! grep -q "^startup$" s_out.txt
 check "single: blok startup TIDAK dicetak" $?
@@ -152,7 +156,7 @@ check "single: PID tertulis (.satria/build.pid)" $?
 
 # §3B: watch terpasang saat build berjalan (lihat catatan SIGSTOP di atas).
 stop_bg .satria/build.pid
-"$SAT" watch > s_watch.txt 2>&1 &
+"$SAT" -j${UNIT_JOBS:-2} watch > s_watch.txt 2>&1 &
 sw=$!
 sleep 1
 cont_bg .satria/build.pid
@@ -167,12 +171,12 @@ sleep 1
 check "single: PID dihapus & log terisi" $?
 
 # Setelah selesai: watch baru ditolak.
-"$SAT" watch > s_done.txt 2>&1
+"$SAT" -j${UNIT_JOBS:-2} watch > s_done.txt 2>&1
 [ $? -eq 1 ] && grep -q "tidak ada build background" s_done.txt
 check "single: watch setelah selesai ditolak" $?
 
 # No-op single: fast-state/router dijawab inline, tanpa spawn.
-"$SAT" > s_noop.out 2>&1
+"$SAT" -j${UNIT_JOBS:-2} > s_noop.out 2>&1
 check "single no-op: rc=0" $?
 grep -q "Nothing to build" s_noop.out
 check "single no-op: pesan router inline" $?
@@ -186,7 +190,7 @@ case "$(uname -s 2>/dev/null)" in
     ;;
   *)
     echo $$ > .satria/build.pid
-    "$SAT" clean > s_clean.txt 2>&1
+    "$SAT" -j${UNIT_JOBS:-2} clean > s_clean.txt 2>&1
     [ $? -ne 0 ] && grep -q "diblokir" s_clean.txt
     check "single: clean diblokir" $?
     rm -f .satria/build.pid

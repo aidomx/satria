@@ -5,11 +5,11 @@
 #     dibuang otomatis pada run (workspace & single) dan saat clean.
 #   - .satria/workspace/<p>.Buildfile (CURRENT — cache config) TIDAK disentuh.
 #   - No-op tetap berlaku setelah penyapuan (state lama memang tak terbaca).
-# Pemakaian: sh tests/unit/legacy_sweep.sh <path-ke-satria> [path-ke-miniws]
+# Pemakaian: sh tests/unit/common/legacy_sweep.sh <path-ke-satria> [path-ke-miniws]
 abspath() { (cd "$(dirname "$1")" 2>/dev/null && printf '%s/%s\n' "$(pwd)" "$(basename "$1")"); }
 [ -n "$1" ] && [ -x "$1" ] || { echo "satria tidak ditemukan: ${1:-<kosong>}"; exit 2; }
 SAT=$(abspath "$1")
-SRC=$(abspath "${2:-$(dirname "$0")/../miniws}")
+SRC=$(abspath "${2:-$(dirname "$0")/../../miniws}")
 [ -d "$SRC" ] || { echo "fixture tidak ditemukan: $SRC"; exit 2; }
 export NO_COLOR=1
 
@@ -52,23 +52,23 @@ W="$UNIT_TMP/legacy_sweep"; rm -rf "${W}"; mkdir -p "${W}" || exit 1
 cp -r "$SRC/." "$W/" || exit 2
 printf "flags = MMD, MP\n" >> "$W/Buildfile.ws"
 cd "$W" || exit 2
-"$SAT" -w > c1 2>&1; check "ws: cold build" $?
+"$SAT" -j${UNIT_JOBS:-2} -w > c1 2>&1; check "ws: cold build" $?
 
 plant .satria
 [ "$(legacy_left .satria)" -eq 11 ]; check "ws: sampah legacy tertanam (11)" $?
 
-"$SAT" -w > c2 2>&1; check "ws: run tetap sukses" $?
+"$SAT" -j${UNIT_JOBS:-2} -w > c2 2>&1; check "ws: run tetap sukses" $?
 hit_ws c2; check "ws: no-op tetap berlaku setelah menyapu" $?
 [ "$(legacy_left .satria)" -eq 0 ]; check "ws: semua state lama terbuang (run)" $?
 [ -f .satria/workspace/core.Buildfile ]; check "ws: <p>.Buildfile current dipertahankan" $?
 
 plant .satria
-"$SAT" -w clean > c3 2>&1; check "ws: clean sukses" $?
+"$SAT" -j${UNIT_JOBS:-2} -w clean > c3 2>&1; check "ws: clean sukses" $?
 [ "$(legacy_left .satria)" -eq 0 ]; check "ws: state lama terbuang saat clean" $?
 [ -f .satria/workspace/core.Buildfile ]; check "ws: clean juga mempertahankan <p>.Buildfile" $?
 
-"$SAT" -w > c4 2>&1; check "ws: build setelah clean sukses" $?
-"$SAT" -w > c5 2>&1; hit_ws c5; check "ws: no-op pulih pasca-clean" $?
+"$SAT" -j${UNIT_JOBS:-2} -w > c4 2>&1; check "ws: build setelah clean sukses" $?
+"$SAT" -j${UNIT_JOBS:-2} -w > c5 2>&1; hit_ws c5; check "ws: no-op pulih pasca-clean" $?
 
 # ============================ MODE SINGLE ============================
 S="$UNIT_TMP/legacy_sweep-2"; rm -rf "${S}"; mkdir -p "${S}" || exit 1
@@ -76,19 +76,19 @@ mkdir -p "$S/src"
 printf 'use project\n\nsources = src\nflags = Wall\n' > "$S/Buildfile"
 printf 'int main(void){return 0;}\n' > "$S/src/main.c"
 cd "$S" || exit 2
-"$SAT" > s1 2>&1; check "single: cold build" $?
+"$SAT" -j${UNIT_JOBS:-2} > s1 2>&1; check "single: cold build" $?
 
 plant .satria
 rm -f .satria/workspace.state   # tidak berlaku di single; tetap tak apa
 [ "$(legacy_left .satria)" -eq 10 ]; check "single: sampah legacy tertanam (10)" $?
 
-"$SAT" > s2 2>&1; check "single: run tetap sukses" $?
+"$SAT" -j${UNIT_JOBS:-2} > s2 2>&1; check "single: run tetap sukses" $?
 grep -q "Nothing to build" s2; check "single: no-op tetap berlaku setelah menyapu" $?
 [ "$(legacy_left .satria)" -eq 0 ]; check "single: semua state lama terbuang (run)" $?
 
 plant .satria
 rm -f .satria/workspace.state
-"$SAT" clean > s3 2>&1; check "single: clean sukses" $?
+"$SAT" -j${UNIT_JOBS:-2} clean > s3 2>&1; check "single: clean sukses" $?
 [ "$(legacy_left .satria)" -eq 0 ]; check "single: state lama terbuang saat clean" $?
 
 echo "---"

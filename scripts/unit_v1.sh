@@ -155,6 +155,7 @@ fi
 # shim sleep: mencatat durasi yang diminta per tes, lalu meneruskan ke sleep asli
 REAL_SLEEP="$(command -v sleep)" || die "sleep tidak ditemukan"
 export UNIT_REAL_SLEEP="$REAL_SLEEP"
+export UNIT_JOBS="$JOBS" # nilai -j milik runner; tes memakai -j${UNIT_JOBS:-2}
 mkdir -p "$STAGE/shim"
 cat > "$STAGE/shim/sleep" <<'SHIM'
 #!/bin/sh

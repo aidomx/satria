@@ -40,7 +40,7 @@ ENG=$(unit_project_source . core)
 ENGDIR=$(dirname "$ENG")
 ENGBASE=$(basename "$ENG")
 
-run() { "$SAT" -w >"$W/out.txt" 2>&1; return $?; }
+run() { "$SAT" -j${UNIT_JOBS:-2} -w >"$W/out.txt" 2>&1; return $?; }
 
 run; check "ws: cold build" $?
 run; hit_ws out.txt; check "ws: no-op dasar" $?
@@ -73,7 +73,7 @@ printf 'use project\n\nsources = src\n' > "$S/Buildfile"
 printf 'int main(void){return 0;}\n' > "$S/src/main.c"
 printf 'int crud2(void){return 2;}\n' > "$S/src/crud2.c"
 cd "$S" || exit 2
-run() { "$SAT" >"$S/out.txt" 2>&1; return $?; }
+run() { "$SAT" -j${UNIT_JOBS:-2} >"$S/out.txt" 2>&1; return $?; }
 
 run; check "single: cold build" $?
 a=$(ostamp); run; b=$(ostamp)

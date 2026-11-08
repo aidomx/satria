@@ -1,5 +1,9 @@
 #!/bin/sh
-# Usage: sh tests/unit/embed_getembed_miniws.sh /absolute/path/to/satria [miniws-dir]
+# Usage: sh tests/unit/miniws/embed_getembed.sh /absolute/path/to/satria [miniws-dir]
+#
+# Khusus fixture tests/miniws: memakai contoh `bade` di fixture (bade/src/embed_use.c)
+# dan path ekstraksi /tmp/satria-miniws-system dari Buildfile.ws-nya. Target lain
+# (proyek nyata) tidak punya program contoh ini, jadi tes tidak dijalankan di sana.
 #
 # Verifikasi design/embedded.md (codegen sebagai satu-satunya mekanisme):
 #   1. codegen     : build/bade/embedded.c + embedded.h (struct Embedded,
@@ -12,11 +16,11 @@
 #   5. konten      : ubah isi arsip -> embedded.c diregenerasi -> hanya
 #                    embedded.c yang recompile lalu relink
 set -eu
-SAT="$1"; SRC="${2:-tests/miniws}"
+SAT="$1"; SRC="${2:-$(cd "$(dirname "$0")/../../.." && pwd)/tests/miniws}"
 case "$SAT" in /*) ;; *) SAT="$(pwd)/$SAT";; esac
 case "$SRC" in /*) ;; *) SRC="$(pwd)/$SRC";; esac
 : "${UNIT_TMP:=${UNIT_BASE:-/tmp/miniws}/t}"
-W="$UNIT_TMP/embed_getembed_miniws"; rm -rf "${W}"; mkdir -p "${W}" || exit 1
+W="$UNIT_TMP/embed_getembed"; rm -rf "${W}"; mkdir -p "${W}" || exit 1
 # .extract fixture Buildfile.ws = /tmp/satria-miniws-system (dipakai embed_use.c)
 EXTRACT=/tmp/satria-miniws-system
 trap 'rm -rf "$W"; rm -rf "$EXTRACT"' EXIT HUP INT TERM
@@ -27,7 +31,7 @@ rm -rf "$EXTRACT"
 fail() { echo "FAIL: $*"; [ -f err ] && tail -20 err; exit 1; }
 
 # ---------- 1. cold build + codegen ----------
-"$SAT" -w >out 2>err || fail "cold build"
+"$SAT" -j${UNIT_JOBS:-2} -w >out 2>err || fail "cold build"
 [ -f build/bade/embedded.c ]    || fail "embedded.c tidak digenerate"
 [ -f build/bade/embedded.h ]    || fail "embedded.h tidak digenerate"
 [ -f build/bade/embedded.o ]    || fail "embedded.o tidak dikompilasi (bukan source biasa?)"
@@ -56,7 +60,7 @@ case "$(uname -s 2>/dev/null)" in
 esac
 
 # ---------- 3. no-op run ulang ----------
-"$SAT" -w >out 2>err || fail "run no-op"
+"$SAT" -j${UNIT_JOBS:-2} -w >out 2>err || fail "run no-op"
 grep -q '^\[' out && fail "no-op masih mengkompilasi: $(grep '^\[' out | head -1)"
 S_EMB=$(stat -c %y build/bade/embedded.c); S_OBJ=$(stat -c %y build/bade/embedded.o)
 S_BIN=$(stat -c %y bin/bade)
@@ -64,7 +68,7 @@ S_BIN=$(stat -c %y bin/bade)
 # ---------- 4. touch arsip, isi sama -> tetap no-op ----------
 sleep 1.1
 touch modules/rupa_modules.tar
-"$SAT" -w >out 2>err || fail "run setelah touch arsip"
+"$SAT" -j${UNIT_JOBS:-2} -w >out 2>err || fail "run setelah touch arsip"
 grep -q '^\[' out && fail "touch (isi sama) memicu kompilasi ulang"
 [ "$(stat -c %y build/bade/embedded.c)" = "$S_EMB" ] || fail "embedded.c disentuh ulang (bukan content-based)"
 [ "$(stat -c %y build/bade/embedded.o)" = "$S_OBJ" ] || fail "embedded.o direcompile saat touch"
@@ -73,7 +77,7 @@ grep -q '^\[' out && fail "touch (isi sama) memicu kompilasi ulang"
 # ---------- 5. ubah isi arsip -> regenerasi + recompile + relink ----------
 sleep 1.1
 printf 'X' >> modules/rupa_modules.tar
-"$SAT" -w >out 2>err || fail "run setelah isi arsip berubah"
+"$SAT" -j${UNIT_JOBS:-2} -w >out 2>err || fail "run setelah isi arsip berubah"
 grep -q 'build/bade/embedded.c' out || fail "embedded.c tidak masuk antrean kompilasi"
 [ "$(stat -c %y build/bade/embedded.c)" != "$S_EMB" ] || fail "embedded.c tidak diregenerasi"
 [ "$(stat -c %y bin/bade)" != "$S_BIN" ] || fail "bin/bade tidak direlink"

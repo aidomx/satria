@@ -1,15 +1,17 @@
 #!/bin/sh
+. "$(dirname "$0")/../lib/layout.sh"
+# requires: cold  -- asersi report.blob/artifact.cache harus berasal dari build cold; snapshot sudah berisi artefak -> vakum
 # Unit test design/startup.md §9 (artifact.cache) dan §10 (report.blob):
 #   - cold/build sukses -> .satria/report.blob + .satria/artifact.cache terbentuk
 #   - no-op ws -> laporan tersimpan ditampilkan ke terminal, pesan no-op tetap terakhir
 #   - release aktif: no-op KINI berlaku (gerbang dibuka; validasi via artifact.cache)
 #   - artefak/input release berubah -> batal no-op + dibangun ulang; sentuh -> PATCH
 #   - single-project: kedua file ikut terbentuk, no-op tetap informatif
-# Pemakaian: sh tests/unit/report_artifact.sh <satria> [miniws]
+# Pemakaian: sh tests/unit/common/report_artifact.sh <satria> [miniws]
 abspath() { (cd "$(dirname "$1")" 2>/dev/null && printf '%s/%s\n' "$(pwd)" "$(basename "$1")"); }
 [ -n "$1" ] && [ -x "$1" ] || { echo "satria tidak ditemukan: ${1:-<kosong>}"; exit 2; }
 SAT=$(abspath "$1")
-MWS=$(abspath "${2:-$(dirname "$0")/../miniws}")
+MWS=$(abspath "${2:-$(dirname "$0")/../../miniws}")
 [ -d "$MWS" ] || { echo "fixture tidak ditemukan: $MWS"; exit 2; }
 export NO_COLOR=1
 
@@ -17,31 +19,31 @@ pass=0; fail=0
 check() { if [ "$2" -eq 0 ]; then pass=$((pass+1)); echo "PASS  $1"; else fail=$((fail+1)); echo "FAIL  $1"; fi; }
 hit_ws() { grep -q "Nothing to build" "$1" && grep -q "Cache valid *:" "$1"; }
 
-# ===================== workspace miniws: report.blob =====================
+# ===================== workspace: report.blob =====================
 : "${UNIT_TMP:=${UNIT_BASE:-/tmp/miniws}/t}"
 W="$UNIT_TMP/report_artifact"; rm -rf "${W}"; mkdir -p "${W}" || exit 1
 cp -r "$MWS/." "$W/" || exit 2
 printf "flags = MMD, MP\n" >> "$W/Buildfile.ws"
 cd "$W" || exit 2
-"$SAT" -w > c.txt 2>&1; check "miniws: cold build" $?
-[ -s .satria/report.blob ]; check "miniws: report.blob terbentuk dan tidak kosong" $?
-grep -q "Status     : Success" .satria/report.blob; check "miniws: report.blob berisi detail laporan" $?
+"$SAT" -j${UNIT_JOBS:-2} -w > c.txt 2>&1; check "ws: cold build" $?
+[ -s .satria/report.blob ]; check "ws: report.blob terbentuk dan tidak kosong" $?
+grep -q "Status     : Success" .satria/report.blob; check "ws: report.blob berisi detail laporan" $?
 grep -q "^STATUS$" .satria/report.blob && grep -q "Cache valid *: .satria/caches/fingerprint.cache" .satria/report.blob
-check "miniws: report.blob blok STATUS (format §10)" $?
+check "ws: report.blob blok STATUS (format §10)" $?
 grep -q "^LAST BUILD SUMMARY$" .satria/report.blob && grep -q "Total time : " .satria/report.blob
 grep -q "Libraries  : [0-9]* generated" .satria/report.blob && grep -q "Binaries   : [0-9]* linked" .satria/report.blob
-check "miniws: report.blob blok LAST BUILD SUMMARY agregat" $?
-[ -f .satria/artifact.cache ]; check "miniws: artifact.cache terbentuk (§9)" $?
-"$SAT" -w > n.txt 2>&1; check "miniws: no-op rc=0" $?
-grep -q "Nothing to build" n.txt; check "miniws: pesan no-op tetap ada" $?
-grep -q "Status     : Success" n.txt; check "miniws: no-op menampilkan detail dari report.blob" $?
+check "ws: report.blob blok LAST BUILD SUMMARY agregat" $?
+[ -f .satria/artifact.cache ]; check "ws: artifact.cache terbentuk (§9)" $?
+"$SAT" -j${UNIT_JOBS:-2} -w > n.txt 2>&1; check "ws: no-op rc=0" $?
+grep -q "Nothing to build" n.txt; check "ws: pesan no-op tetap ada" $?
+grep -q "Status     : Success" n.txt; check "ws: no-op menampilkan detail dari report.blob" $?
 # urutan replay (format §10): blok STATUS (pesan no-op) mendahului LAST BUILD SUMMARY
 sline=$(grep -n "Status     : Success" n.txt | head -1 | cut -d: -f1)
 nline=$(grep -n "Nothing to build" n.txt | head -1 | cut -d: -f1)
 [ -n "$sline" ] && [ -n "$nline" ] && [ "$nline" -lt "$sline" ]
-check "miniws: urutan output = STATUS dulu, ringkasan sesudah" $?
+check "ws: urutan output = STATUS dulu, ringkasan sesudah" $?
 
-# ===================== workspace miniws + release: release + artifact =====================
+# ===================== workspace + release: release + artifact =====================
 # Salinan miniws ditambahi konfigurasi release (fixture asli tidak diubah).
 R="$UNIT_TMP/report_artifact-2"; rm -rf "${R}"; mkdir -p "${R}" || exit 1
 cp -r "$MWS/." "$R/" || exit 2
@@ -57,7 +59,7 @@ release.format = tar
 release.compress = gzip
 release.checksum = sha256
 REL
-"$SAT" -w > rc0.txt 2>&1; check "release: cold build (release)" $?
+"$SAT" -j${UNIT_JOBS:-2} -w > rc0.txt 2>&1; check "release: cold build (release)" $?
 grep -q "Releases   : 1 created" .satria/report.blob
 check "release: LAST BUILD SUMMARY berisi baris Releases (blob)" $?
 grep -c "dist/rupa-v" .satria/artifact.cache > "$tmp/rpt_cnt"
@@ -66,32 +68,32 @@ grep -q "cmd.txt" .satria/artifact.cache
 check "release: input release (cmd.txt) tercatat di artifact.cache" $?
 grep -q "rupa_modules.tar" .satria/artifact.cache
 check "release: arsip proyek kemasan tercatat di artifact.cache" $?
-"$SAT" -w > rc1.txt 2>&1
+"$SAT" -j${UNIT_JOBS:-2} -w > rc1.txt 2>&1
 hit_ws rc1.txt; check "release: no-op HIT saat release aktif (gerbang terbuka)" $?
 grep -q "Releases   : 1 created" rc1.txt
 check "release: no-op memutar baris Releases dari LAST BUILD SUMMARY" $?
 
 # artefak dihapus -> batal no-op + dibangun ulang + hit lagi
 rm -f dist/*.tar.gz
-"$SAT" -w > rc2.txt 2>&1
+"$SAT" -j${UNIT_JOBS:-2} -w > rc2.txt 2>&1
 ! hit_ws rc2.txt; check "release: artefak hilang membatalkan no-op" $?
 ls dist/*.tar.gz >/dev/null 2>&1; check "release: artefak dibangun ulang" $?
-"$SAT" -w > rc3.txt 2>&1
+"$SAT" -j${UNIT_JOBS:-2} -w > rc3.txt 2>&1
 hit_ws rc3.txt; check "release: no-op pulih setelah artefak terbangun" $?
 
 # input release (di luar fingerprint) berubah isi -> batal no-op + release ulang
 echo "perubahan-test" >> core/src/cmd.txt
-"$SAT" -w > rc4.txt 2>&1
+"$SAT" -j${UNIT_JOBS:-2} -w > rc4.txt 2>&1
 ! hit_ws rc4.txt; check "release: edit input release membatalkan no-op" $?
 grep -q "# Release" rc4.txt && grep -Eq 'rupa-v[0-9.]+\.tar\.gz \([^)]*built\)' rc4.txt
 check "release: fase release berjalan ulang (# Release built)" $?
-"$SAT" -w > rc5.txt 2>&1
+"$SAT" -j${UNIT_JOBS:-2} -w > rc5.txt 2>&1
 hit_ws rc5.txt; check "release: no-op pulih setelah input sinkron" $?
 
 # sentuh artefak (stempel beda, isi sama) -> PATCH, no-op tetap diambil
-sleep 1.1
+wait_tick
 touch dist/*.tar.gz
-"$SAT" -w > rc6.txt 2>&1
+"$SAT" -j${UNIT_JOBS:-2} -w > rc6.txt 2>&1
 hit_ws rc6.txt; check "release: sentuh artefak tetap no-op (PATCH hash)" $?
 rm -f "$tmp/rpt_cnt"
 
@@ -106,11 +108,12 @@ release.name = rupa
 release.version = 0.3.0
 release.files = core/src/cmd.txt
 release.output = dist/{name}-v{version}.tar.gz
+release.format = tar
 release.compress = gzip
 release.checksum = sha256
 release.optimize = true
 REL
-"$SAT" -w > oc0.txt 2>&1; check "optimize: cold build (release)" $?
+"$SAT" -j${UNIT_JOBS:-2} -w > oc0.txt 2>&1; check "optimize: cold build (release)" $?
 # tarball valid + gzip level ter-FASTEST (header "was out.tar.part", max speed)
 tar tzf dist/*.tar.gz >/dev/null 2>&1; check "optimize: tarball gzip valid" $?
 [ -s dist/*.tar.gz ]; check "optimize: tarball terbentuk" $?
@@ -122,14 +125,14 @@ check "optimize: input tercatat di artifact.cache" $?
 cat >> Buildfile.ws <<'BAD'
 release.optimize = maybe
 BAD
-"$SAT" -w > oc1.txt 2>&1
+"$SAT" -j${UNIT_JOBS:-2} -w > oc1.txt 2>&1
 grep -q "optimize 'maybe' tidak valid" oc1.txt
 check "optimize: nilai tidak valid ditolak (pesan pack)" $?
 sed -i '/release.optimize = maybe/d' Buildfile.ws
 # edit Buildfile.ws membatalkan no-op sekali; pulihkan lalu cek HIT
-"$SAT" -w > /dev/null 2>&1
+"$SAT" -j${UNIT_JOBS:-2} -w > /dev/null 2>&1
 # no-op pulih; tarball hasil optimize masih valid
-"$SAT" -w > oc2.txt 2>&1
+"$SAT" -j${UNIT_JOBS:-2} -w > oc2.txt 2>&1
 hit_ws oc2.txt; check "optimize: no-op HIT (gerbang terbuka)" $?
 tar tzf dist/*.tar.gz >/dev/null 2>&1; check "optimize: tarball tetap valid setelah no-op" $?
 
@@ -139,10 +142,10 @@ mkdir -p "$S/src"
 printf 'use project\n\nsources = src\n' > "$S/Buildfile"
 printf 'int main(void){return 0;}\n' > "$S/src/main.c"
 cd "$S" || exit 2
-"$SAT" > sc.txt 2>&1; check "single: cold build" $?
+"$SAT" -j${UNIT_JOBS:-2} > sc.txt 2>&1; check "single: cold build" $?
 [ -s .satria/report.blob ]; check "single: report.blob terbentuk" $?
 [ -f .satria/artifact.cache ]; check "single: artifact.cache terbentuk" $?
-"$SAT" > sn.txt 2>&1; check "single: no-op rc=0" $?
+"$SAT" -j${UNIT_JOBS:-2} > sn.txt 2>&1; check "single: no-op rc=0" $?
 grep -q "Status     : Success" sn.txt; check "single: no-op informatif dari state" $?
 
 echo "---"

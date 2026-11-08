@@ -36,7 +36,7 @@ else
 fi; }
 hit_ws() { grep -q "Nothing to build" "$1" && grep -q "Cache valid *:" "$1"; }
 fast() {
-  SATRIA_CACHE_TRACE=1 "$SAT" -w > "$1" 2>&1
+  SATRIA_CACHE_TRACE=1 "$SAT" -j${UNIT_JOBS:-2} -w > "$1" 2>&1
   grep -q "P-fast hit" "$1"
 }
 meta_re() { grep -cE '^P [0-9a-f]{16} [SDOWH] [0-9a-f]{16} [0-9]+ [0-9]+ ' "$1"; }
@@ -47,7 +47,7 @@ cp -r "$SRC/." "$W/" || exit 2
 printf "flags = MMD, MP\n" >> "$W/Buildfile.ws"
 cd "$W" || exit 2
 
-"$SAT" -w > c1 2>&1
+"$SAT" -j${UNIT_JOBS:-2} -w > c1 2>&1
 check "ws: cold build" $?
 pm=$(meta_re .satria/sources.cache)
 pt=$(grep -c '^P ' .satria/sources.cache)
@@ -66,7 +66,7 @@ wait_tick
 CRUDFILE=$(unit_project_source . core)
 [ -n "$CRUDFILE" ] || unit_precondition "fixture tidak punya sumber .c proyek core"
 touch "$CRUDFILE"
-SATRIA_CACHE_TRACE=1 "$SAT" -w > t1 2>&1
+SATRIA_CACHE_TRACE=1 "$SAT" -j${UNIT_JOBS:-2} -w > t1 2>&1
 rc=$?
 hit_ws t1
 check "ws: sentuh = no-op (P-fast refresh)" $?
@@ -85,7 +85,7 @@ wait_tick
 # Proyek archive (yang memaket `.`) — bukan nama fixture tertentu.
 ARCHDIR=$(unit_archive_project .)
 touch "${ARCHDIR:-.}"
-SATRIA_CACHE_TRACE=1 "$SAT" -w > td1 2>&1
+SATRIA_CACHE_TRACE=1 "$SAT" -j${UNIT_JOBS:-2} -w > td1 2>&1
 hit_ws td1
 check "ws: touch direktori archive = Nothing to build" $?
 grep -q "P-fast refreshed" td1
@@ -98,7 +98,7 @@ check "ws: touch direktori berikutnya kembali P-fast" $?
 BSRC=$(unit_project_source . bade)
 [ -n "$BSRC" ] || { echo "FAIL bade: tidak ada source untuk proyek bade (layout)" >&2; exit 1; }
 printf '\nint pmeta_x(void){return 9;}\n' >> "$BSRC"
-"$SAT" -w > e1 2>&1
+"$SAT" -j${UNIT_JOBS:-2} -w > e1 2>&1
 check "ws: edit isi -> build" $?
 ! hit_ws e1
 check "ws: edit tidak dianggap no-op" $?
@@ -106,7 +106,7 @@ fast out.txt
 check "ws: no-op pulih P-fast setelah edit" $?
 
 printf 'P garbage\n' >> .satria/sources.cache
-"$SAT" -w > g1 2>&1
+"$SAT" -j${UNIT_JOBS:-2} -w > g1 2>&1
 check "ws: P rusak -> run tetap sukses (jalur normal)" $?
 ! hit_ws g1
 check "ws: P rusak menolak no-op" $?
@@ -126,7 +126,7 @@ check "ws: fixture format lama konsisten (size)" $?
 [ "$(meta_re .satria/sources.cache)" -eq 0 ]
 check "ws: fixture benar-benar format lama" $?
 
-SATRIA_CACHE_TRACE=1 "$SAT" -w > m1 2>&1
+SATRIA_CACHE_TRACE=1 "$SAT" -j${UNIT_JOBS:-2} -w > m1 2>&1
 hit_ws m1
 check "ws: format lama tetap no-op (jalur penuh)" $?
 grep -q "P metadata refreshed" m1
@@ -157,12 +157,12 @@ check "ws: P opts.cache bermetadata ($n/$pt)" $?
 # Stamp per proyek: konfigurasi satu proyek berubah -> gate menolak & menyebut
 # proyeknya SEBELUM membuka seluruh entri; build pemulihan -> P-fast lagi.
 printf "core.flags = DEXTRA\n" >> Buildfile.ws
-SATRIA_CACHE_TRACE=1 "$SAT" -w > s1 2>&1
+SATRIA_CACHE_TRACE=1 "$SAT" -j${UNIT_JOBS:-2} -w > s1 2>&1
 # grep -q "project stamp changed core" s1
 check "ws: stamp proyek menolak & menyebut core" $?
 ! hit_ws s1
 check "ws: perubahan konfigurasi proyek = miss" $?
-SATRIA_CACHE_TRACE=1 "$SAT" -w > s2 2>&1
+SATRIA_CACHE_TRACE=1 "$SAT" -j${UNIT_JOBS:-2} -w > s2 2>&1
 hit_ws s2
 check "ws: pulih setelah stamp mismatch" $?
 fast out.txt
@@ -181,7 +181,7 @@ check "ws: store tanpa meta tetap sah" $?
 
 # A real directory-entry change must still invalidate no-op.
 printf 'new archive input\n' > rupamod/new-input.rp
-SATRIA_CACHE_TRACE=1 "$SAT" -w > da1 2>&1
+SATRIA_CACHE_TRACE=1 "$SAT" -j${UNIT_JOBS:-2} -w > da1 2>&1
 ! hit_ws da1
 check "ws: file baru di direktori archive menolak no-op" $?
 grep -Eq 'rupa_modules\.tar \([^)]*built\)' da1

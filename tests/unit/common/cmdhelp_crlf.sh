@@ -5,7 +5,7 @@
 #   - `satria help` tidak kosong dan memuat baris usage
 #   - `satria help <topic>` menemukan section
 #   - keluaran tidak membawa sisa '\r'
-# Pemakaian: sh tests/unit/cmdhelp_crlf.sh <path-ke-satria>
+# Pemakaian: sh tests/unit/common/cmdhelp_crlf.sh <path-ke-satria>
 
 S="$1"
 
@@ -13,7 +13,7 @@ fail() { echo "FAIL cmdhelp_crlf: $1"; exit 1; }
 
 [ -x "$S" ] || fail "binary tidak ditemukan: $S"
 
-ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+ROOT="${UNIT_REPO:?UNIT_REPO tidak di-set: jalankan lewat scripts/unit_v1.sh}"
 SRC="$ROOT/src/cmd.txt"
 [ -f "$SRC" ] || fail "cmd.txt tidak ditemukan: $SRC"
 

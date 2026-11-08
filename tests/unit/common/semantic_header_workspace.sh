@@ -1,13 +1,13 @@
 #!/bin/sh
 # Semantic header invalidation for workspace builds.
 # Unused prototype changes must not compile; consumed prototype changes must.
-# Usage: sh tests/unit/semantic_header_workspace.sh <path-to-satria> [miniws-fixture]
+# Usage: sh tests/unit/common/semantic_header_workspace.sh <path-to-satria> [miniws-fixture]
 set -eu
 case "${1:-}" in
   /*) SAT=$1 ;;
   *) SAT="$(pwd)/${1:-bin/satria}" ;;
 esac
-SRC=${2:-"$(dirname "$0")/../miniws"}
+SRC=${2:-"$(dirname "$0")/../../miniws"}
 [ -x "$SAT" ] || { echo "satria tidak ditemukan: $SAT" >&2; exit 2; }
 : "${UNIT_TMP:=${UNIT_BASE:-/tmp/miniws}/t}"
 TMP="$UNIT_TMP/semantic_header_workspace"; rm -rf "${TMP}"; mkdir -p "${TMP}" || exit 1
@@ -62,7 +62,10 @@ echo "PASS unchanged header touch: no source compilation"
 USED="$TMP/used"
 prepare "$USED"
 run_build "$TMP/used-cold.log" "$USED"
-sed -i 's/^extern void thisBade();$/extern void thisBade(void);/' "$USED/include/ext.h"
+find "$USED/include/" -name '*.h' -type f | while IFS= read -r f; do
+    name=$(basename "$f" .h | tr '[:lower:]' '[:upper:]')
+    sed -i "2i #define AB_${name} 2" "$f"
+done
 run_build "$TMP/used-edit.log" "$USED"
 if ! grep -q 'OK .*core/src/main.c' "$TMP/used-edit.log"; then
   echo "FAIL consumed declaration did not recompile core/src/main.c" >&2

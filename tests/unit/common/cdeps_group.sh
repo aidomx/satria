@@ -4,10 +4,10 @@
 #   - grup yang saling tumpang tindih digabung tanpa duplikat
 #   - kesalahan: grup satu anggota, proyek tidak dikenal, bentuk lama tanpa
 #     kurung, kurung tidak ditutup, nama kosong; pesan menunjuk ke baris Buildfile.ws
-# Pemakaian: sh tests/unit/cdeps_group.sh <path-ke-satria> [path-ke-miniws]
+# Pemakaian: sh tests/unit/common/cdeps_group.sh <path-ke-satria> [path-ke-miniws]
 
 S="$1"
-MW="${2:-$(dirname "$0")/../miniws}"
+MW="${2:-$(dirname "$0")/../../miniws}"
 
 fail() { echo "FAIL cdeps_group: $1"; exit 1; }
 

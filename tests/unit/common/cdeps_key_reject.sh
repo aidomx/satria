@@ -1,10 +1,10 @@
 #!/bin/sh
 # Unit test: cdeps.<kunci> (mis. cdeps.preshared) ditolak eksplisit, bukan
 # diterima diam-diam sebagai proyek implisit bernama `cdeps`.
-# Pemakaian: sh tests/unit/cdeps_key_reject.sh <path-ke-satria> [path-ke-miniws]
+# Pemakaian: sh tests/unit/common/cdeps_key_reject.sh <path-ke-satria> [path-ke-miniws]
 
 S="$1"
-MW="${2:-$(dirname "$0")/../miniws}"
+MW="${2:-$(dirname "$0")/../../miniws}"
 
 fail() { echo "FAIL cdeps_key_reject: $1"; exit 1; }
 

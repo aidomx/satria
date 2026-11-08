@@ -4,10 +4,10 @@
 #   - satria -w --version: dispatch bootstrap, bukan nama proyek
 #   - satria --version -w: sama
 #   - baris help menyebut alias --version
-# Pemakaian: sh tests/unit/version_alias.sh <path-ke-satria> [path-ke-miniws]
+# Pemakaian: sh tests/unit/common/version_alias.sh <path-ke-satria> [path-ke-miniws]
 
 S="$1"
-MW="${2:-$(dirname "$0")/../miniws}"
+MW="${2:-$(dirname "$0")/../../miniws}"
 
 fail() { echo "FAIL version_alias: $1"; exit 1; }
 

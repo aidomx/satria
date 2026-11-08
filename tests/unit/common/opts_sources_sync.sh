@@ -1,15 +1,16 @@
 #!/bin/sh
+. "$(dirname "$0")/../lib/layout.sh"
 # Uji sambungan dua arah opts.cache <-> sources.cache (design/startup.md §4):
 #   opts -> sources : route `sources` wajib ada dengan stempel nanodetik+ukuran;
 #                     perubahan sources.cache (touch, isi dalam detik sama,
 #                     hapus) menolak no-op sampai run sukses menyegarkan route.
 #   sources -> opts : run sukses (merge P maupun re-walk) menyegarkan SEMUA route
 #                     di opts.cache sehingga no-op kembali diambil run berikutnya.
-# Pemakaian: sh tests/unit/opts_sources_sync.sh <path-ke-satria> [path-ke-miniws]
+# Pemakaian: sh tests/unit/common/opts_sources_sync.sh <path-ke-satria> [path-ke-miniws]
 abspath() { (cd "$(dirname "$1")" 2>/dev/null && printf '%s/%s\n' "$(pwd)" "$(basename "$1")"); }
 [ -n "$1" ] && [ -x "$1" ] || { echo "satria tidak ditemukan: ${1:-<kosong>}"; exit 2; }
 SAT=$(abspath "$1")
-SRC=$(abspath "${2:-$(dirname "$0")/../miniws}")
+SRC=$(abspath "${2:-$(dirname "$0")/../../miniws}")
 [ -d "$SRC" ] || { echo "fixture tidak ditemukan: $SRC"; exit 2; }
 
 pass=0; fail=0
@@ -59,11 +60,11 @@ W="$UNIT_TMP/opts_sources_sync"; rm -rf "${W}"; mkdir -p "${W}" || exit 1
 cp -r "$SRC/." "$W/" || exit 2
 printf "flags = MMD, MP\n" >> "$W/Buildfile.ws"
 cd "$W" || exit 2
-run() { "$SAT" -w >"$W/out.txt" 2>&1; return $?; }
+run() { "$SAT" -j${UNIT_JOBS:-2} -w >"$W/out.txt" 2>&1; return $?; }
 valid() { grep -q "Nothing to build" "$W/out.txt" && grep -q "Cache valid *:" "$W/out.txt"; }
 
 run; check "ws: cold build" $?
-sleep 1 # hindari racy terhadap run pertama
+wait_tick # hindari racy terhadap run pertama
 route_ns_ok .satria/opts.cache; check "ws: route sources ada dengan stempel ns" $?
 run; valid; check "ws: no-op diambil setelah cold" $?
 
@@ -105,13 +106,13 @@ mkdir -p "$S/src"
 printf 'use project\n\nsources = src\n' > "$S/Buildfile"
 printf 'int main(void){return 0;}\n' > "$S/src/main.c"
 cd "$S" || exit 2
-run() { "$SAT" >"$S/out.txt" 2>&1; return $?; }
+run() { "$SAT" -j${UNIT_JOBS:-2} >"$S/out.txt" 2>&1; return $?; }
 ostamp() { stat -c '%y' .satria/opts.cache; }
 
 run; check "single: cold build" $?
 grep -q "^SATRIASRC2 " .satria/sources.cache; check "single: sources.cache format SATRIASRC2" $?
 route_ns_ok .satria/opts.cache; check "single: route sources ada dengan stempel ns" $?
-sleep 1
+wait_tick
 a=$(ostamp); run; b=$(ostamp)
 [ "$a" = "$b" ]; check "single: no-op tidak menulis opts.cache" $?
 

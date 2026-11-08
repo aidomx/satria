@@ -1,5 +1,5 @@
 #!/bin/sh
-# Usage: sh tests/unit/trace_summary.sh /path/to/satria
+# Usage: sh tests/unit/common/trace_summary.sh /path/to/satria
 # `satria trace` harus setara pipeline manual pada log gaya-strace:
 #   LD_PRELOAD=<tracer> satria ... ; wc -l log ;
 #   ekstrak key op+path dari tiap baris, lalu sort | uniq -c | sort -rn | head
@@ -7,21 +7,22 @@
 set -eu
 SAT="$1"
 case "$SAT" in /*) ;; *) SAT="$(pwd)/$SAT" ;; esac
-SRC_ROOT=$(cd "$(dirname "$0")/../.." && pwd)
+SRC_ROOT="${UNIT_REPO:?UNIT_REPO tidak di-set: jalankan lewat scripts/unit_v1.sh}"
+SRC="${2:-$SRC_ROOT/tests/miniws}"
 : "${UNIT_TMP:=${UNIT_BASE:-/tmp/miniws}/t}"
 W="$UNIT_TMP/trace_summary"; rm -rf "${W}"; mkdir -p "${W}" || exit 1
 trap 'rm -rf "$W"' EXIT HUP INT TERM
-cp -a "$SRC_ROOT/tests/miniws/." "$W/"
+cp -a "$SRC/." "$W/"
 cd "$W"
 rm -rf build bin lib modules .satria
-"$SAT" -w clean >/dev/null 2>&1 || true
-"$SAT" -w >/dev/null 2>&1
+"$SAT" -j${UNIT_JOBS:-2} -w clean >/dev/null 2>&1 || true
+"$SAT" -j${UNIT_JOBS:-2} -w >/dev/null 2>&1
 pass=0; fail=0
 check() {
   if [ "$2" = "$3" ]; then pass=$((pass+1)); echo "PASS: $1"; else fail=$((fail+1)); echo "FAIL: $1 (dapat '$2', harap '$3')"; fi
 }
 # 1) satria trace berjalan, rc child diteruskan (0 pada no-op)
-"$SAT" trace --out "$W/t.log" -- -w core > "$W/trace.txt" 2>&1
+"$SAT" -j${UNIT_JOBS:-2} trace --out "$W/t.log" -- -w core > "$W/trace.txt" 2>&1
 check "satria trace rc 0 (no-op)" "$?" "0"
 check "ringkasan tercetak" "$(grep -c '^> trace   : [0-9]* akses' "$W/trace.txt" || true)" "1"
 check "log terbentuk" "$( [ -s "$W/t.log" ] && echo 1 || echo 0 )" "1"
@@ -48,7 +49,7 @@ top_manual=$(awk '
 top_sat=$(grep -A1 '^  top ' "$W/trace.txt" | tail -1 | awk '{print $1}')
 check "hitungan teratas = key op+path sort|uniq -c" "$top_sat" "$top_manual"
 # 4) --raw memutar isi log setelah ringkasan
-"$SAT" trace --raw --out "$W/t2.log" -- -w core > "$W/trace2.txt" 2>&1
+"$SAT" -j${UNIT_JOBS:-2} trace --raw --out "$W/t2.log" -- -w core > "$W/trace2.txt" 2>&1
 raw_lines=$(awk '/--- isi log/{f=1; next} f { if ($0 ~ /^[a-z_0-9]+\(/) c++ } END { print c+0 }' "$W/trace2.txt")
 check "raw: stream setara isi log" "$raw_lines" "$(wc -l < "$W/t2.log" | tr -d ' ')"
 # 5) tracer disimpan di .satria/trace (dibangun otomatis bila belum ada)

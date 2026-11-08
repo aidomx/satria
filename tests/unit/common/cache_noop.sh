@@ -40,7 +40,7 @@ check() { # $1 = nama, $2 = kondisi (0 = benar)
   fi
 }
 run() {
-  SATRIA_CACHE_NOOP=1 "$SAT" -w > "$W/out.txt" 2>&1
+  SATRIA_CACHE_NOOP=1 "$SAT" -j${UNIT_JOBS:-2} -w > "$W/out.txt" 2>&1
   return $?
 }
 valid() { grep -q "Nothing to build" "$W/out.txt" && grep -q "Cache valid *:" "$W/out.txt"; }
@@ -55,11 +55,11 @@ check "no-op dengan cache: keluar cepat" $?
 valid
 check "no-op memakai cache (pesan cache valid)" $?
 
-"$SAT" -w > "$W/out_off.txt" 2>&1
+"$SAT" -j${UNIT_JOBS:-2} -w > "$W/out_off.txt" 2>&1
 grep -q "Cache valid *:" "$W/out_off.txt"
 check "tanpa flag: jalur cache aktif (default on)" $?
 
-SATRIA_CACHE_NOOP=0 "$SAT" -w > "$W/out_off.txt" 2>&1
+SATRIA_CACHE_NOOP=0 "$SAT" -j${UNIT_JOBS:-2} -w > "$W/out_off.txt" 2>&1
 ! grep -q "Cache valid *:" "$W/out_off.txt"
 check "SATRIA_CACHE_NOOP=0: jalur lama, tidak memakai cache" $?
 
