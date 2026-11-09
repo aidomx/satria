@@ -114,20 +114,13 @@ if [ "$WATCH" -eq 1 ]; then
   }
 
   # ---------------------------------------------------------------- tampilan
-  # Header dan body relatif (ikut alur teks dan bergulir). Footer tetap di bawah:
-  # scroll region (ESC[1;Nr) membatasi gulungan body di atas FOOT_N baris terakhir.
-  # Resize/zoom (SIGWINCH): region dipasang ulang dan footer digambar ulang di bawah.
+  # B T Y berjalan menaut (commit-style): entri selesai TERCETAK SEKALI sebagai
+  # teks bergulir biasa (tetap di scrollback, tidak tak cadangan tertimpa);
+  # hanya entri berjalan (2 baris tail) yang diperbarui di tempat.
+  # Footer tetap di bawah: scroll region ESC[1;b r membatasi gulungan di atas
+  # FOOT_N baris terakhir; karena rows tail di STEP REGION SELALU (b-1, b), posisinya
+  # abangan di tempat tulis ABSOLUT — tidak butuh save/restore atau kursor relatif.
   FOOT_N=3
-  BODY_H="${UNIT_WATCH_BODY:-3}"
-  case "$BODY_H" in ''|*[!0-9]*) die "UNIT_WATCH_BODY harus bilangan bulat >= 2" ;; esac
-  [ "$BODY_H" -ge 2 ] || die "UNIT_WATCH_BODY harus >= 2"
-  # Jendela body dihitung per ENTRI utuh (2 baris/entri: "[i/N] nama" + "PASS
-  # FAIL PRE"). Isi body direpaint penuh dari atas region tiap berubah — jangan
-  # mengandalkan gulungan region implisit: entri ganjil membuat baris pertama
-  # entri tergulung dan tertimpa baris berikutnya (bug: baris "PASS:" jadi
-  # anak yatim). Region selalu memuat KENT entri utuh + slot entri berjalan.
-  KENT=$(( BODY_H / 2 ))
-  [ "$KENT" -ge 1 ] || KENT=1
   TTY=0; [ -t 1 ] && TTY=1
   RESIZED=0; trap 'RESIZED=1' WINCH
   trap 'watch_cleanup; exit 130' INT TERM HUP
@@ -157,7 +150,7 @@ if [ "$WATCH" -eq 1 ]; then
   }
   # Keadaan antar iterasi (shell yang sama, bukan subshell):
   CUR_NAME=""; CUR_START=0; RUN_KEY=""; EMIT_K=0; FOOTTXT=""; FOOTARR=(); FORCE_FOOT=1
-  LASTH=""; LASTC=""; BODYTXT=""
+  LASTH=""; LASTC=""; TAILTXT=""
   watch_cleanup() {
     if [ "$TTY" -eq 1 ]; then
       printf '\033[?25h'                    # kursor tampil lagi
@@ -209,11 +202,26 @@ if [ "$WATCH" -eq 1 ]; then
     fi
     return 0
   }
-  # Tail/entri kursor "menimpa baris" dihapus (tail_clear/tail_print): mengandalkan
-  # posisi tersimpan s/u + koreksi relatif membuat baris pertama entri tergulung
-  # dan tertimpa baris berikutnya ("PASS:" jadi anak yatim). Penggantinya:
-  # repaint penuh blok body dari atas region tiap isi berubah (bagian loop bawah).
-  # Footer: tiga baris tetap di bawah, ditulis dengan kursor absolut.
+  # commit-style body: entri selesai dicetak sekali dan TIDAK pernah disentuh
+  # lagi; entri berjalan menetap dua baris teratas region (b-1, b) dan ditulis
+  # ulang secara ABSOLUT (2K + tulis) — tidak butuh save/restore/kursor relatif.
+  region_install() { # region seluruh layar di atas footer; header tercetak sebelum ini
+    local h; h=$(scr_rows)
+    printf '\033[r'
+    printf '\033[1;%dr' "$(( h - FOOT_N ))"
+  }
+  tail_wipe() { # bersihkan slot entri berjalan (dua baris teratas region)
+    local b; scr_size; b=$(( SCR_R - FOOT_N ))
+    printf '\033[%d;1H\033[2K' "$(( b - 1 ))"
+    printf '\033[%d;1H\033[2K' "$b"
+  }
+  tail_show() { # tail_show <teks 2 baris>: tulis entri berjalan di (b-1, b)
+    local b w l1 l2
+    scr_size; b=$(( SCR_R - FOOT_N )); w=$SCR_C
+    l1="${1%%$'\n'*}"; l2="${1#*$'\n'}"
+    printf '\033[%d;1H\033[2K%s' "$(( b - 1 ))" "${l1:0:$(( w - 1 ))}"
+    printf '\033[%d;1H\033[2K%s' "$b" "${l2:0:$(( w - 1 ))}"
+  }
   # Footer: tiga baris tetap di bawah, ditulis dengan kursor absolut. Kursor TIDAK
   # dikembalikan ke body di sini: kursor dibiarkan di akhir baris footer terakhir
   # (seperti prompt), lewat foot_focus.
@@ -238,47 +246,6 @@ if [ "$WATCH" -eq 1 ]; then
     local h; h=$(scr_rows)
     printf '\033[%d;%dH' "$h" "$(( ${#FOOTLAST} + 1 ))"
   }
-  # Baris kursor saat ini lewat DSR (ESC[6n). Kosong bila terminal tidak menjawab.
-  get_crow() {
-    local buf row
-    printf '\033[6n' > /dev/tty 2>/dev/null
-    IFS= read -rs -d R -t 1 buf < /dev/tty 2>/dev/null || true
-    row="${buf##*\[}"; row="${row%%;*}"
-    case "${row:-}" in ''|*[!0-9]*) echo "" ;; *) echo "$row" ;; esac
-  }
-  # Body mulai di bawah prompt aktif, tanpa membersihkan layar: riwayat shell di atas
-  # tetap utuh. Scroll region dimulai dari BODY_TOP sampai baris sebelum footer.
-  init_body() { # kotak body (BODY_H baris) tepat di bawah header; footer tetap di bawah layar
-    local h w cr bottom k i
-    scr_size; h=$SCR_R; w=$SCR_C; bottom=$(( h - FOOT_N ))
-    # DSR dulu: perintah scroll region (ESC[r / ESC[t;br) memindahkan kursor ke pojok kiri atas.
-    cr="$(get_crow)"; [ -n "$cr" ] || cr=$(( bottom - BODY_H ))
-    printf '\033[r'
-    [ "$cr" -lt 1 ] && cr=1
-    if [ $(( cr + BODY_H - 1 )) -gt "$bottom" ]; then
-      # Kotak tidak muat di bawah kursor: gulung layar ke atas (terminal yang bergerak sendiri).
-      k=$(( cr + BODY_H - 1 - bottom ))
-      printf '\033[%d;1H' "$h"
-      for (( i=0; i<k; i++ )); do printf '\n'; done
-      cr=$(( cr - k )); [ "$cr" -lt 1 ] && cr=1
-    fi
-    BODY_TOP=$cr; BODY_BOT=$(( cr + BODY_H - 1 ))
-    printf '\033[%d;%dr' "$BODY_TOP" "$BODY_BOT"
-    printf '\033[%d;1H' "$BODY_TOP"
-    LASTH="$h"; LASTC="$w"
-
-  }
-  # Dipanggil saat resize: pasang ulang region dengan tinggi baru, kursor ke dasar body.
-  region_set() { # resize: pasang ulang kotak body di atas footer, kursor ke dasar kotak
-    local h bottom; scr_size; h=$SCR_R; bottom=$(( h - FOOT_N ))
-    BODY_TOP=${BODY_TOP:-1}
-    [ "$BODY_TOP" -gt $(( bottom - BODY_H + 1 )) ] && BODY_TOP=$(( bottom - BODY_H + 1 ))
-    [ "$BODY_TOP" -lt 1 ] && BODY_TOP=1
-    BODY_BOT=$(( BODY_TOP + BODY_H - 1 ))
-    printf '\033[%d;%dr' "$BODY_TOP" "$BODY_BOT"
-    printf '\033[%d;1H' "$BODY_BOT"
-
-  }
   # Header (relatif, bagian dari body).
   WPIDTXT=""
   if [ -n "$WTARGET" ]; then
@@ -292,14 +259,14 @@ if [ "$WATCH" -eq 1 ]; then
   [ -n "$WTARGET" ] && body_line "* Target: $WTARGET${WPIDTXT:+ - $WPIDTXT}"
   [ -n "${WACTIVE:-}" ] && [ -z "${POS[0]-}" ] && body_line "* Dipilih otomatis: satu-satunya run aktif"
 
-    if [ "$TTY" -eq 1 ]; then init_body; fi   # kotak body tepat di bawah header
+    if [ "$TTY" -eq 1 ]; then region_install; fi   # scroll region di atas footer
   while :; do
     BODYCHG=0
     h=$(scr_rows); w=$(scr_cols)
     relayout=0
     if [ "$RESIZED" -eq 1 ] || [ "$h" != "$LASTH" ] || [ "$w" != "$LASTC" ]; then
       RESIZED=0; LASTH="$h"; LASTC="$w"
-      [ "$TTY" -eq 1 ] && { region_set; relayout=1; }
+      [ "$TTY" -eq 1 ] && { region_install; relayout=1; }
     fi
     if [ -n "$WTARGET" ] && load_run; then
         # Entri selesai (semua, urut) + entri berjalan (ujung body). Placeholder
@@ -328,32 +295,37 @@ if [ "$WATCH" -eq 1 ]; then
         wanted="$(entry "$CI" "$CUR" - - -)"
       fi
       if [ "$TTY" -eq 1 ]; then
-        # Jendela body: entri SELESAI Utuh + entri berjalan; lapisan di luar
-        # window sudah bergulir keluar unit-sejajar (2 baris/entri). Kursor
-        # diposisikan ABSOLUT di BODY_TOP tiap repaint — save/restore (s/u)
-        # basi setelah region bergulir atau rescale.
-        slots=$(( KENT )); [ -n "$wanted" ] && slots=$(( slots - 1 ))
-        win=""
-        n_e=${#ENTR[@]}
-        start=$(( n_e - slots )); [ "$start" -lt 0 ] && start=0
-        for (( j=start; j<n_e; j++ )); do win+="${ENTR[$j]}"; done
-        [ -n "$wanted" ] && win="$win$wanted"   # entri terakhir TANPA newline
-        win="${win%$'\n'}"
-        if [ "$win" != "$BODYTXT" ] || [ "$relayout" -eq 1 ]; then
-          # Kursor hanya dimainkan kalau body benar-benar berubah (anti-kedip).
+        # Commit-style: entri selesai TERCETAK SEKALI di posisi tail (menggulir
+        # dan menetap di riwayat), lalu entri berjalan ditulis ulang di (b-1, b).
+        # Tidak pernah: menimpa entri yang sudah dicetak, save/restore kursor.
+        pend=""
+        while [ "${#ENTR[@]}" -gt "$EMIT_K" ]; do
+          pend+="${ENTR[$EMIT_K]}"
+          EMIT_K=$((EMIT_K+1))
+        done
+        if [ -n "$pend" ]; then
           BODYCHG=1
           printf '\033[?25l'
-          printf '\033[%d;1H' "$BODY_TOP"
-          j=0
-          while [ "$j" -lt "$BODY_H" ]; do
-            printf '\r\033[2K'
-            [ "$j" -lt $(( BODY_H - 1 )) ] && printf '\033[1B'
-            j=$((j+1))
-          done
-          printf '\033[%d;1H' "$BODY_TOP"
-          printf '%s' "$win"    # tanpa newline di baris terakhir: tak ada gulungan
-          BODYTXT="$win"
+          scr_size; b=$(( SCR_R - FOOT_N ))
+          printf '\033[%d;1H' "$(( b - 1 ))"
+          # Enti selesai: mencetak pasangan baris (nama, PASS). Karena cursor
+          # mulai di (b-1), TIAP pasangan elemen \n-nya tepat dua-boundary:
+          # \n di (b-1) lalu \n di dasar (b) → scroll 1 per entri, pasangan
+          # selalu padu. Baris dipotong ke lebar layar agar tidak mengganggu
+          # gutu (fenomenon wrap menambah baris dan menggeser batas).
+          printf '%s' "$pend" | cut -c"1-$(( SCR_C - 1 ))"
+          printf '\n'   # lepas pasangan terakhir dari slot tail (b-1, b) kosong lagi
+          if [ -n "$wanted" ]; then
+            tail_show "$wanted"
+          else
+            tail_wipe                    # ENDED: slot entri berjalan dikosongkan
+          fi
+        elif [ "$wanted" != "$TAILTXT" ] || [ "$relayout" -eq 1 ]; then
+          BODYCHG=1
+          printf '\033[?25l'
+          if [ -n "$wanted" ]; then tail_show "$wanted"; else tail_wipe; fi
         fi
+        TAILTXT="$wanted"
       else
         # Non-TTY: entri baru dicetak sekali (alur teks biasa).
         done_block=""
@@ -368,10 +340,13 @@ if [ "$WATCH" -eq 1 ]; then
         waiting=$(( N - DONE_N - ( CI > 0 ? 1 : 0 ) ))
         tms=$(( $(now_ms) - CUR_START ))
         pm="$(awk -F'\t' -v n="$CUR" 'NR > 1 && $1 == n { v = $3 } END { print v }' "$PREV" 2>/dev/null)"
-        pct="-"
-        if [ -n "$pm" ] && [ "$pm" -gt 0 ] 2>/dev/null; then pct=$(( tms * 100 / pm )); [ "$pct" -gt 99 ] && pct=99; fi
+        pcttxt=""
+        if [ -n "$pm" ] && [ "$pm" -gt 0 ] 2>/dev/null; then
+          pct=$(( tms * 100 / pm )); [ "$pct" -gt 99 ] && pct=99
+          pcttxt=" ${pct}%"
+        fi   # baris tidak ada di run sebelumnya: tanpa persen (pct -% beku tidak informatif)
         if [ -n "$CUR" ]; then
-          foot="# Processing"$'\n'"* $waiting waiting..."$'\n'"* $CUR $(fmt_dot $((tms/1000))) $pct%"
+          foot="# Processing"$'\n'"* $waiting waiting..."$'\n'"* $CUR $(fmt_dot $((tms/1000)))${pcttxt}"
         else
           foot="# Processing"$'\n'"* $N/$DONE_N selesai..."$'\n'"* antar tes"
         fi
