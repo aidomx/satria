@@ -48,6 +48,24 @@ unit_project_source() {
   return 0
 }
 
+# unit_project_sources <root> [proyek]
+#   SEMUA berkas .c milik <proyek> (default: core) dari sources.tsv, satu path
+#   `<proyek>/<sumber>` per baris. Hasil codegen (`embedded.c`) di-skip —
+#   berkas itu diterbitkan build, bukan input, dan bisa jadi memakai/melekat
+#   getEmbed tanpa berarti fixture memakai API Embed.
+#   Dipakai tes yang perlu menelusuri seluruh sumber proyek (mis. guard
+#   "fixture benar-benar memakai API X").
+unit_project_sources() {
+  _want=${2:-core}
+  _tsv="${UNIT_DISCOVERY:-}/sources.tsv"
+  [ -s "$_tsv" ] || return 0
+  _have=$(awk -F'\t' -v w="$_want" '$1==w { f=1 } END { print f+0 }' "$_tsv")
+  [ "$_have" = "1" ] || _want=$(awk -F'\t' '{ print $1 }' "$_tsv" | head -1)
+  [ -n "$_want" ] || return 0
+  awk -F'\t' -v w="$_want" '$1 == w && $2 !~ /(^|\/)embedded\.c$/ { print w "/" $2 }' "$_tsv"
+  return 0
+}
+
 # unit_project_binary <root> [proyek]
 #   Path binary hasil proyek, dari `X.output as A` + `A.binaryName = N` -> bin/N
 #   INTERIM: micro-read Buildfile.ws sampai ada query targets native satria

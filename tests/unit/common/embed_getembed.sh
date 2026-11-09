@@ -22,18 +22,26 @@ case "$SAT" in /*) ;; *) SAT="$(pwd)/$SAT";; esac
 case "$SRC" in /*) ;; *) SRC="$(pwd)/$SRC";; esac
 : "${UNIT_TMP:=${UNIT_BASE:-/tmp/miniws}/t}"
 W="$UNIT_TMP/embed_getembed"; rm -rf "${W}"; mkdir -p "${W}" || exit 1
-# .extract fixture Buildfile.ws = /tmp/satria-miniws-system (dipakai embed_use.c)
-EXTRACT=/tmp/satria-miniws-system
+# $W/$EXTRACT dievaluasi saat trap berjalan (bukan saat trap dipasang)
 trap 'rm -rf "$W"; rm -rf "$EXTRACT"' EXIT HUP INT TERM
 cp -R "$SRC/." "$W/"
 cd "$W"
-rm -rf "$EXTRACT"
 
-# Kebutuhan embed (bademod.extract + project bade): hanya miniws.
-# Tanpa itu: PRECONDITION (design unit_test.md §5.3) — bukan kegagalan satria.
-if ! grep -q 'extract' Buildfile.ws || [ -z "$(unit_project_source . bade)" ]; then
-  unit_precondition "fixture tidak punya bade + bademod.extract (spek embed khusus miniws)"
+# Kebutuhan fixture (design unit_test.md §5.3 + §8): embed yang MENGUJI API
+# getEmbed itu sendiri —
+#   1) `bademod.extract` terdaftar di Buildfile.ws (path ekstraksi nyata dari
+#      fixture, bukan hardcode — bila beda antar-fixture ikut benar),
+#   2) proyek bade tersumber .c (discovery TSV §6),
+#   3) minimal satu sumber bade memakai API Embed: getEmbed().
+# Fixture dengan tabel embed gaya LAMA tanpa konsumen getEmbed (mis. rupaws:
+# `bademod.extract` masih ada, tapi pemanggilan masih mekanisme lama) →
+# PRECONDITION, bukan FAIL.
+EXTRACT=$(sed -n 's/^bademod\.extract *= *//p' Buildfile.ws | head -1 | tr -d ' \t')
+if [ -z "$EXTRACT" ] || [ -z "$(unit_project_source . bade)" ] \
+   || ! unit_project_sources . bade | xargs grep -l -- 'getEmbed(' > /dev/null 2>&1; then
+  unit_precondition "fixture tidak menguji API Embed (perlu bademod.extract + konsumen getEmbed di bade)"
 fi
+rm -rf "$EXTRACT"
 
 fail() { echo "FAIL: $*"; [ -f err ] && tail -20 err; exit 1; }
 
