@@ -20,7 +20,6 @@ TESTS_DIR="${UNIT_TESTS_DIR:-$ROOT/tests/unit}"
 STAGE="${UNIT_STAGE:-/tmp/satria-unit}"
 
 # Pustaka tampilan (adaptasi v0.2.1): dipakai watcher; warna TTY+NO_COLOR-aware.
-[ -f "$ROOT/scripts/ui.sh" ] && . "$ROOT/scripts/ui.sh"
 
 # Dijalankan dari salinan scripts/unit.sh? Salinan itu milik run ini (bukan milik
 # pembungkus): ia yang menghapus dirinya, supaya `-b` — yang me-re-exec "$0" di
@@ -117,17 +116,13 @@ if [ "$WATCH" -eq 1 ]; then
   }
 
   # ---------------------------------------------------------------- tampilan
-  # B T Y berjalan menaut (commit-style): entri selesai TERCETAK SEKALI sebagai
-  # teks bergulir biasa (tetap di scrollback, tidak tak cadangan tertimpa);
-  # hanya entri berjalan (2 baris tail) yang diperbarui di tempat.
-  # Footer tetap di bawah: scroll region ESC[1;b r membatasi gulungan di atas
-  # FOOT_N baris terakhir; karena rows tail di STEP REGION SELALU (b-1, b), posisinya
-  # abangan di tempat tulis ABSOLUT — tidak butuh save/restore atau kursor relatif.
-  FOOT_N=3
+  # Model tampilan (design §9, versi sederhana): SATU dokumen — header + entri.
+  # Entri = baris nama + satu baris status: `* process: …` selama tes berjalan,
+  # jadi `* PASS: …` saat selesai (baris process hilang). `# Summary` masuk flow
+  # saat run berakhir. Kursor aktif = baris entri berjalan (ujung dokumen).
+  # Tidak ada section tetap: semuanya teks mengalir; repaint = gambar ulang
+  # viewport (potongan terakhir dokumen) dari (1,1), tanpa penulisan absolut.
   TTY=0; [ -t 1 ] && TTY=1
-  ui_init 2> /dev/null   # warna (TTY + NO_COLOR-aware); no-op bila ui.sh tak ada
-  # framenya spinner naik tiap footer direpaint (pattern loop v0.2.1)
-  SPIN_I=0
   RESIZED=0; trap 'RESIZED=1' WINCH
   trap 'watch_cleanup; exit 130' INT TERM HUP
   now_ms() { local t; t="$(date +%s%3N 2>/dev/null)"; case "$t" in *N*|'') t=$(( $(date +%s) * 1000 )) ;; esac; echo "$t"; }
@@ -155,19 +150,20 @@ if [ "$WATCH" -eq 1 ]; then
     return 1
   }
   # Keadaan antar iterasi (shell yang sama, bukan subshell):
-  CUR_NAME=""; CUR_START=0; RUN_KEY=""; EMIT_K=0; FOOTTXT=""; FOOTARR=(); FORCE_FOOT=1
-  LASTH=""; LASTC=""; LIVE=""
-  HDR_LINES=()
+  CUR_NAME=""; CUR_START=0; RUN_KEY=""; EMIT_K=0; LASTBUF=""
+  LASTH=""; LASTC=""
+  HDR_LINES=(); SUM_LINES=(); SUM_PRINTED=0
   watch_cleanup() {
     if [ "$TTY" -eq 1 ]; then
       printf '\033[?25h'                    # kursor tampil lagi
-      printf '\033[r'                       # lepas scroll region
-      printf '\033[%d;1H\n' "$(scr_rows)"   # kursor ke bawah, prompt tampil di bawah footer
+      printf '\033[%d;1H\n' "$(scr_rows)"   # kursor ke bawah
     fi
     rm -f "$STAGE/watch.pid"
   }
-  # Entri tes: dua baris, "[i/N] nama" lalu "PASS: p FAIL: f PRE: q".
-  entry() { printf '[%d/%d] %s\nPASS: %s FAIL: %s PRE: %s' "$1" "$N" "$2" "$3" "$4" "$5"; }
+  # Entri tes selesai: dua baris, "[i/N] nama" lalu "* PASS: p FAIL: f PRE: q".
+  entry() { printf '[%d/%d] %s\n* PASS: %s FAIL: %s PRE: %s' "$1" "$N" "$2" "$3" "$4" "$5"; }
+  # Entri tes berjalan: baris status process, berganti jadi PASS saat selesai.
+  entry_live() { printf '[%d/%d] %s\n* process: %s%s' "$1" "$N" "$2" "$3" "$4"; }
   # Hasil satu tes dari timing.tsv (baris terakhir untuk nama itu): "p f q" atau kosong.
   result_of() {
     awk -F'\t' -v n="$1" 'NR > 1 && $1 == n { p = $4; f = $5; q = $6; ok = 1 } END { if (ok) printf "%s %s %s", p, f, q }' "$TIM" 2>/dev/null
@@ -209,33 +205,28 @@ if [ "$WATCH" -eq 1 ]; then
     fi
     return 0
   }
-  # commit-style body sesuai model dua section (design §9):
-  #   Section 1 = header + body, SATU dokumen mengalir. Dicetak sebagai viewport
-  #   yang bottom-aligned pada tepi atas footer: dokumen bertumbuh, dan yang
-  #   bergulir adalah SECARA KESELURUHAN section-nya (header ikut terdorong ke
-  #   atas bersama entri — push natural, bukan timpa-menimpa).
-  #   Section 2 = footer: tiga baris terbawah, satu-satunya yang diverifikasi
-  #   repaint di tempat (kursor absolut). Selain footer, tidak ada tulisan
-  #   absolut yang menimpa isi section 1.
-  region_install() { # section 1 = seluruh layar di atas footer
-    local h; h=$(scr_rows)
-    printf '\033[r'
-    printf '\033[1;%dr' "$(( h - FOOT_N ))"
+  # Model dua-arah commit: SATU dokumen mengalir (header + entri). Repaint =
+  # gambar ulang viewport (potongan terakhir sesuai tinggi layar) dari (1,1).
+  # Tidak ada tulisan absolut yang menimpa isi; markup percentだけ di baris
+  # entri berjalan (cursor aktif).
+  # doc_build <live>: rakit seluruh isi dokumen (header + entri + summary +
+  # live) ke DBUF.
+  doc_build() { # doc_build <entri-berjalan-2-baris|>
+    DBUF=""
+    local line j
+    for line in "${HDR_LINES[@]}"; do DBUF="$DBUF$line"$'\n'; done
+    for (( j=0; j<${#ENTR[@]}; j++ )); do DBUF="$DBUF${ENTR[j]}"; done
+    for line in "${SUM_LINES[@]}"; do DBUF="$DBUF$line"$'\n'; done
+    [ -n "${1:-}" ] && DBUF="$DBUF$1"
   }
-  # doc_paint: gambar ulang section 1 dari (1,1). Isi = header + entri selesai +
+  # doc_paint: gambar ulang dokumen dari (1,1). Isi = header + entri selesai +
   # entri berjalan (paling akhir, 2 baris). Bila lebih panjang dari viewport,
   # yang terlihat adalah POTONGAN TERAKHIR sebanyak viewport — dokumen muncul
   # "mendorong" ke atas sebagai satu section, seperti teks yang mengalir normal.
-  doc_paint() { # doc_paint <entri-berjalan-2-baris|>: repaint viewport section 1
-    local w b n i start live
-    scr_size; w=$SCR_C; b=$(( SCR_R - FOOT_N ))
-    live="$1"
-    local buf="" line
-    for line in "${HDR_LINES[@]}"; do buf="$buf$line"$'\n'; done
-    local j
-    for (( j=0; j<${#ENTR[@]}; j++ )); do buf="$buf${ENTR[j]}"; done
-    [ -n "$live" ] && buf="$buf$live"   # tanpa \n: kursor berhenti di barisnya
-    mapfile -t LST <<< "$buf"
+  doc_paint() { # repaint viewport dokumen dari DBUF
+    local w b n i start
+    scr_size; w=$SCR_C; b=$SCR_R
+    mapfile -t LST <<< "$DBUF"
     n=${#LST[@]}
     [ "$n" -gt 0 ] || return 0
     start=0; [ "$n" -gt "$b" ] && start=$(( n - b ))
@@ -249,64 +240,27 @@ if [ "$WATCH" -eq 1 ]; then
     rest=$(( n - start )); rem=$(( b - rest ))
     for (( j=0; j<rem; j++ )); do printf '\n\033[2K'; done
   }
-  # Footer: tiga baris tetap di bawah, ditulis dengan kursor absolut. Kursor TIDAK
-  # dikembalikan ke body di sini: kursor dibiarkan di akhir baris footer terakhir
-  # (seperti prompt), lewat foot_focus.
-  vis_strip() { # buang kode ANSI SGR — untuk pengukuran lebar terlihat
-    printf '%s' "$1" | sed 's/\x1b\[[0-9;]*m//g'
-  }
-  foot_draw() { # foot_draw <teks 3 baris>: hanya baris yang berubah yang ditulis ulang
-    local h w r i line vis
-    h=$(scr_rows); w=$(scr_cols)
-    i=0
-    while IFS= read -r line; do
-      i=$((i+1)); [ "$i" -le "$FOOT_N" ] || break
-      vis="$(vis_strip "$line")"
-      # Lebar diukur TANPA kode ANSI (tak terlihat): bila terlalu panjang,
-      # gambar versi polos agar tidak wrap dan menggeser footer.
-      if [ "${#vis}" -gt "$(( w - 1 ))" ]; then
-        line="${vis:0:$(( w - 1 ))}"
-        vis="$line"
-      fi
-      if [ "${FOOTARR[$i]:-}" != "$line" ] || [ "$FORCE_FOOT" -eq 1 ]; then
-        r=$(( h - FOOT_N + i ))
-        printf '\033[%d;1H\033[2K%s' "$r" "$line"
-        FOOTARR[$i]="$line"
-      fi
-      FOOTLAST="$vis"
-    done < <(printf '%s\n' "$1")
-    FOOTTXT="$1"
-    FORCE_FOOT=0
-  }
-  foot_focus() { # kursor di akhir baris footer terakhir, seperti prompt
-    local h; h=$(scr_rows)
-    # FOOTLAST sudah versi polos (tanpa ANSI), panjangnya = kolom terlihat.
-    printf '\033[%d;%dH' "$h" "$(( ${#FOOTLAST} + 1 ))"
-  }
-  # Header (relatif, bagian dari body).
+  # Header (bagian dokumen, surat design §9).
   WPIDTXT=""
-  if [ -n "$WTARGET" ]; then
-    _wp="$(cat "$STAGE/targets/$WTARGET/log/run.pid" 2>/dev/null)"
-    [ -n "${_wp:-}" ] && kill -0 "$_wp" 2>/dev/null && WPIDTXT="$_wp"
-  fi
+  [ -n "$WTARGET" ] && WPIDTXT="$(cat "$STAGE/targets/$WTARGET/log/run.pid" 2>/dev/null)"; :
   body_line() { # header juga disimpan ke dokumen section 1 (untuk repaint doc_paint)
     HDR_LINES+=("$1")
     printf '%s\n' "$1"
     [ -n "${LOG:-}" ] && printf '%s\n' "$1" >> "$LOG"
   }
   body_line "# Watch unit test"
-  body_line "* PID: $$"
-  body_line "* Staging: $STAGE/targets   (interval ${WINTERVAL}s, Ctrl-C untuk berhenti)"
-  [ -n "$WTARGET" ] && body_line "* Target: $WTARGET${WPIDTXT:+ - $WPIDTXT}"
+  body_line "* PID      : $$"
+  body_line "* Staging  : $STAGE/targets"
+  body_line "* Interval : ${WINTERVAL}s, Ctrl-C untuk berhenti"
+  [ -n "$WTARGET" ] && body_line "* Target   : $WTARGET${WPIDTXT:+ - $WPIDTXT}"
   [ -n "${WACTIVE:-}" ] && [ -z "${POS[0]-}" ] && body_line "* Dipilih otomatis: satu-satunya run aktif"
 
-    if [ "$TTY" -eq 1 ]; then region_install; fi   # section 1 di atas footer
   while :; do
     h=$(scr_rows); w=$(scr_cols)
     relayout=0
     if [ "$RESIZED" -eq 1 ] || [ "$h" != "$LASTH" ] || [ "$w" != "$LASTC" ]; then
       RESIZED=0; LASTH="$h"; LASTC="$w"
-      [ "$TTY" -eq 1 ] && { region_install; FORCE_FOOT=1; relayout=1; }
+      [ "$TTY" -eq 1 ] && relayout=1
     fi
     if [ -n "$WTARGET" ] && load_run; then
         # Entri selesai (semua, urut) + entri berjalan (ujung body). Placeholder
@@ -330,29 +284,38 @@ if [ "$WATCH" -eq 1 ]; then
       # Entri tes yang sedang berjalan (ujung body), hasil "-". Saat "> Selesai"
       # tercetak tetapi tes berikut belum terlihat di log (urantai), CUR kosong:
       # entri barusan selesai TIDAK diulang di tail (tak ada duplek sesaat).
+      # Entri berjalan: baris process (elapsed + persen bila data prev ada).
+      # "> Selesai" tercetak tetapi tes berikut belum terlihat di log (urantai):
+      # CUR kosong — entri barusan selesai TIDAK diulang.
       wanted=""
       if [ "$ACTIVE" -eq 1 ] && [ "$CI" -gt 0 ] && [ -z "$ENDED" ]; then
-        wanted="$(entry "$CI" "$CUR" - - -)"
+        tms=$(( $(now_ms) - CUR_START ))
+        pctx=""
+        pm="$(awk -F'\t' -v n="$CUR" 'NR > 1 && $1 == n { v = $3 } END { print v }' "$PREV" 2>/dev/null)"
+        if [ -n "$pm" ] && [ "$pm" -gt 0 ] 2>/dev/null; then
+          pct=$(( tms * 100 / pm )); [ "$pct" -gt 99 ] && pct=99
+          pctx=" ${pct}%"
+        fi
+        wanted="$(entry_live "$CI" "$CUR" "$(fmt_dot $((tms/1000)))" "$pctx")"
+      fi
+      if [ -n "$ENDED" ] && [ "$SUM_PRINTED" -eq 0 ]; then
+        # Summary dibuat sekali dan dipegang di SUM_LINES: ENTR dibangun ulang
+        # tiap tick, jadi baris summary tidak boleh menempel di sini.
+        SUM_PRINTED=1
+        ms="$(sed -n 's/^RUN_ELAPSED_MS=//p' "$ENV" | head -1)"
+        set -- $(awk -F'\t' 'NR > 1 && $1 != "snap-build" { p += $4; f += $5; q += $6 } END { printf "%d %d %d", p+0, f+0, q+0 }' "$TIM" 2>/dev/null)
+        SUM_LINES=("" "# Summary" "* $DONE_N/$N selesai, total $(fmt_dot $(( ${ms:-0} / 1000 )))" "* PASS: $1 FAIL: $2 PRE: $3")
       fi
       if [ "$TTY" -eq 1 ]; then
-        # Section 1 (header+body) direpaint sebagai SATU dokumen bila isi
-        # berubah: entri baru tercommit, nama entri berjalan berganti, resize,
-        # atau run berakhir. Yang terlihat = potongan terakhir dokumen sesuai
-        # tinggi section — header ikut terdorong ke atas saat berlawalah
-        # bergulir (push natural, tidak menimpa apa pun).
-        pend=""
-        while [ "${#ENTR[@]}" -gt "$EMIT_K" ]; do
-          pend+="${ENTR[$EMIT_K]}"
-          EMIT_K=$((EMIT_K+1))
-        done
-        changed=0
-        [ -n "$pend" ] && changed=1
-        [ "$wanted" != "$LIVE" ] && changed=1
-        [ "$relayout" -eq 1 ] && changed=1
-        if [ "$changed" -eq 1 ]; then
-          doc_paint "$wanted"
+        # Repaint dokumen bila ISI berubah (entri tercommit, live berganti,
+        # summary masuk, resize) — deteksi via kesetaraan isi dokumen penuh,
+        # bukan penambahan elemen: hasil tes mengganti baris "-" tanpa
+        # menambah elemen, dan tetap terdeteksi.
+        doc_build "$wanted"
+        if [ "$DBUF" != "$LASTBUF" ] || [ "$relayout" -eq 1 ]; then
+          doc_paint
+          LASTBUF="$DBUF"
         fi
-        LIVE="$wanted"
       else
         # Non-TTY: entri baru dicetak sekali (alur teks biasa).
         done_block=""
@@ -361,47 +324,12 @@ if [ "$WATCH" -eq 1 ]; then
           EMIT_K=$((EMIT_K+1))
         done
         [ -n "$done_block" ] && { printf '%s' "$done_block"; [ -n "${LOG:-}" ] && printf '%s' "$done_block" >> "$LOG"; }
-      fi
-      # Footer.
-      if [ "$ACTIVE" -eq 1 ]; then
-        waiting=$(( N - DONE_N - ( CI > 0 ? 1 : 0 ) ))
-        tms=$(( $(now_ms) - CUR_START ))
-        pm="$(awk -F'\t' -v n="$CUR" 'NR > 1 && $1 == n { v = $3 } END { print v }' "$PREV" 2>/dev/null)"
-        # Bar (pola v0.2.1 _render_bar) bila timing.prev punya baris tes ini;
-        # selain itu spinner (pattern progress_spinner) — persen "-%" beku
-        # tidak informatif digantikan animasi hidup.
-        if [ -n "$pm" ] && [ "$pm" -gt 0 ] 2>/dev/null; then
-          pct=$(( tms * 100 / pm )); [ "$pct" -gt 99 ] && pct=99
-          barf="$(ui_bar "$pct" 20 2>/dev/null)"
-          curtxt="* $CUR $barf ${pct}% $(fmt_dot $((tms/1000)))"
-        else
-          SPIN_I=$((SPIN_I+1))
-          curtxt="* $CUR $(ui_spin "$SPIN_I" 2>/dev/null) $(fmt_dot $((tms/1000)))"
+        if [ "$SUM_PRINTED" -eq 1 ] && [ "${SUM_SHOWN:-}" != 1 ]; then
+          SUM_SHOWN=1
+          for line in "${SUM_LINES[@]}"; do printf '%s\n' "$line"; [ -n "${LOG:-}" ] && printf '%s\n' "$line" >> "$LOG"; done
         fi
-        if [ -n "$CUR" ]; then
-          foot="# Processing"$'\n'"* $waiting waiting..."$'\n'"$curtxt"
-        else
-          foot="# Processing"$'\n'"* $N/$DONE_N selesai..."$'\n'"* antar tes"
-        fi
-      elif [ -n "$ENDED" ]; then
-        ms="$(sed -n 's/^RUN_ELAPSED_MS=//p' "$ENV" | head -1)"
-        set -- $(awk -F'\t' 'NR > 1 && $1 != "snap-build" { p += $4; f += $5; q += $6 } END { printf "%d %d %d", p+0, f+0, q+0 }' "$TIM" 2>/dev/null)
-        foot="# Summary"$'\n'"* $DONE_N/$N selesai, total $(fmt_dot $(( ${ms:-0} / 1000 )))"$'\n'"* PASS: $1 FAIL: $2 PRE: $3"
-      else
-        foot="# Processing"$'\n'"* terhenti"$'\n'"* tanpa RUN_ENDED"
       fi
-    else
-      foot="# Menunggu"$'\n'"* belum ada run aktif"$'\n'"* jalankan run atau sebut target"
-    fi
-    if [ "$TTY" -eq 1 ]; then
-      if [ "$foot" != "$FOOTTXT" ] || [ "$relayout" -eq 1 ]; then
-        printf '\033[?25l'; foot_draw "$foot"; foot_focus; printf '\033[?25h'
-      fi
-    else
-      case "$foot" in
-        "# Summary"*) if [ "${SUM_PRINTED:-}" != "$foot" ]; then printf '%s\n' "$foot"; SUM_PRINTED="$foot"; fi ;;
-      esac
-    fi
+    fi   # load_run
     sleep "$WINTERVAL"
   done
 fi
