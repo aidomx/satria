@@ -27,7 +27,15 @@ coreout.libraryName = rupa
 coreout.libDir = lib
 coreout.libraryShared = true                          
 bade.sources = manager, src
-bade.exclude = manager/main.c
+# manager/main.c: milik binary, tidak dikemas ke library.
+# src/cli.c: CLI bade memanggil simbol core (core_cli_notes, core_value,
+# thisCore). Shared library Windows (bade.dll) menuntut SEMUA simbol
+# terdefinisi saat link - tidak seperti .so Linux yang menunda resolusi ke
+# runtime - sehingga cli.c dikeluarkan dari library (tetap dikompilasi dan
+# di-link ke bin/bade, simbol core terjawab di link binary via cdeps
+# `library = core/lib/librupa.a`). Pola yang sama sudah diterapkan sisi
+# core: core_value() nilai tetap, bukan memanggil bade_value().
+bade.exclude = manager/main.c, src/cli.c
 
 bade.output as badeout
 bade.library as badelib
