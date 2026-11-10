@@ -4,7 +4,7 @@ Dengan unit test yang terstruktur dan fleksibel, memungkinkan ditemukannya regre
 
 Tujuan utamanya bukan sekadar memastikan command berhasil dijalankan, tetapi menguji perilaku Satria, termasuk cold build, warmstart, incremental build, cache, dependency, dan workspace.
 
-1. Daftar Unit Test
+# 1. Daftar Unit Test
 
 «"location: tests/unit/"»
 
@@ -23,7 +23,7 @@ Setiap tes baru wajib didaftarkan di classes.conf. Runner menolak tes yang tidak
 
 Unit test dapat menggunakan helper dari "common/" dan "lib/", tetapi helper harus bersifat fixture-aware dan tidak mengikat implementasinya pada satu struktur project tertentu.
 
-2. Runner Unit Test
+# 2. Runner Unit Test
 
 «"location: scripts/unit.sh"»
 
@@ -44,13 +44,16 @@ Runner bertanggung jawab menyiapkan lingkungan pengujian, bukan menentukan selur
 
 Ruang lingkup v1 (keputusan):
 
-- CLI: bash scripts/unit.sh <binary> <target> [-b] [-j N] [-o <log>]
+- CLI run: bash scripts/unit.sh <binary> <target> [-b] [-j N] [-o <log>] [-t <tes>]
+- CLI watcher: bash scripts/unit.sh -w [target]
+- Snapshot loader: `unit.sh` menyalin `unit_dev.sh` dan `lib/` ke `scripts/.unit.<pid>.d/` lalu menjalankan salinan itu di foreground. Edit `unit_dev.sh` atau `lib/unit_*.sh` saat ada run atau watcher berjalan tidak memengaruhi proses itu. Folder dihapus oleh proses yang memakainya (`drop_copy`); snapshot yatim dari proses yang dihentikan keras (SIGKILL) dibersihkan oleh `unit.sh` berikutnya bila PID-nya sudah tidak hidup.
 - -b wajib ada di v1. Preflight dijalankan sebelum proses dipindahkan ke background.
 - -s dan -p dihapus dari CLI. Snapshot dan urutan cold/snap ditentukan oleh classes.conf, tidak lewat flag.
 - -j N dan -o <log> masuk v1. Keduanya dipakai langsung oleh pengguna, bukan karena kebutuhan CI.
-- DITUNDA (akan ditulis sebagai desain sebelum dibangun): --mode light|full, --projects, -f, -x, -w (watcher), -m, -T, -l, -c.
+- -w masuk v1 (§9). Watcher hanya memantau staging, jadi ia berjalan di foreground tanpa <binary>, tanpa -b, dan tanpa -t.
+- DITUNDA (akan ditulis sebagai desain sebelum dibangun): --mode light|full, --projects, -f, -x, -m, -T, -l, -c.
 
-2.1 Runner Lifecycle
+## 2.1 Runner Lifecycle
 
 Runner bekerja di satu area staging, terpisah dari sumber:
 
@@ -90,7 +93,7 @@ Urutan lifecycle:
 
 Sebelum setiap test, UNIT_TMP dibersihkan. Fixture utama tidak otomatis dibersihkan di antara test.
 
-2.2 Discovery
+## 2.2 Discovery
 
 Discovery pada runner sama dengan discovery startup Satria: membaca target apa adanya dan menghasilkan keadaan yang dibutuhkan lingkungan. Discovery tidak menjalankan build dan tidak menulis ke sumber.
 
@@ -103,7 +106,7 @@ Hasil discovery untuk setiap target:
 
 Discovery hanya menghasilkan informasi untuk runner. Tes tetap membaca konfigurasi sendiri di work/ bila membutuhkannya (6.4).
 
-2.3 Staging dan test.state
+## 2.3 Staging dan test.state
 
 Runner tidak menjalankan tes dari tests/unit/. Ia menyalin common/, lib/, dan classes.conf ke /tmp/satria-unit/.
 
@@ -126,7 +129,7 @@ Aturan:
 
 Pemeriksaan hash berkas di staging mencegah kasus staging yang dimodifikasi di luar runner.
 
-2.4 Invarian keamanan
+## 2.4 Invarian keamanan
 
 - Runner tidak pernah menulis, menghapus, atau mengubah tests/unit/.
 - Runner hanya menghapus di dalam /tmp/satria-unit/. Pembersihan (--clean) dibatasi pada /tmp/satria-unit/targets/<nama>/.
@@ -135,7 +138,7 @@ Pemeriksaan hash berkas di staging mencegah kasus staging yang dimodifikasi di l
 - Tes tidak menghitung root repo dari $0. Di staging, $0 berada di /tmp/satria-unit/common/, sehingga "$(dirname "$0")/../../.." salah. Runner menyediakan UNIT_REPO (root repo) dan SATRIA_CMD (src/cmd.txt). Tes membacanya dengan ${UNIT_REPO:?...} dan tidak punya fallback diam-diam.
 - Binary yang dipin di staging tidak boleh bergantung pada lokasi filesystem-nya. Satria mencari cmd.txt dengan urutan $SATRIA_CMD, lalu ./src, lalu <exe>/../src. Runner mengekspor SATRIA_CMD agar binary di staging tetap menemukan bantuannya.
 
-2.5 Argumen, lock, dan reaper per target
+## 2.5 Argumen, lock, dan reaper per target
 
 Bentuk argumen:
 
@@ -143,7 +146,8 @@ Bentuk argumen:
 scripts/unit.sh <binary> <target>
 ```
 
-- <target> adalah nama (miniws, rupaws), bukan path. Nama diselesaikan ke fixture sumber (asumsi awal: tests/<nama>, perlu dikonfirmasi).
+- <target> adalah nama (miniws, complexws, rupaws), bukan path. Nama diselesaikan ke fixture sumber `tests/<nama>` (dikonfirmasi: implementasi runner memakai aturan ini).
+- Pilihan target menurut kebutuhan, bukan menurut tes: `miniws` (contoh minimal), `complexws` (workspace tiga proyek yang menghasilkan program CLI nyata, build hitungan detik), `rupaws` (proyek nyata, build puluhan menit). Asersi tingkat workspace sebaiknya divalidasi di `complexws` dulu; `rupaws` dipakai bila memang perlu skala proyek nyata.
 - Satu run hanya melayani satu target. Target lain dijalankan dengan run terpisah.
 
 Lock dan reaper berlaku per target, bukan per base:
@@ -152,9 +156,9 @@ Lock dan reaper berlaku per target, bukan per base:
 - Reaper: hanya menghentikan proses yang cwd-nya berada di dalam targets/<nama>/. Proses run target lain tidak disentuh.
 - --clean: hanya menghapus targets/<nama>/, tidak menyentuh target lain atau common/, lib/, classes.conf, dan test.state.
 
-Dampak ke -w tanpa argumen: bila lebih dari satu run aktif, watcher harus memilih atau menampilkan semua run (lihat 9.5).
+Watcher berada di luar skema lock run: `-w` tidak memakai `targets/<nama>/log/run.pid` dan tidak menahan run mana pun. Lock-nya satu untuk seluruh staging (`$UNIT_STAGE/watch.pid`), karena satu watcher melayani seluruh staging. Tanpa argumen, `-w` memilih target satu-satunya run aktif; bila ada beberapa run, ia berhenti dan meminta target disebut. `-w <target>` mempersempit tampilan, bukan lock (§9.4).
 
-2.6 Binary staging, pinning per run, dan -w multi-target
+## 2.6 Binary staging, pinning per run, dan -w multi-target
 
 Discovery runner menyalin binary yang diuji ke staging sebagai berkas versi:
 
@@ -178,19 +182,20 @@ Bukti: pengujian pada sandbox memperlihatkan bahwa loop yang memanggil path bers
 
 -w untuk banyak target:
 
-- Watcher menemukan run dari targets/*/log/run.pid, bukan dari nama proses. Run dianggap hidup bila PID-nya ada.
-- Setiap run hidup ditampilkan sebagai panel sendiri (progress bar per target). Run yang sudah selesai ditampilkan ringkas.
+- Watcher menemukan run dari `targets/*/log/run.pid`, bukan dari nama proses. Run dianggap hidup bila PID-nya ada.
+- Tanpa argumen, `-w` memantau satu-satunya run aktif — tidak perlu menyebut target selama hanya ada satu run. Bila beberapa run hidup, panel mana yang dimaksud ambigu, jadi watcher berhenti dan menyebut kandidatnya; pengguna mengulang dengan `-w <target>`.
+- Saat tidak ada run hidup, `-w` tanpa target berhenti dengan `tidak ada run aktif: sebutkan target yang mau dipantau (<kandidat>)` — tanpa run tidak ada kemajuan yang bisa dipantau; `-w <target>` tetap menunggu run pertama target itu.
 - Identifikasi proses milik target dilakukan lewat cwd (/proc/<pid>/cwd berada di bawah targets/<nama>/), sama seperti reaper.
 
 Alternatif yang ditolak: salinan binary per target (bins/satria-<target>). Alasannya: menduplikasi kebenaran binary, dan salinan per target tetap tidak menyelesaikan masalah pemanggilan lintas run bila path dipakai bersama.
 
-3. Cold Start dan Warmstart
+# 3. Cold Start dan Warmstart
 
 Cold start bukan kondisi wajib untuk setiap unit test.
 
 Warmstart merupakan kondisi normal untuk menguji perilaku Satria secara realistis.
 
-3.1 Cold Start
+## 3.1 Cold Start
 
 Cold start digunakan ketika test membutuhkan kondisi tanpa state sebelumnya.
 
@@ -204,7 +209,7 @@ Contoh:
 
 Cold reset menjadi tanggung jawab test yang membutuhkannya, bukan runner.
 
-3.2 Warmstart
+## 3.2 Warmstart
 
 Warmstart digunakan ketika test membutuhkan state build yang sudah terbentuk.
 
@@ -238,7 +243,7 @@ Test:
   assert affected consumers
 ```
 
-4. Test Isolation
+# 4. Test Isolation
 
 Warmstart tidak boleh menyebabkan test bergantung pada urutan eksekusi.
 
@@ -246,11 +251,11 @@ Setiap test harus memiliki precondition yang jelas dan dapat dipertanggungjawabk
 
 Dua pendekatan diperbolehkan:
 
-Independent setup
+- Independent setup
 
 Test menyiapkan sendiri kondisi awal yang dibutuhkan.
 
-Shared warm state
+- Shared warm state
 
 Test menggunakan state yang tersedia dari test sebelumnya selama state tersebut memang valid untuk skenario yang diuji.
 
@@ -258,23 +263,23 @@ Namun, keberhasilan test sebelumnya tidak boleh menjadi syarat tersembunyi bagi 
 
 Jika kondisi awal tidak dapat dijamin, test harus menyiapkannya sendiri.
 
-5. Fixture-aware Testing
+# 5. Fixture-aware Testing
 
 Unit test harus mengikuti kondisi aktual fixture, bukan memaksakan asumsi terhadap struktur atau isinya.
 
-5.1 No Static Fixture Assumptions
+## 5.1 No Static Fixture Assumptions
 
 Jangan mengasumsikan file, direktori, library, source, atau dependency tertentu selalu tersedia.
 
 Contoh yang terlalu spesifik:
 
-header="$USED/include/ext.h"
+`header="$USED/include/ext.h"`
 
 Jika keberadaan file tersebut tidak dijamin oleh skenario test, referensi ini tidak aman.
 
 Gunakan informasi konfigurasi atau discovery yang sesuai dengan kebutuhan test.
 
-5.2 Discover Before Use
+## 5.2 Discover Before Use
 
 Untuk resource yang berasal dari fixture:
 
@@ -284,7 +289,7 @@ Untuk resource yang berasal dari fixture:
 - Jangan menggunakan hasil kosong sebagai input build.
 - Jangan memilih sembarang resource hanya agar test dapat berjalan.
 
-5.3 Explicit Preconditions
+## 5.3 Explicit Preconditions
 
 Jika test membutuhkan resource tertentu:
 
@@ -293,7 +298,7 @@ Jika test membutuhkan resource tertentu:
 
 Jangan membiarkan kegagalan resource disalahartikan sebagai regresi Satria.
 
-5.4 Common Test Helpers
+## 5.4 Common Test Helpers
 
 `"common/*.sh"` (salinan staging) harus reusable terhadap berbagai fixture.
 
@@ -306,7 +311,7 @@ Helper tidak boleh terikat pada:
 
 Jika helper membutuhkan karakteristik tertentu, persyaratan tersebut harus eksplisit dan divalidasi.
 
-6. Workspace-aware Configuration
+# 6. Workspace-aware Configuration
 
 Runner harus memahami konfigurasi workspace sebelum menjalankan test.
 
@@ -314,7 +319,7 @@ Sumber kebenaran adalah mekanisme parser atau introspeksi konfigurasi milik Satr
 
 Runner tidak boleh membuat parser Buildfile.ws kedua yang memiliki interpretasi berbeda.
 
-6.1 Configuration Discovery
+## 6.1 Configuration Discovery
 
 Sebelum test dimulai, runner harus memperoleh:
 
@@ -329,7 +334,7 @@ Untuk workspace, informasi berasal dari konfigurasi "Buildfile.ws" melalui mekan
 
 Project tidak boleh ditentukan hanya berdasarkan direktori yang ditemukan.
 
-6.2 Project Selection
+## 6.2 Project Selection
 
 Default adalah seluruh project yang terdaftar dalam workspace.
 
@@ -357,7 +362,7 @@ Validasi:
 
 Pemilihan project hanya mengatur cakupan unit test, bukan mengubah Buildfile.ws.
 
-6.3 Header Location
+## 6.3 Header Location
 
 Header location menggunakan mode auto secara default.
 
@@ -389,7 +394,7 @@ Ketentuan:
 - Header spesifik tetap harus divalidasi.
 - Lokasi yang tidak tersedia harus dilaporkan sebagai precondition failure.
 
-6.4 Shared Configuration Interface
+## 6.4 Shared Configuration Interface
 
 Runner dan seluruh unit test menggunakan hasil preflight yang sama.
 
@@ -406,7 +411,7 @@ Format interface dapat berupa environment file atau format lain yang sesuai deng
 
 `"common/*.sh"` tidak perlu membaca ulang Buildfile.ws atau melakukan discovery konfigurasi secara independen.
 
-7. Non-interactive Configuration
+# 7. Non-interactive Configuration
 
 Runner tetap harus mendukung CI dan otomatisasi tanpa terminal interaktif.
 
@@ -421,102 +426,133 @@ Background execution harus menjalankan preflight sebelum proses dipindahkan ke b
 
 Proses background tidak boleh menunggu input terminal.
 
-8. Failure Classification
+# 8. Failure Classification
 
 Kegagalan harus dibedakan menjadi tiga kategori:
 
-Precondition failure
+1. Precondition failure
+- Fixture tidak menyediakan kebutuhan test.
+- Infrastructure failure
 
-Fixture tidak menyediakan kebutuhan test.
+2. Discovery, setup, konfigurasi, atau runner mengalami masalah.
 
-Infrastructure failure
-
-Discovery, setup, konfigurasi, atau runner mengalami masalah.
-
-Satria failure
-
+3. Satria failure
 Perilaku Satria tidak sesuai dengan ekspektasi test.
 
 Ketiganya tidak boleh dicampur menjadi satu kegagalan assertion.
 
-9. Watcher
+# 9. Watcher
 
-Watcher digunakan untuk memantau perubahan dan menjalankan ulang unit test secara otomatis.
+Watcher (`-w`) memantau **kemajuan run** di area staging, bukan menjalankan atau memicu run.
 
-Watcher merupakan mode pemantauan berkelanjutan, bukan sekadar pengulangan seluruh unit test secara periodik.
+Sumber kebenaran watcher hanya `/tmp/satria-unit/targets/<nama>/log/`. Watcher tidak membaca sumber repo Satria dan tidak menulis apa pun ke `targets/` — sehingga tidak ada siklus yang bisa memicu dirinya sendiri. Multi-watch diperankan sebagai registri (bukan lock): tiap watcher menulis `$UNIT_STAGE/watch/<pid>` berisi target yang dipantau dan hanya menghapus miliknya sendiri; watcher lain yang masih hidup diumumkan di header, tidak pernah ditolak. Ctrl-C di terminal watcher hanya menghentikan watcher: run latar (`-b`/nohup) berada di process group lain dan tidak pernah kebagian sinyal — mematikannya memang butuh `kill <pid>`.
 
-Contoh tampilan:
-```text
+### Contoh:
+
+```bash
 # Watch unit test
-* PID: <PID>
+* PID      : 4500
+* Staging  : /tmp/satria-unit/targets
+* Interval : 1s, Ctrl-C untuk berhenti
+* Target   : miniws - 4206
 
-[n/N] <unit_test_name> PASS: - FAIL: -
-process: <unit_test_name> n% <time:hh:mm:ss>
+# prepare : 12300 ms 47% 247.6KB
+# Execution test
+[1/25] background
+* process: 30000 ms 100% 12.4MB
+* PASS: 39 FAIL: 0 PRE: 0 TIME: 4210 ms
+[2/25] build_log
+* process: 2000 ms 37% 591.8KB
+
+# Summary
+* 25/25 selesai, total 00:04:10
+* PASS: 255 FAIL: 1 PRE: 0
 ```
 
-9.1 Watcher Lifecycle
+Catatan:
+- Bagian `prepare` muncul hanya saat build snap berjalan (lihat §9.6); tanpanya watcher langsung masuk `# Execution test`.
+- Entri tes muncul saat namanya terlihat di log run: `* process:` (ms + persen + ukuran) selama berjalan, berganti `* PASS:` saat selesai.
+- Setelah run berakhir, summary dicetak sekali (`total` berformat `HH:MM:SS`), watcher diam 2 detik lalu keluar sendiri (exit 0).
 
-Watcher harus:
+## 9.1 Watcher Lifecycle
 
-1. Melakukan initial preflight.
-2. Menjalankan unit test awal.
-3. Memantau perubahan yang relevan.
-4. Menentukan test yang perlu dijalankan ulang.
-5. Menjalankan test sesuai perubahan.
-6. Memperbarui status dan laporan.
+1. Validasi argumen: `-w [target]` — nol atau satu argumen, tanpa `<binary>`.
+2. Tolak kombinasi yang tidak masuk akal: `-b`, `--clean`, dan `-t` (watcher tidak memilih tes).
+3. Tentukan target: `<target>` dipakai apa adanya. Tanpa argumen, hitung run aktif (`run.pid` yang prosesnya hidup): tepat satu → target itu; lebih dari satu → berhenti dengan `ada beberapa run aktif (<a>,<b>): sebutkan yang mau dipantau, mis. -w <a>`; nol → berhenti dengan `tidak ada run aktif: sebutkan target yang mau dipantau (<kandidat>)`, karena tanpa run tidak ada kemajuan yang bisa dipantau.
+4. Daftarkan diri di `$UNIT_STAGE/watch/<pid>` (berisi target); sweep registri basi (PID mati) saat mulai. Registri bukan lock — banyak watcher boleh menulis target yang sama.
+5. Cetak header: PID, staging, interval, target (plus penanda dipilih otomatis), dan bila ada watcher lain: `* Watcher lain: <n> (<pid>...)`.
+6. Poll status setiap `UNIT_WATCH_INTERVAL` detik (default 1): entri tes yang selesai dicetak sekali, baris `* process:` entri berjalan ditulis ulang di tempat (khusus TTY), dan fase prepare (§9.6) berperilaku sama.
+7. Berhenti secara normal setelah summary (+2 detik, exit 0); berhenti karena Ctrl-C/SIGTERM (trap menghapus file registri) atau — bila run mati saat fase prepare — `# prepare : terhenti` dan exit 1.
 
-Watcher tetap berjalan sampai dihentikan pengguna atau prosesnya dihentikan.
+## 9.2 Polled State
 
-9.2 Change Detection
+Yang dipantau adalah berkas yang ditulis run sendiri di `targets/<nama>/log/`:
 
-Perubahan yang dipantau mencakup:
+- `run.pid` — identitas runner (ditulis `runner_init`, sebelum staging, sehingga run.env run sebelumnya tak sempat diterima sebagai cerita); liveness via `kill -0`.
+- `run.env` — `RUN_TESTS_COLD` + `RUN_TESTS_SNAP` (total), `RUN_STARTED`, `RUN_ENDED`, `RUN_ELAPSED_MS`, dan `RUN_LOG`.
+- `bg.pid` — pembungkus `-b` menuliskannya sebelum child jalan; dipakai watcher sebagai sinyal "run akan segera mulai" (harus lebih baru dari `run.env`, agar `bg.pid` basi run lama tidak dihitung).
+- `plan.tsv` — daftar tes run berurutan (`nomor`, `nama`, `fase`), sumber urutan `[i/N]`.
+- `timing.tsv` — baris per tes yang sudah selesai, beserta PASS/FAIL/PRE-nya.
+- Log run (`RUN_LOG`, fallback `log/unit.log`) — membaca `> Running <tes>` dan `> Selesai <tes>` untuk nama tes yang sedang berjalan.
+- `$UNIT_STAGE/snap/<pid>.pid` — registri build (§9.6).
 
-- Source code Satria yang relevan.
-- Unit test.
-- Common test helpers.
-- Konfigurasi workspace.
-- Resource fixture yang digunakan test.
+Watcher tidak memakai mtime berkas sumber, tidak menyimpan sha, dan tidak menjalankan ulang apa pun. Perubahan kode tidak terlihat oleh watcher; run berikutnya yang memutuskan apa yang dijalankan (design §2).
 
-Perubahan artefak hasil build, log, temporary files, dan snapshot tidak boleh memicu watcher secara berulang.
+Karena `run.env` ditulis sesudah `run.pid`, watcher memperlakukan `run.env` yang lebih tua dari `run.pid` sebagai manifest run sebelumnya dan tidak menampilkan apa pun untuk run baru sampai manifest run itu muncul — bukan angka run lama. Anti-stale ekstra: bila belum ada `run.pid`/`bg.pid` segar sama sekali, watcher menahan 2 tick pertama sebelum menerima cerita lama (proteksi watcher yang di-attach tepat pada detik run dimulai).
 
-9.3 Test Execution
+## 9.3 Execution
 
-Watcher harus mempertahankan warm state selama masih valid.
+Watcher tidak mengeksekusi tes, tidak mempertahankan warm state, dan tidak menghitung cakupan. Semua itu tanggung jawab run (`scripts/unit.sh <binary> <target>`), yang dijalankan terpisah — biasanya dari terminal lain atau dengan `-b`. Konsekuensinya, watcher aman dijalankan bersamaan dengan run target mana pun dan tidak memperpanjang lock run.
 
-Ketika perubahan hanya memengaruhi sebagian test, watcher sebaiknya menjalankan test yang relevan, bukan selalu seluruh suite.
+## 9.4 Coverage
 
-Jika perubahan memengaruhi konfigurasi workspace atau shared helper, cakupan test harus dievaluasi ulang.
+- Dengan `<target>`: hanya target itu — termasuk saat run lain juga aktif, karena menyebut target adalah cara memilih. Target yang belum pernah dijalankan tidak menghasilkan error; watcher menunggu tanpa mencetak apa pun sampai run pertama menulis manifestnya (fase prepare §9.6 pada run berikutnya tetap tampil).
+- Banyak run paralel (multiwatch): satu watcher per target di terminal berbeda, semua bebas saling berjalan — registri `watch/<pid>` hanya mencatat siapa memantau apa. Watcher ikut menampilkan fase prepare target masing-masing.
+- Tanpa argumen: watcher menghitung run aktif dari `targets/*/log/run.pid` (`kill -0` pada PID-nya). Tepat satu → target itu dipilih otomatis, dengan header `* Target   : <nama> - <pid run>` dan `* Dipilih otomatis: satu-satunya run aktif`. Lebih dari satu → berhenti, pesannya menyebut kandidat agar pengguna memilih. Nol → berhenti dengan `tidak ada run aktif: sebutkan target yang mau dipantau (<kandidat>)`.
+- Kalau `targets/` belum ada sama sekali, `-w` berhenti dengan `belum ada run di staging`.
 
-Perubahan konfigurasi yang memengaruhi preflight harus memicu validasi ulang sebelum test dijalankan.
+## 9.5 Watcher Status
 
-9.4 Test Isolation in Watcher
+Status adalah alur teks mengalir (satu dokumen, tanpa section tetap — terminal bergulir sendiri; ala `tail -f` berindikator). Header sekali, lalu entri dua baris per tes.
 
-Setiap siklus watcher harus tetap menghormati precondition test.
-
-State sebelumnya boleh dipertahankan selama valid, tetapi tidak boleh menyebabkan hasil test bergantung pada urutan atau siklus sebelumnya.
-
-9.5 Watcher Status
-
-Watcher harus menampilkan:
-
-- PID watcher.
-- Jumlah test yang selesai.
-- Jumlah PASS dan FAIL.
-- Test yang sedang berjalan.
-- Persentase proses.
-- Durasi proses.
-
-Contoh:
 ```text
-# Watch unit test
-* PID: 12345
-
-[3/12] semantic_header_workspace PASS: 3 FAIL: 0
-process: selective_noop 65% 00:00:01
+# prepare : <ms> ms [<persen>%] [<ukuran>]  # build snap berjalan (TTY); §9.6
+[<i>/<N>] <nama tes>
+* PASS: <n> FAIL: <n> PRE: <n> TIME: <ms> ms   # tes selesai; TIME = durasi tes dari timing.tsv (`-` bila tidak tercatat)
+* process: <ms> ms [<persen>%] [<ukuran>]  # tes berjalan (TTY); durasi dalam milidetik; ukuran = folder work
 ```
-Status harus diperbarui tanpa menghilangkan informasi penting dari siklus sebelumnya.
 
-10. Snapshot
+- `<i>/<N>` = urutan tes dalam run dan totalnya, keduanya dari `plan.tsv` (fallback: jumlah tes di `run.env`). Nomor tidak bergeser walau watcher mulai di tengah run.
+- `# Execution test` dicetak sekali sebelum entri pertama; setelah baris prepare terakhir bila fase prepare sempat tampil.
+- Entri selesai diambil dari `timing.tsv` (baris `snap-build` tidak dihitung) dan dicetak sekali per tes.
+- Durasi `process` (dalam ms) = sekarang − waktu mulai `@<epoch_ms>` pada baris `> Running <tes>.sh [<mode>]...`, bukan saat watcher melihat tes itu. Tidak pernah mundur dalam satu tes.
+- Persen dibandingkan durasi tes yang sama pada run sebelumnya (`timing.prev.tsv`), dibatasi 99% sampai tes selesai, dan hanya tampil bila data itu ada.
+- Ukuran = `du -sb` folder work tes aktif (`targets/<nama>/work`) — tumbuh saat tes menghasilkan artefak, terlihat bila tes stuck.
+- Saat tes selesai, baris `process` menampilkan `100%` satu tick dengan durasi dari `timing.tsv` (ms), dengan batas bawah nilai terakhir yang tampil, lalu diganti `* PASS:`.
+- Saat run berakhir (`RUN_ENDED`), summary dicetak sekali: `# Summary`, `* <selesai>/<N> selesai, total <HH:MM:SS dari RUN_ELAPSED_MS>`, lalu jumlah PASS/FAIL/PRE seluruh `timing.tsv`. Tes yang tidak punya catatan ditampilkan `- - -`.
+- Run yang prosesnya hilang tanpa `RUN_ENDED` tidak ditandai selesai dan tidak mendapat summary: watcher tidak mengarang hasil maupun durasi.
+- Di non-TTY (mis. `-o <log>`) hanya `# Execution test`, entri selesai, dan summary yang ditulis; tidak ada baris `process`/`prepare` berulang maupun escape terminal.
+
+## 9.6 Fase Prepare (build snap)
+
+Antara `runner_init` dan entri tes pertama, run menulis `run.pid` (via `runner_init`) dan membangun snap; `run.env` baru muncul setelahnya (di akhir discovery). Selama celah itu watcher memasuki fase prepare — persis fase yang dulu berupa kebisuan.
+
+- **Registri build**: `$UNIT_STAGE/snap/<pid>.pid`, isi `target mode denominasi` (mode `cold` atau kosong; denominasi = total byte artefak build sebelumnya — `build,bin,lib,dist,modules,.satria` di `targets/<nama>/snap`). Ditulis runner sebelum `rm -rf` snap lama, dihapus setelah build selesai (bila runner mati keras, sweep watcher mengaburkan). Liveness build = `kill -0` pid-nya.
+- **Baris status** (TTY, rewrite di tempat seperti `* process:`): `# prepare : <ms> ms [<persen>%] [<ukuran>]`. Persen = ukuran artefak sekarang / denominasi registri, dibatasi 99% dan hanya saat `cold` (build incremental tidak menunjukkan kemajuan jujur dari ukuran); ukuran = total byte artefak sekarang; tanpa registri → ms saja.
+- **Akhir fase**: bila `run.env` segar muncul, baris terakhir dikunci (`100%` dicap), `# Execution test` menyusul, lalu alur entri biasa. Run yang mati di tengah build (tanpa `run.env`) diberi `# prepare : terhenti (run berhenti sebelum run.env)` dan exit 1.
+- **Realtime**: persen dibaca per poll dari `du -sb` folder snap — kartu kemajuan build yang biasa tak bisa dipantau karena perintah build hanya berjalan senyap kini tampak berjalan.
+
+## 9.7 Implementasi
+
+Blok watcher berada di `scripts/lib/unit_watcher.sh` (dimuat `scripts/unit_dev.sh`, dijalankan lewat `scripts/unit.sh`) dan selesai sebelum validasi `<binary> <target>`, jadi mode ini tidak menyentuh discovery, staging, atau lock run.
+
+- Registri multi-watch: `$UNIT_STAGE/watch/<pid>` (file per watcher, isi target yang dipantau) — bukan lock; watcher lain tidak pernah ditolak. Sweep basi saat mulai (`kill -0`), dan tiap watcher hanya menghapus miliknya sendiri.
+- `scripts/unit.sh` exec snapshot unit_dev (satu proses, satu pid) sehingga sinyal kill ke pid menghantam proses yang tepat tanpa yatim; watcher bisa dikembangkan langsung lewat `scripts/unit_dev.sh -w` tanpa mengganggu run yang berjalan, karena run memegang snapshot skripnya sendiri (lihat §13).
+- Read-only: tidak ada `mkdir`, `cp`, atau penulisan lain di `targets/`; menghentikan watcher tidak mengubah hasil run.
+- `run.env` memuat `RUN_LOG` supaya watcher tahu log run ketika `-o <log>` dipakai.
+- Biaya poll: beberapa `sed`, satu `awk` atas `timing.tsv`, satu `awk` atas log run, `kill -0` per target, dan beberapa `du -sb` saat fase prepare — cukup untuk interval 1 detik tanpa membebani run.
+
+# 10. Snapshot
 
 Snapshot digunakan untuk menyimpan kondisi tertentu yang diperlukan oleh pengujian.
 
@@ -531,7 +567,7 @@ Snapshot tidak boleh dianggap sebagai pengganti assertion.
 
 Snapshot harus memiliki identitas dan konteks yang jelas, termasuk konfigurasi workspace serta kondisi fixture yang relevan.
 
-11. Reporting
+# 11. Reporting
 
 Setiap unit test memiliki log tersendiri.
 
@@ -553,7 +589,7 @@ Logs:
 
 Laporan harus membedakan kegagalan test dan kegagalan precondition atau infrastruktur.
 
-12. Design Principles
+# 12. Design Principles
 
 1. Cold start hanya ketika diperlukan.
 2. Warmstart menjadi kondisi normal.
@@ -566,24 +602,24 @@ Laporan harus membedakan kegagalan test dan kegagalan precondition atau infrastr
 9. Header location ditemukan otomatis berdasarkan konfigurasi.
 10. Preflight selesai sebelum test dimulai.
 11. Common helpers menggunakan hasil preflight.
-12. Watcher mempertahankan warm state selama valid.
-13. Watcher tidak memicu dirinya sendiri akibat artefak build.
+12. Watcher memantau kemajuan run dari staging, bukan dari sumber repo — fase prepare, `# Execution test`, dan summary berikutnya sesuai §9.
+13. Watcher read-only terhadap targets/ (registri `$UNIT_STAGE/watch/<pid>` dan `$UNIT_STAGE/snap/<pid>.pid` di luar targets), sehingga tidak memicu run dan tidak mengubah hasil; multiwatch bebas.
 14. Snapshot membantu reproduksi, bukan menggantikan validasi.
 15. Runner tidak menduplikasi tanggung jawab build system.
 
 Tujuan akhirnya adalah menghasilkan pengujian yang fleksibel, reproducible, workspace-aware, dan mampu menemukan regresi nyata tanpa melakukan pekerjaan build yang tidak diperlukan.
 
-## 13. Status Implementasi (scripts/unit_dev.sh)
+# 13. Status Implementasi (scripts/unit_dev.sh)
 
 Implementasi mengikuti nomor bagian di atas. Runner: `scripts/unit_dev.sh` (dev,
-versi stabil disalin ke `scripts/unit.sh`).
+versi stabil disalin oleh `scripts/unit.sh`).
 
 | Bagian | Fitur | Status | Catatan |
 |---|---|---|---|
 | 2.1–2.2 | Staging `targets/<nama>/` + `test.state` fingerprint | ✅ | common/, lib/, classes.conf disalin; tak disalin ulang bila sama |
 | 2.3 | `test.state` | ✅ | sinkronisasi staging per run |
 | 2.4 | Penamaan & resolusi target | ✅ | `<target>` = nama → `tests/<nama>` |
-| — | `unit.sh` = konsumen tipis `unit_dev.sh` | ✅ | unit.sh menyalin `unit_dev.sh` ke `.unit.$$` di `scripts/` lalu menjalankan salinan itu: edit `unit_dev.sh` tak lagi mengganggu run aktif (bash lazy-parse memegang snapshot), dan unit.sh tak perlu ditimpa lagi — insiden "ditimpa saat run rupaws, parsing run aktif rusak" tak terulang |
+| — | `unit.sh` = konsumen tipis `unit_dev.sh` | ✅ | unit.sh menyalin `unit_dev.sh` ke `.unit.$$` di `scripts/` lalu menjalankan salinan itu: edit `unit_dev.sh` tak lagi mengganggu run aktif (bash lazy-parse memegang snapshot), dan unit.sh tak perlu ditimpa lagi — insiden "ditimpa saat run rupaws, parsing run aktif rusak" tak terulang. Salinan dijalankan di foreground, jadi Ctrl-C (satu process group), stdin, dan kode keluar identik dengan menjalankan `unit_dev.sh` langsung; salinan itu sendiri yang menghapus dirinya (`drop_copy`) — bukan pembungkus — sehingga `-b`, yang me-re-exec `$0` di proses lain, tidak kehilangan skripnya. Konsekuensinya `scripts/unit_dev.sh -w` bisa dipakai mengembangkan watcher tanpa mengganggu run yang berjalan |
 | 2.5 | Lock & reaper per target; `-b` background pasca-preflight; `--clean` per target | ✅ | `log/run.pid`, reaper rekursif, `--clean` hanya `targets/<nama>/` |
 | 2.6 | Binary pinning `satria-<hash8>` | ✅ | `run.env`: `RUN_BINARY` (path pin) + `RUN_ORIGINAL` |
 | 3.2 | Snap ber-identitas (`SNAP_ID` dari hash biner+target+fixture) | ✅ | identitas cocok → tidak dibangun ulang |
@@ -593,9 +629,9 @@ versi stabil disalin ke `scripts/unit.sh`).
 | 5.3 | PRECONDITION kategori sendiri | ✅ | `unit_precondition()` verdict + talli `PRE` (bukan FAIL), design §8 |
 | 5.4 | Helpers reusable antar fixture | ✅ | |
 | 6 | Workspace-aware configuration (parser Buildfile.ws via Satria) | ✅ | discovery runner = `-w -g compdb` (mekanisme satria, query-only) pada salinan throwaway fixture → `discovery/sources.tsv` (proyek/sumber/objek); `lib/layout.sh` makan TSV (skip `embedded.c`, prefer `src/`); tanpa runner → string kosong → PRECONDITION. `unit_project_binary`/`unit_archive_project` masih micro-read Buildfile.ws (interim, tunggu query targets native) |
-| 7 | Non-interactive (argumen/env penuh) | ✅ | `-b`, `-j`, `-o`, `-t`, `--clean` — tanpa prompt (interactive configuration dihapus dari design — menambah beban kode runner tanpa nilai) |
+| 7 | Non-interactive (argumen/env penuh) | ✅ | `-b`, `-j`, `-o`, `-t`, `-w`, `--clean` — tanpa prompt (interactive configuration dihapus dari design — menambah beban kode runner tanpa nilai) |
 | 8 | Klasifikasi kegagalan 3 kategori | ✅ | FAIL / PRE / infra (exit 2) |
-| 9 | Watcher (`-w`) | ⏸ | ditunda, v1.5 |
+| 9 | Watcher (`-w [target]`) | ✅ | §9: pemantau read-only atas `targets/<nama>/log/` (`run.pid`, `run.env`, `bg.pid`, `plan.tsv`, `timing.tsv`, log run) — tidak menjalankan tes, tidak memantau sumber repo; status mengalir: fase `# prepare : <ms> ms [<persen>%] [<ukuran>]` saat build snap (§9.6, registri `$UNIT_STAGE/snap/<pid>.pid`), `# Execution test`, per tes `[i/N] <tes>` + `* PASS: p FAIL: f PRE: q TIME: <ms> ms` (selesai) atau `* process: <ms> ms [<persen>%] [<ukuran>]` (berjalan), `# Summary` sekali saat `RUN_ENDED` lalu watcher keluar sendiri (exit 0); multiwatch via registri `$UNIT_STAGE/watch/<pid>` (tanpa lock); tanpa argumen = target satu-satunya run aktif, beberapa/ nol run aktif → berhenti dan minta target disebut; tolak `-b`/`--clean`/`-t` |
 | 10 | Reporting: ringkasan + `timing.tsv` per tes | ✅ | pass/fail/pre, total, tunggu vs kerja via shim sleep; 5 tes terlama |
 | 11 | Contoh laporan + log per tes | ✅ | `log/unit.log`, `log/<tes>.log` |
 | — | `-t <tes>` seleksi run | ✅ | ekstra di luar design: jalankan subset, snap hanya bila ada tes [snap] terpilih |
