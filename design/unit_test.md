@@ -526,7 +526,7 @@ Status adalah alur teks mengalir (satu dokumen, tanpa section tetap — terminal
 - `# Execution test` dicetak sekali sebelum entri pertama; setelah baris prepare terakhir bila fase prepare sempat tampil.
 - Entri selesai diambil dari `timing.tsv` (baris `snap-build` tidak dihitung) dan dicetak sekali per tes.
 - Durasi `process` (dalam ms) = sekarang − waktu mulai `@<epoch_ms>` pada baris `> Running <tes>.sh [<mode>]...`, bukan saat watcher melihat tes itu. Tidak pernah mundur dalam satu tes.
-- Persen dibandingkan durasi tes yang sama pada run sebelumnya (`timing.prev.tsv`), dibatasi 99% sampai tes selesai, dan hanya tampil bila data itu ada.
+- Persen dibandingkan durasi tes yang sama pada run sebelumnya (`timing.prev.tsv`), dibatasi 99% sampai tes selesai, dan hanya tampil bila data itu ada. `timing.prev.tsv` adalah **akumulasi lintas run** — gabungan prev lama + `timing.tsv`, run terakhir menang bila nama sama — sehingga run `-t` subset tidak menyempitkan cakupan persen; merge dilakukan di awal discovery run berikutnya.
 - Ukuran = `du -sb` folder work tes aktif (`targets/<nama>/work`) — tumbuh saat tes menghasilkan artefak, terlihat bila tes stuck.
 - Saat tes selesai, baris `process` menampilkan `100%` satu tick dengan durasi dari `timing.tsv` (ms), dengan batas bawah nilai terakhir yang tampil, lalu diganti `* PASS:`.
 - Saat run berakhir (`RUN_ENDED`), summary dicetak sekali: `# Summary`, `* <selesai>/<N> selesai, total <HH:MM:SS dari RUN_ELAPSED_MS>`, lalu jumlah PASS/FAIL/PRE seluruh `timing.tsv`. Tes yang tidak punya catatan ditampilkan `- - -`.

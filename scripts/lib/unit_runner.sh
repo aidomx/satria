@@ -291,7 +291,22 @@ print proj "\t" src "\t" obj
     _pi=$((_pi + 1))
     printf '%s\t%s\tsnap\n' "$_pi" "$_t" >> "$PLAN"
   done
-  [ -f "$LOGDIR/timing.tsv" ] && cp "$LOGDIR/timing.tsv" "$LOGDIR/timing.prev.tsv"
+  # timing.prev = pengetahuan durasi yang terakumulasi: gabungan prev lama +
+  # timing run terakhir (run terakhir menang bila nama sama — dibaca kedua,
+  # mengubah nilai). Gabungan, bukan salinan: run -t yang memilih subset
+  # tidak lagi menyempitkan cakupan percen watcher (problem: persen hanya
+  # tampil untuk tes yang kebetulan ada di run terakhir).
+  if [ -s "$LOGDIR/timing.tsv" ]; then
+    {
+      printf 'operasi\tfase\tms\tpass\tfail\tpre\tsleep_ms\twork_ms\n'
+      awk -F'\t' '
+        FNR > 1 && $1 != "" { row[$1] = $0 }
+        END { for (k in row) print row[k] }
+      ' "$LOGDIR/timing.prev.tsv" "$LOGDIR/timing.tsv" 2> /dev/null
+    } > "$LOGDIR/timing.prev.tmp" \
+      && mv "$LOGDIR/timing.prev.tmp" "$LOGDIR/timing.prev.tsv" \
+      || rm -f "$LOGDIR/timing.prev.tmp"
+  fi
 
   TIMING="$LOGDIR/timing.tsv"
   : > "$TIMING"
