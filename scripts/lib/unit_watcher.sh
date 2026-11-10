@@ -333,24 +333,25 @@ watcher_run() {
     return 0
   }
 
-  # Render baris prepare aktif (baris ke-2 yang isinya direwrite di tempat,
-  # setelah baris process tes). Kalert dicetak: "# prepare : <ms> ms <pct%>"
-  # — % dan size hanya saat cold (registri build ada), ms selalu.
+  # Render baris build aktif (direwrite di tempat di bawah header "# Prepare").
+  # Persen hanya saat cold (registri build ada — build incremental tidak
+  # menunjukkan kemajuan jujur dari ukuran); tanpa persen, tampilkan ukuran.
   prep_text() {
     local tms cur pct pctx
     tms=$(($(now_ms) - PREP_T0))
     [ "$tms" -lt 0 ] && tms=0
     [ "$tms" -lt "$PREP_MS" ] && tms=$PREP_MS
     PREP_MS=$tms
-    pctx=""
     cur="$(snap_bytes "$STAGE/targets/$WTARGET/snap")"
     if [ "$PREP_COLD" = cold ] && [ "$PREP_PREV" -gt 0 ] 2> /dev/null \
       && [ "$cur" -gt 0 ]; then
       pct=$((cur * 100 / PREP_PREV))
       [ "$pct" -gt 99 ] && pct=99
-      pctx=" ${pct}%"
+      pctx="* build: ${pct}%"
+    else
+      pctx="* build:$(size_of "$STAGE/targets/$WTARGET/snap")"
     fi
-    PREP_TXT="# Prepare : ${tms} ms${pctx}$(size_of "$STAGE/targets/$WTARGET/snap")"
+    PREP_TXT="$pctx"
   }
 
   # Print "# Execution test" sekali sebelum entri pertama — setelah baris
@@ -359,24 +360,19 @@ watcher_run() {
   exec_line() {
     [ "$EXEC_SHOWN" -eq 1 ] && return 0
     if [ "$TTY" -eq 1 ] && [ "$PREP_DONE" -eq 1 ]; then
-      # Versi akhir prepare: kunci ms, persen boleh mencapai 100
-      local tms cur pct pctx
+      # Baris build live ditutup jadi centang: √ <HH:MM:SS> <ukuran> — di
+      # tempat yang sama (rewrite), bukan baris baru.
+      local tms
       tms=$(($(now_ms) - PREP_T0))
       [ "$tms" -lt 0 ] && tms=0
       [ "$tms" -lt "$PREP_MS" ] && tms=$PREP_MS
       PREP_MS=$tms
-      pctx=""
-      if [ "$PREP_COLD" = cold ]; then
-        pctx="$(size_of "$STAGE/targets/$WTARGET/snap")"
-        cur="$(snap_bytes "$STAGE/targets/$WTARGET/snap")"
-        if [ "$PREP_PREV" -gt 0 ] 2> /dev/null && [ "$cur" -gt 0 ]; then
-          pct=$((cur * 100 / PREP_PREV))
-          [ "$pct" -gt 100 ] && pct=100
-          pctx=" ${pct}%${pctx}"
-        fi
+      if [ "$PREP_DRAWN" -eq 0 ]; then
+        printf '\n# Prepare\n'
+        PREP_DRAWN=1
       fi
-      echo ""
-      printf '\r\033[2K# Prepare : %s ms%s\n' "$tms" "$pctx"
+      printf '\r\033[2K√ %s%s\n' "$(fmt_hms $((tms / 1000)))" \
+        "$(size_of "$STAGE/targets/$WTARGET/snap")"
     fi
     echo ""
     printf '# Execution test\n'
@@ -532,7 +528,7 @@ watcher_run() {
       # snap berjalan (registri $STAGE/snap/<pid>.pid) atau tunggu ringkas.
       if prep_check && [ "$TTY" -eq 1 ]; then
         if [ "$PREP_DRAWN" -eq 0 ]; then
-          printf '\n' # gap antar header: header → # Prepare (sekali render pertama)
+          printf '\n# Prepare\n' # gap antar header + header fase, sekali
           PREP_DRAWN=1
         fi
         prep_text

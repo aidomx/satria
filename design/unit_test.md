@@ -456,7 +456,9 @@ Sumber kebenaran watcher hanya `/tmp/satria-unit/targets/<nama>/log/`. Watcher t
 * Interval : 1s, Ctrl-C untuk berhenti
 * Target   : miniws - 4206
 
-# prepare : 12300 ms 47% 247.6KB
+# Prepare
+* build: 47%
+√ 00:00:06 591.8KB
 # Execution test
 [1/25] background
 * process: 30000 ms 100% 12.4MB
@@ -470,7 +472,7 @@ Sumber kebenaran watcher hanya `/tmp/satria-unit/targets/<nama>/log/`. Watcher t
 ```
 
 Catatan:
-- Bagian `prepare` muncul hanya saat build snap berjalan (lihat §9.6); tanpanya watcher langsung masuk `# Execution test`.
+- Bagian `prepare` muncul hanya saat build snap berjalan (lihat §9.6): header `# Prepare` sekali, baris `* build:` live di bawahnya, berubah `√ <HH:MM:SS> <ukuran>` saat build selesai; tanpanya watcher langsung masuk `# Execution test`.
 - Entri tes muncul saat namanya terlihat di log run: `* process:` (ms + persen + ukuran) selama berjalan, berganti `* PASS:` saat selesai.
 - Setelah run berakhir, summary dicetak sekali (`total` berformat `HH:MM:SS`), watcher diam 2 detik lalu keluar sendiri (exit 0).
 
@@ -482,7 +484,7 @@ Catatan:
 4. Daftarkan diri di `$UNIT_STAGE/watch/<pid>` (berisi target); sweep registri basi (PID mati) saat mulai. Registri bukan lock — banyak watcher boleh menulis target yang sama.
 5. Cetak header: PID, staging, interval, target (plus penanda dipilih otomatis), dan bila ada watcher lain: `* Watcher lain: <n> (<pid>...)`.
 6. Poll status setiap `UNIT_WATCH_INTERVAL` detik (default 1): entri tes yang selesai dicetak sekali, baris `* process:` entri berjalan ditulis ulang di tempat (khusus TTY), dan fase prepare (§9.6) berperilaku sama.
-7. Berhenti secara normal setelah summary (+2 detik, exit 0); berhenti karena Ctrl-C/SIGTERM (trap menghapus file registri) atau — bila run mati saat fase prepare — `# prepare : terhenti` dan exit 1.
+7. Berhenti secara normal setelah summary (+2 detik, exit 0); berhenti karena Ctrl-C/SIGTERM (trap menghapus file registri) atau — bila run mati saat fase prepare — `# Prepare : terhenti` dan exit 1.
 
 ## 9.2 Polled State
 
@@ -516,7 +518,9 @@ Watcher tidak mengeksekusi tes, tidak mempertahankan warm state, dan tidak mengh
 Status adalah alur teks mengalir (satu dokumen, tanpa section tetap — terminal bergulir sendiri; ala `tail -f` berindikator). Header sekali, lalu entri dua baris per tes.
 
 ```text
-# prepare : <ms> ms [<persen>%] [<ukuran>]  # build snap berjalan (TTY); §9.6
+# Prepare
+* build: <persen>% | <ukuran>   # build snap berjalan (TTY); rewrite di tempat; §9.6
+√ <HH:MM:SS> <ukuran>          # build selesai: baris yang sama berubah centang
 [<i>/<N>] <nama tes>
 * PASS: <n> FAIL: <n> PRE: <n> TIME: <ms> ms   # tes selesai; TIME = durasi tes dari timing.tsv (`-` bila tidak tercatat)
 * process: <ms> ms [<persen>%] [<ukuran>]  # tes berjalan (TTY); durasi dalam milidetik; ukuran = folder work
@@ -538,8 +542,8 @@ Status adalah alur teks mengalir (satu dokumen, tanpa section tetap — terminal
 Antara `runner_init` dan entri tes pertama, run menulis `run.pid` (via `runner_init`) dan membangun snap; `run.env` baru muncul setelahnya (di akhir discovery). Selama celah itu watcher memasuki fase prepare — persis fase yang dulu berupa kebisuan.
 
 - **Registri build**: `$UNIT_STAGE/snap/<pid>.pid`, isi `target mode denominasi` (mode `cold` atau kosong; denominasi = total byte artefak build sebelumnya — `build,bin,lib,dist,modules,.satria` di `targets/<nama>/snap`). Ditulis runner sebelum `rm -rf` snap lama, dihapus setelah build selesai (bila runner mati keras, sweep watcher mengaburkan). Liveness build = `kill -0` pid-nya.
-- **Baris status** (TTY, rewrite di tempat seperti `* process:`): `# prepare : <ms> ms [<persen>%] [<ukuran>]`. Persen = ukuran artefak sekarang / denominasi registri, dibatasi 99% dan hanya saat `cold` (build incremental tidak menunjukkan kemajuan jujur dari ukuran); ukuran = total byte artefak sekarang; tanpa registri → ms saja.
-- **Akhir fase**: bila `run.env` segar muncul, baris terakhir dikunci (`100%` dicap), `# Execution test` menyusul, lalu alur entri biasa. Run yang mati di tengah build (tanpa `run.env`) diberi `# prepare : terhenti (run berhenti sebelum run.env)` dan exit 1.
+- **Baris status** (TTY, rewrite di tempat seperti `* process:`): header `# Prepare` dicetak sekali, di bawahnya satu baris `* build: <persen>%` (bila denominasi ada) atau `* build: <ukuran>` (tanpa denominasi). Persen = ukuran artefak sekarang / denominasi registri, dibatasi 99% dan hanya saat `cold` (build incremental tidak menunjukkan kemajuan jujur dari ukuran); ukuran = total byte artefak sekarang.
+- **Akhir fase**: bila `run.env` segar muncul, baris build yang sama berubah menjadi centang `√ <HH:MM:SS> <ukuran>` (durasi build, ukuran akhir), lalu `# Execution test` menyusul dan alur entri biasa berlanjut. Run yang mati di tengah build (tanpa `run.env`) diberi `# Prepare : terhenti (run berhenti sebelum run.env)` dan exit 1.
 - **Realtime**: persen dibaca per poll dari `du -sb` folder snap — kartu kemajuan build yang biasa tak bisa dipantau karena perintah build hanya berjalan senyap kini tampak berjalan.
 
 ## 9.7 Implementasi
@@ -631,7 +635,7 @@ versi stabil disalin oleh `scripts/unit.sh`).
 | 6 | Workspace-aware configuration (parser Buildfile.ws via Satria) | ✅ | discovery runner = `-w -g compdb` (mekanisme satria, query-only) pada salinan throwaway fixture → `discovery/sources.tsv` (proyek/sumber/objek); `lib/layout.sh` makan TSV (skip `embedded.c`, prefer `src/`); tanpa runner → string kosong → PRECONDITION. `unit_project_binary`/`unit_archive_project` masih micro-read Buildfile.ws (interim, tunggu query targets native) |
 | 7 | Non-interactive (argumen/env penuh) | ✅ | `-b`, `-j`, `-o`, `-t`, `-w`, `--clean` — tanpa prompt (interactive configuration dihapus dari design — menambah beban kode runner tanpa nilai) |
 | 8 | Klasifikasi kegagalan 3 kategori | ✅ | FAIL / PRE / infra (exit 2) |
-| 9 | Watcher (`-w [target]`) | ✅ | §9: pemantau read-only atas `targets/<nama>/log/` (`run.pid`, `run.env`, `bg.pid`, `plan.tsv`, `timing.tsv`, log run) — tidak menjalankan tes, tidak memantau sumber repo; status mengalir: fase `# prepare : <ms> ms [<persen>%] [<ukuran>]` saat build snap (§9.6, registri `$UNIT_STAGE/snap/<pid>.pid`), `# Execution test`, per tes `[i/N] <tes>` + `* PASS: p FAIL: f PRE: q TIME: <ms> ms` (selesai) atau `* process: <ms> ms [<persen>%] [<ukuran>]` (berjalan), `# Summary` sekali saat `RUN_ENDED` lalu watcher keluar sendiri (exit 0); multiwatch via registri `$UNIT_STAGE/watch/<pid>` (tanpa lock); tanpa argumen = target satu-satunya run aktif, beberapa/ nol run aktif → berhenti dan minta target disebut; tolak `-b`/`--clean`/`-t` |
+| 9 | Watcher (`-w [target]`) | ✅ | §9: pemantau read-only atas `targets/<nama>/log/` (`run.pid`, `run.env`, `bg.pid`, `plan.tsv`, `timing.tsv`, log run) — tidak menjalankan tes, tidak memantau sumber repo; status mengalir: fase `# Prepare` + baris `* build: <persen>%|<ukuran>` yang berubah `√ <HH:MM:SS> <ukuran>` saat build selesai (§9.6, registri `$UNIT_STAGE/snap/<pid>.pid`), `# Execution test`, per tes `[i/N] <tes>` + `* PASS: p FAIL: f PRE: q TIME: <ms> ms` (selesai) atau `* process: <ms> ms [<persen>%] [<ukuran>]` (berjalan), `# Summary` sekali saat `RUN_ENDED` lalu watcher keluar sendiri (exit 0); multiwatch via registri `$UNIT_STAGE/watch/<pid>` (tanpa lock); tanpa argumen = target satu-satunya run aktif, beberapa/ nol run aktif → berhenti dan minta target disebut; tolak `-b`/`--clean`/`-t` |
 | 10 | Reporting: ringkasan + `timing.tsv` per tes | ✅ | pass/fail/pre, total, tunggu vs kerja via shim sleep; 5 tes terlama |
 | 11 | Contoh laporan + log per tes | ✅ | `log/unit.log`, `log/<tes>.log` |
 | — | `-t <tes>` seleksi run | ✅ | ekstra di luar design: jalankan subset, snap hanya bila ada tes [snap] terpilih |
