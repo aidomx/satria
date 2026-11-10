@@ -7,6 +7,16 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
+/* mkdir POSIX (dua argumen) tidak ada di MSVC: <direct.h> menyediakan
+   _mkdir satu argumen (mode lewat umask Windows). Sisanya identik:
+   keduanya sukses saat direktori dibuat atau sudah ada. */
+#ifdef _WIN32
+#include <direct.h>
+#define MKDIR(D) _mkdir((D))
+#else
+#define MKDIR(D) mkdir((D), 0777)
+#endif
+
 static int notes_path(const char *dir, char *out, size_t size) {
   if (!dir || !*dir) return -1;
   if (snprintf(out, size, "%s/notes.txt", dir) >= (int)size) return -1;
@@ -14,7 +24,7 @@ static int notes_path(const char *dir, char *out, size_t size) {
 }
 
 static int ensure_dir(const char *dir) {
-  if (mkdir(dir, 0777) == 0) return 0;
+  if (MKDIR(dir) == 0) return 0;
   return errno == EEXIST ? 0 : -1;
 }
 

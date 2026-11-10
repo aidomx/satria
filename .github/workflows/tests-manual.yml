@@ -8,9 +8,10 @@
 #     ("cp: cannot stat 'tests/miniws/.'", "fixture tidak ditemukan: (kosong)")
 #     dan log hilang dari upload-artifact. Sudah ditangani: input diubah
 #     absolut via cygpath (step "Fixture suite absolut").
-#   - checkout WAJIB core.autocrlf false — default runner mengonversi LF→CRLF,
-#     gen_tracer_src menghasilkan byte berbeda → trace_src_sync FAIL palsu.
-#     (config core.autocrlf di step checkout.)
+#   - autocrlf: run hijau 08/11 (PASS=241 FAIL=0, miniws) membuktikan
+#     trace_src_sync & cmdhelp_crlf lulus dengan default runner — tanpa
+#     koreksi apa pun (input `config:` checkout@v4 ternyata invalid dan
+#     hanya menghasilkan annotation warning; dihapus 10/11/2026).
 #
 # Yang diharapkan GAGAL di Windows (jalur POSIX — jangan dianggap regresi):
 #   - trace_summary.sh → `satria trace` menolak (LD_PRELOAD/dlsym tidak ada;
@@ -19,8 +20,6 @@
 #     git-bash/Windows (dapat 0).
 #   - faststate_external_header.sh ("steady state is no-op") → SATU-satunya
 #     logika yang mungkin nyata; perlu investigasi (mtime NTFS?).
-#   - trace_src_sync.sh & cmdhelp_crlf → PASS palsu ikut hilang bersama
-#     core.autocrlf (lihat atas).
 #
 # Runner scripts/unit.sh menjalankan semua tes terdaftar di classes.conf
 # — CLI: <binary> <target-nama> [-j N] [-o log]; tes di tests/unit/common
@@ -52,13 +51,11 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          # Pelajaran run 05/11/2026: default core.autocrlf membuat tracer.src
-          # dll. terkonversi CRLF → gen_tracer_src.h membedakan hasil
-          # regen → trace_src_sync/cmdhelp_crlf FAIL palsu (dokumen和生产 LF).
-          config: |
-            core.autocrlf false
-            core.eol lf
+        # Pelajaran run 05/11/2026 TERNYATA SALAH: input `config` TIDAK ADA
+        # di actions/checkout@v4 (annotation "Unexpected input(s) 'config'")
+        # → diabaikan, core.autocrlf tetap default runner. Empiris run hijau
+        # 08/11 (PASS=241 FAIL=0, miniws): trace_src_sync & cmdhelp_crlf
+        # lulus dengan default itu — tidak perlu koreksi autocrlf.
 
       - name: Fixture suite absolut (bash MSYS butuh gaya POSIX)
         if: ${{ inputs.suite != '' }}
@@ -76,6 +73,12 @@ jobs:
           # upload-artifact. Log ABSOLUT juga.
           echo "log1=$WS/unit-msvc-1.log" >> "$GITHUB_OUTPUT"
           echo "log2=$WS/unit-msvc-2.log" >> "$GITHUB_OUTPUT"
+          # upload-artifact@v4 = node: tak membaca path MSYS /d/a/... atau
+          # /tmp/... — keluarkan gaya WINDOWS (pelajaran run 10/11/2026:
+          # 0 artifact walau step upload ✓).
+          echo "log1w=$(cygpath -w "$WS/unit-msvc-1.log")" >> "$GITHUB_OUTPUT"
+          echo "log2w=$(cygpath -w "$WS/unit-msvc-2.log")" >> "$GITHUB_OUTPUT"
+          echo "stage=$(cygpath -w /tmp/satria-unit)" >> "$GITHUB_OUTPUT"
 
       - name: Setup Node.js 24
         uses: actions/setup-node@v4
@@ -167,14 +170,27 @@ jobs:
             && echo "SMOKE OK: optimize dua-langkah (FNAME=out.tar.part) + tarball valid"
 
       # Selalu unggah log walau salah satu suite gagal (suite ke-2 boleh
-      # tidak jalan → if-no-files-found: ignore).
+      # tidak jalan → if-no-files-found: ignore). Saat gagal, staging unit
+      # (/tmp/satria-unit: log/snap-build.log, unit.log, run.env) diunggah
+      # terpisah agar penyebab rc=1 selalu terlihat — pelajaran run
+      # 42798946391: "build snap gagal" tanpa isi log karena die sebelum
+      # log -o sempat ditulis dan path MSYS tak terbaca node.
       - name: Upload logs (always)
         if: ${{ always() && inputs.suite != '' }}
         uses: actions/upload-artifact@v4
         with:
           name: unit-logs-msvc
           path: |
-            ${{ steps.suite.outputs.log1 }}
-            ${{ steps.suite.outputs.log2 }}
+            ${{ steps.suite.outputs.log1w }}
+            ${{ steps.suite.outputs.log2w }}
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Upload staging unit (hanya saat gagal)
+        if: ${{ failure() && inputs.suite != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-stage-debug
+          path: ${{ steps.suite.outputs.stage }}/targets/**/log/**
           if-no-files-found: ignore
           retention-days: 14
