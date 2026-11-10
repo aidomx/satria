@@ -2,6 +2,10 @@
 # scripts/unit_dev.sh - runner unit test dev (design/unit_test.md)
 #
 #   bash scripts/unit_dev.sh <binary> <target> [-b] [-j N] [-o <log>] [-t <tes>]
+#   bash scripts/unit_dev.sh start <binary> <target> [...]   # sama dengan atas
+#   bash scripts/unit_dev.sh stop <target>                   # kill run aktif
+#   bash scripts/unit_dev.sh pause <target>                  # berhenti setelah tes berjalan selesai
+#   bash scripts/unit_dev.sh resume <target> [-b] [-j N] [-o <log>]  # lanjut sisa run
 #   bash scripts/unit_dev.sh -w [target]
 #
 # Tahap: discovery -> staging (common/, lib/, classes.conf, test.state)
@@ -36,7 +40,7 @@ die() {
 
 say() { echo "$*"; }
 
-usage() { sed -n '2,14p' "$0"; }
+usage() { sed -n '2,9p' "$0"; }
 
 # Load modules
 source "$SCRIPT_DIR/lib/unit_common.sh"
@@ -50,6 +54,7 @@ export SATRIA_CMD="$ROOT/src/cmd.txt"
 [ -f "$SATRIA_CMD" ] || die "src/cmd.txt tidak ada di $ROOT"
 
 # Parse arguments
+MODE="run" # run (default) | stop | resume — subcommand kata pertama, sisanya opsi
 BG=0
 JOBS=2
 LOG=""
@@ -57,6 +62,25 @@ CLEAN=0
 WATCH=0
 POS=()
 SEL=()
+
+case "${1-}" in
+  start)
+    MODE="run"
+    shift
+    ;;
+  stop)
+    MODE="stop"
+    shift
+    ;;
+  pause)
+    MODE="pause"
+    shift
+    ;;
+  resume)
+    MODE="resume"
+    shift
+    ;;
+esac
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -102,7 +126,25 @@ done
 case "$JOBS" in '' | *[!0-9]*) die "-j harus bilangan bulat >= 0" ;; esac
 
 # Dispatch
-if [ "$WATCH" -eq 1 ]; then
+if [ "$MODE" = "stop" ]; then
+  [ "$WATCH" -eq 0 ] || die "stop tidak bisa digabung dengan -w"
+  [ "$BG" -eq 0 ] || die "stop tidak bisa digabung dengan -b"
+  [ "$CLEAN" -eq 0 ] || die "stop tidak bisa digabung dengan --clean"
+  [ "${#SEL[@]}" -eq 0 ] || die "stop tidak menerima -t"
+  stop_run
+elif [ "$MODE" = "pause" ]; then
+  [ "$WATCH" -eq 0 ] || die "pause tidak bisa digabung dengan -w"
+  [ "$BG" -eq 0 ] || die "pause tidak bisa digabung dengan -b"
+  [ "$CLEAN" -eq 0 ] || die "pause tidak bisa digabung dengan --clean"
+  [ "${#SEL[@]}" -eq 0 ] || die "pause tidak menerima -t"
+  pause_run
+elif [ "$MODE" = "resume" ]; then
+  [ "$WATCH" -eq 0 ] || die "resume tidak bisa digabung dengan -w"
+  [ "$CLEAN" -eq 0 ] || die "resume tidak bisa digabung dengan --clean"
+  [ "${#SEL[@]}" -eq 0 ] || die "resume menolak -t — seleksi otomatis dari sisa plan"
+  rm -f "$STAGE/targets/${POS[0]}/log/pause.flag" 2> /dev/null
+  resume_run
+elif [ "$WATCH" -eq 1 ]; then
   watcher_init
   watcher_run
 else

@@ -189,6 +189,21 @@ Bukti: pengujian pada sandbox memperlihatkan bahwa loop yang memanggil path bers
 
 Alternatif yang ditolak: salinan binary per target (bins/satria-<target>). Alasannya: menduplikasi kebenaran binary, dan salinan per target tetap tidak menyelesaikan masalah pemanggilan lintas run bila path dipakai bersama.
 
+## 2.7 Pause, Stop & Resume
+
+Run yang panjang bisa dikendalikan lewat tiga kata kerja di `scripts/unit_dev.sh` (semuanya per target, dipanggil lewat `scripts/unit.sh`):
+
+- `start <binary> <target>` (alias: tanpa subcommand) — menjalankan run.
+- `pause <target>` — menandai `log/pause.flag`; runner berhenti **antara tes** (graceful: tes yang sedang berjalan dibiarkan selesai), menulis `RUN_PAUSED=1` ke `run.env`, keluar bersih (trap membersihkan `run.pid` + snapshot). Bukan kill — state (`plan.tsv`, `timing.tsv`, `run.env`) tetap utuh.
+- `resume <target> [-b] [-j N] [-o <log>]` — menjalankan **sisa** `plan.tsv` yang belum ada di `timing.tsv` dengan binary yang tercatat di `run.env` (`RUN_ORIGINAL`, fallback `RUN_BINARY`). Tanpa sisa → `semua tes sudah selesai`. Berlaku pasca-pause maupun pasca-stop: sisa dihitung dari `plan−timing`, bukan dari penanda pause. Flag `pause.flag` basi dibuang saat resume.
+- `stop <target>` — kill tree run aktif (`kill_children` + TERM, KILL bila perlu), lalu bersihkan `run.pid`, `bg.pid`, dan registri `$UNIT_STAGE/snap/<pid>.pid`. Timing & plan dibiarkan agar sisa tetap bisa di-resume.
+
+Kombinasi yang ditolak: `stop`/`pause` tidak boleh digabung `-b`/`-w`/`--clean`/`-t`; `resume` menolak `-w`/`--clean`/`-t` (seleksi otomatis dari sisa plan) — `-b`/`-j`/`-o` diterima.
+
+Watcher menampilkan run paused sebagai `# Paused : <selesai>/<N> selesai, sisa <n> — lanjutkan dengan: unit_dev.sh resume <target>` (sekali, tanpa `# Summary`) dan tetap menunggu — resume memulai cerita baru (`RUN_STARTED` berbeda). Run mati tanpa `RUN_PAUSED` tetap tidak mendapat summary (§9.5).
+
+Catatan kejujuran sisa: `resume` menghitung dari `plan.tsv` yang ditulis run terakhir (di discovery). Bila stop datang sebelum run baru sempat menulis plan, sisa dihitung dari plan run sebelumnya.
+
 # 3. Cold Start dan Warmstart
 
 Cold start bukan kondisi wajib untuk setiap unit test.
@@ -613,32 +628,28 @@ Laporan harus membedakan kegagalan test dan kegagalan precondition atau infrastr
 
 Tujuan akhirnya adalah menghasilkan pengujian yang fleksibel, reproducible, workspace-aware, dan mampu menemukan regresi nyata tanpa melakukan pekerjaan build yang tidak diperlukan.
 
-# 13. Status Implementasi (scripts/unit_dev.sh)
+# Daftar implementasi
 
-Implementasi mengikuti nomor bagian di atas. Runner: `scripts/unit_dev.sh` (dev,
-versi stabil disalin oleh `scripts/unit.sh`).
+Implementasi mengikuti nomor bagian di atas. Runner: `scripts/unit_dev.sh` (dev, versi stabil disalin oleh `scripts/unit.sh`).
 
-| Bagian | Fitur | Status | Catatan |
-|---|---|---|---|
-| 2.1–2.2 | Staging `targets/<nama>/` + `test.state` fingerprint | ✅ | common/, lib/, classes.conf disalin; tak disalin ulang bila sama |
-| 2.3 | `test.state` | ✅ | sinkronisasi staging per run |
-| 2.4 | Penamaan & resolusi target | ✅ | `<target>` = nama → `tests/<nama>` |
-| — | `unit.sh` = konsumen tipis `unit_dev.sh` | ✅ | unit.sh menyalin `unit_dev.sh` ke `.unit.$$` di `scripts/` lalu menjalankan salinan itu: edit `unit_dev.sh` tak lagi mengganggu run aktif (bash lazy-parse memegang snapshot), dan unit.sh tak perlu ditimpa lagi — insiden "ditimpa saat run rupaws, parsing run aktif rusak" tak terulang. Salinan dijalankan di foreground, jadi Ctrl-C (satu process group), stdin, dan kode keluar identik dengan menjalankan `unit_dev.sh` langsung; salinan itu sendiri yang menghapus dirinya (`drop_copy`) — bukan pembungkus — sehingga `-b`, yang me-re-exec `$0` di proses lain, tidak kehilangan skripnya. Konsekuensinya `scripts/unit_dev.sh -w` bisa dipakai mengembangkan watcher tanpa mengganggu run yang berjalan |
-| 2.5 | Lock & reaper per target; `-b` background pasca-preflight; `--clean` per target | ✅ | `log/run.pid`, reaper rekursif, `--clean` hanya `targets/<nama>/` |
-| 2.6 | Binary pinning `satria-<hash8>` | ✅ | `run.env`: `RUN_BINARY` (path pin) + `RUN_ORIGINAL` |
-| 3.2 | Snap ber-identitas (`SNAP_ID` dari hash biner+target+fixture) | ✅ | identitas cocok → tidak dibangun ulang |
-| 3.3 | Fase cold lalu snap; reset work per tes | ✅ | |
-| 4 | Test isolation (folder work, UNIT_TMP per tes) | ✅ | |
-| 5.1–5.2 | Fixture-aware helpers tanpa asumsi nama file | ✅ | `unit_project_source`, `unit_project_binary` dll. di `lib/layout.sh` |
-| 5.3 | PRECONDITION kategori sendiri | ✅ | `unit_precondition()` verdict + talli `PRE` (bukan FAIL), design §8 |
-| 5.4 | Helpers reusable antar fixture | ✅ | |
-| 6 | Workspace-aware configuration (parser Buildfile.ws via Satria) | ✅ | discovery runner = `-w -g compdb` (mekanisme satria, query-only) pada salinan throwaway fixture → `discovery/sources.tsv` (proyek/sumber/objek); `lib/layout.sh` makan TSV (skip `embedded.c`, prefer `src/`); tanpa runner → string kosong → PRECONDITION. `unit_project_binary`/`unit_archive_project` masih micro-read Buildfile.ws (interim, tunggu query targets native) |
-| 7 | Non-interactive (argumen/env penuh) | ✅ | `-b`, `-j`, `-o`, `-t`, `-w`, `--clean` — tanpa prompt (interactive configuration dihapus dari design — menambah beban kode runner tanpa nilai) |
-| 8 | Klasifikasi kegagalan 3 kategori | ✅ | FAIL / PRE / infra (exit 2) |
-| 9 | Watcher (`-w [target]`) | ✅ | §9: pemantau read-only atas `targets/<nama>/log/` (`run.pid`, `run.env`, `bg.pid`, `plan.tsv`, `timing.tsv`, log run) — tidak menjalankan tes, tidak memantau sumber repo; status mengalir: fase `# Prepare` + baris `* build: <persen>%|<ukuran>` yang berubah `√ <HH:MM:SS> <ukuran>` saat build selesai (§9.6, registri `$UNIT_STAGE/snap/<pid>.pid`), `# Execution test`, per tes `[i/N] <tes>` + `* PASS: p FAIL: f PRE: q TIME: <ms> ms` (selesai) atau `* process: <ms> ms [<persen>%] [<ukuran>]` (berjalan), `# Summary` sekali saat `RUN_ENDED` lalu watcher keluar sendiri (exit 0); multiwatch via registri `$UNIT_STAGE/watch/<pid>` (tanpa lock); tanpa argumen = target satu-satunya run aktif, beberapa/ nol run aktif → berhenti dan minta target disebut; tolak `-b`/`--clean`/`-t` |
-| 10 | Reporting: ringkasan + `timing.tsv` per tes | ✅ | pass/fail/pre, total, tunggu vs kerja via shim sleep; 5 tes terlama |
-| 11 | Contoh laporan + log per tes | ✅ | `log/unit.log`, `log/<tes>.log` |
-| — | `-t <tes>` seleksi run | ✅ | ekstra di luar design: jalankan subset, snap hanya bila ada tes [snap] terpilih |
+- [x] Staging `targets/<nama>/` + `test.state` fingerprint (§2.1–2.3): `common/`, `lib/`, `classes.conf` disalin; tak disalin ulang bila sama
+- [x] Penamaan & resolusi target (§2.4): `<target>` = nama → `tests/<nama>`
+- [x] `unit.sh` konsumen tipis: snapshot `.unit.<pid>.d` per proses + `exec` — edit `unit_dev.sh` tak mengganggu run aktif; salinan menghapus dirinya (`drop_copy`), sehingga `-b` tidak kehilangan skripnya
+- [x] Lock & reaper per target; `-b` background pasca-preflight; `--clean` per target (§2.5)
+- [x] Binary pinning `satria-<hash8>` (§2.6): `run.env` memuat `RUN_BINARY` (path pin) + `RUN_ORIGINAL`
+- [x] Pause / Stop / Resume (§2.7): `pause` = berhenti antara tes (`RUN_PAUSED=1`), `stop` = kill tree + bersih-bersih, `resume` = sisa `plan−timing` dengan binary tercatat; watcher menampilkan `# Paused`
+- [x] Snap ber-identitas (§3.2): `SNAP_ID` dari hash biner+target+fixture; identitas cocok → tidak dibangun ulang
+- [x] Fase cold lalu snap; reset work per tes (§3.3)
+- [x] Test isolation: folder work per tes + `UNIT_TMP` (§4)
+- [x] Fixture-aware helpers tanpa asumsi nama file (§5.1–5.2, §5.4): `unit_project_source`, `unit_project_binary` dll. di `lib/layout.sh`
+- [x] PRECONDITION kategori sendiri (§5.3): `unit_precondition()` verdict + talli `PRE` (bukan FAIL)
+- [x] Workspace-aware configuration (§6): discovery runner = `-w -g compdb` (query-only) pada salinan throwaway fixture → `discovery/sources.tsv`; `lib/layout.sh` makan TSV; tanpa runner → PRECONDITION; `unit_project_binary`/`unit_archive_project` masih micro-read Buildfile.ws (interim, tunggu query targets native)
+- [x] Non-interactive (§7): `-b`, `-j`, `-o`, `-t`, `-w`, `--clean` — tanpa prompt (interactive configuration dihapus dari design)
+- [x] Klasifikasi kegagalan 3 kategori (§8): FAIL / PRE / infra (exit 2)
+- [x] Watcher `-w` (§9): read-only atas `log/` (`run.pid`, `run.env`, `bg.pid`, `plan.tsv`, `timing.tsv`, log run); registri multiwatch `watch/<pid>` (tanpa lock); fase `# Prepare` + `* build:` → `√ <HH:MM:SS> <ukuran>` (registri `snap/<pid>.pid`); `# Execution test`; per tes `[i/N]` + `* PASS/FAIL/PRE TIME` atau `* process` ms+persen+ukuran; `# Summary` + exit 0; `# Paused`
+- [x] Reporting (§10–11): ringkasan + `timing.tsv` per tes (tunggu vs kerja via shim sleep; 5 tes terlama), log per tes `log/unit.log` + `log/<tes>.log`
+- [x] Seleksi `-t <tes>` (ekstra): subset, snap hanya bila ada tes [snap] terpilih
+- [ ] CI dispatch `suite=tests/complexws` (masih didiskusikan)
 
 Batasan `-j` tiga lapis (out of band):
 1. runner `-j N` → `export UNIT_JOBS="$JOBS"`;

@@ -221,6 +221,7 @@ load_run() {
     CUR_START=0
     STREAM_K=""
     LIVE=0
+    PAUSED_SHOWN=0
   fi
 
   NAMES=()
@@ -238,6 +239,7 @@ load_run() {
   fi
 
   ENDED="$(sed -n 's/^RUN_ENDED=//p' "$env" | head -1)"
+  RUNPAUSED="$(sed -n 's/^RUN_PAUSED=//p' "$env" | head -1)"
   CI=0
   CUR=""
 
@@ -497,6 +499,18 @@ watcher_run() {
           printf '%s' "$done_block"
           [ -n "${LOG:-}" ] && printf '%s' "$done_block" >> "$LOG"
         }
+      fi
+
+      # Paused (unit_dev.sh pause <target>): run berhenti terkendali tanpa
+      # RUN_ENDED — tampilkan sekali, watcher tetap menunggu resume (run baru
+      # dengan RUN_STARTED berbeda memulai cerita segar).
+      if [ -z "$ENDED" ] && [ "$ACTIVE" -eq 0 ] && [ "${RUNPAUSED:-}" = "1" ] \
+        && [ "${PAUSED_SHOWN:-}" != "1" ]; then
+        PAUSED_SHOWN=1
+        nsisa=$((N - DONE_N))
+        _ptx="# Paused : $DONE_N/$N selesai, sisa $nsisa — lanjutkan dengan: unit_dev.sh resume $WTARGET"
+        printf '\n%s\n' "$_ptx"
+        [ -n "${LOG:-}" ] && printf '%s\n' "$_ptx" >> "$LOG"
       fi
 
       # Summary

@@ -348,6 +348,7 @@ runner_exec() {
   FAILN=0
   PREN=0
   TOT=0
+  PAUSED=0
   RESULTS=()
 
   run_phase() {
@@ -355,6 +356,13 @@ runner_exec() {
     shift
     local name
     for name in "$@"; do
+      # Pause antar tes (graceful): flag ditulis `unit_dev.sh pause <target>`;
+      # tes yang sedang berjalan dibiarkan selesai, berikutnya tidak dimulai.
+      if [ -f "$LOGDIR/pause.flag" ]; then
+        rm -f "$LOGDIR/pause.flag"
+        PAUSED=1
+        break
+      fi
       TOT=$((TOT + 1))
       _rt="$(date +%s%3N 2> /dev/null)"
       case "$_rt" in *N* | '') _rt=$(($(date +%s) * 1000)) ;; esac
@@ -400,7 +408,18 @@ runner_exec() {
   }
 
   run_phase cold "${COLD[@]}"
-  [ "${#SNAP[@]}" -gt 0 ] && run_phase snap "${SNAP[@]}"
+  [ "$PAUSED" -eq 0 ] && [ "${#SNAP[@]}" -gt 0 ] && run_phase snap "${SNAP[@]}"
+
+  # Pause: tandai run.env, cetak status sisa, keluar bersih (trap menangani
+  # run.pid + snapshot). Tanpa RUN_ENDED — run belum selesai, watcher tahu.
+  if [ "$PAUSED" -eq 1 ]; then
+    printf 'RUN_PAUSED=1\n' >> "$LOGDIR/run.env"
+    nsisa="$(remaining_count)"
+    echo "=========================================="
+    echo "Paused : $TOT tes selesai, sisa $nsisa — lanjutkan dengan: unit_dev.sh resume $TNAME"
+    echo "Timing : $TIMING"
+    exit 0
+  fi
 
   RUN_ELAPSED=$(($(now_ms) - RUN_T0))
   printf 'RUN_ENDED=%s\nRUN_ELAPSED_MS=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$RUN_ELAPSED" >> "$LOGDIR/run.env"
@@ -428,4 +447,120 @@ runner_run() {
   runner_fixture
   runner_discovery
   runner_exec
+}
+
+# Validasi nama target untuk stop/resume (satu kata, tanpa jalur).
+control_target() {
+  [ "${#POS[@]}" -ge 1 ] || {
+    usage >&2
+    die "$1 perlu <target>"
+  }
+  [ "${#POS[@]}" -le 1 ] || {
+    usage >&2
+    die "$1 hanya menerima <target>"
+  }
+  TNAME="${POS[0]}"
+  case "$TNAME" in '' | */* | .*) die "nama target tidak valid: $TNAME" ;; esac
+  T="$STAGE/targets/$TNAME"
+  [ -d "$T" ] || die "target belum pernah dijalankan: $STAGE/targets/$TNAME"
+  LOGDIR="$T/log"
+  [ -d "$LOGDIR" ] || die "tidak ada log run di $LOGDIR"
+}
+
+# Jumlah tes sisa di target (plan.tsv yang belum ada di timing.tsv).
+# plan.tsv: nomor, nama, fase — TANPA header, nama di kolom 2;
+# timing.tsv: nama di kolom 1 (dengan header; snap-build tak dihitung).
+remaining_count() {
+  awk -F'\t' '
+    NR == FNR {
+      if (FNR > 1 && $1 != "snap-build") done[$1] = 1
+      next
+    }
+    !($2 in done) { n++ }
+    END { print n + 0 }
+  ' "$LOGDIR/timing.tsv" "$LOGDIR/plan.tsv" 2> /dev/null
+}
+
+# Daftar nama tes sisa (urut plan) — satu per baris.
+remaining_names() {
+  awk -F'\t' '
+    NR == FNR {
+      if (FNR > 1 && $1 != "snap-build") done[$1] = 1
+      next
+    }
+    !($2 in done) { print $2 }
+  ' "$LOGDIR/timing.tsv" "$LOGDIR/plan.tsv" 2> /dev/null
+}
+
+# unit_dev.sh pause <target> — tandai run aktif agar berhenti setelah tes
+# yang sedang berjalan selesai (graceful, antara tes). Runner menuliskan
+# RUN_PAUSED=1 ke run.env; `resume <target>` melanjutkan sisa plan−timing.
+pause_run() {
+  control_target "pause"
+  local rpid
+  rpid="$(cat "$LOGDIR/run.pid" 2> /dev/null)"
+  if [ -z "$rpid" ] || ! kill -0 "$rpid" 2> /dev/null; then
+    die "tidak ada run aktif di target $TNAME — pause hanya untuk run yang sedang berjalan"
+  fi
+  : > "$LOGDIR/pause.flag"
+  say "> Pause : ditandai (pid $rpid) — berhenti setelah tes berjalan selesai"
+  say "> Pause : lanjutkan dengan: unit_dev.sh resume $TNAME"
+}
+
+# unit_dev.sh stop <target> — hentikan run aktif (kill tree), bersihkan
+# jejaknya (run.pid, bg.pid, registri snap); timing & plan dibiarkan agar
+# `resume <target>` bisa melanjutkan sisa tes.
+stop_run() {
+  control_target "stop"
+  local rpid nsisa
+  rpid="$(cat "$LOGDIR/run.pid" 2> /dev/null)"
+  if [ -z "$rpid" ] || ! kill -0 "$rpid" 2> /dev/null; then
+    rpid="$(cat "$LOGDIR/bg.pid" 2> /dev/null)"
+    if [ -z "$rpid" ] || ! kill -0 "$rpid" 2> /dev/null; then
+      die "tidak ada run aktif di target $TNAME"
+    fi
+  fi
+  nsisa="$(remaining_count)"
+  kill_children "$rpid"
+  kill -TERM "$rpid" 2> /dev/null
+  sleep 0.2
+  kill -0 "$rpid" 2> /dev/null && kill -KILL "$rpid" 2> /dev/null
+  rm -f "$LOGDIR/run.pid" "$LOGDIR/bg.pid" "$STAGE/snap/$rpid.pid"
+  say "> Stop : run $TNAME (pid $rpid) dihentikan"
+  if [ "$nsisa" -gt 0 ]; then
+    say "> Stop : sisa $nsisa tes — lanjutkan dengan: unit_dev.sh resume $TNAME"
+  fi
+}
+
+# unit_dev.sh resume <target> — lanjutkan run yang terputus: sisa plan
+# (plan.tsv minus timing.tsv) dijalankan dengan binary yang tercatat di
+# run.env. Snap & staging dianggap milik run itu — identitas menentukan.
+resume_run() {
+  control_target "resume"
+  local rpid binin
+  rpid="$(cat "$LOGDIR/run.pid" 2> /dev/null)"
+  if [ -n "$rpid" ] && kill -0 "$rpid" 2> /dev/null; then
+    die "run masih aktif di target $TNAME (pid $rpid) — hentikan dulu: unit_dev.sh stop $TNAME"
+  fi
+  [ -f "$LOGDIR/plan.tsv" ] || die "belum ada plan untuk di-resume: jalankan run biasa dulu"
+  [ -f "$LOGDIR/run.env" ] || die "belum ada run.env untuk di-resume: jalankan run biasa dulu"
+
+  SEL=()
+  while IFS= read -r _n; do
+    [ -n "$_n" ] && SEL+=("$_n")
+  done < <(remaining_names)
+  if [ "${#SEL[@]}" -eq 0 ]; then
+    say "> Resume : semua tes sudah selesai di target $TNAME — tidak ada yang dijalankan"
+    return 0
+  fi
+
+  # Binary dari run: path original dulu, pinned sebagai fallback.
+  binin="$(sed -n 's/^RUN_ORIGINAL=//p' "$LOGDIR/run.env" | head -1)"
+  [ -n "$binin" ] && [ -x "$binin" ] ||
+    binin="$(sed -n 's/^RUN_BINARY=//p' "$LOGDIR/run.env" | head -1)"
+  [ -n "$binin" ] && [ -x "$binin" ] ||
+    die "binary run sebelumnya tidak ditemukan (${binin:-?}) — jalankan run biasa"
+  POS=("$binin" "$TNAME")
+  say "> Resume : sisa ${#SEL[@]} tes di $TNAME (${SEL[*]})"
+  runner_run
 }
