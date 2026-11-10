@@ -28,7 +28,14 @@ check "setelah build dingin: 1 linked, 0 up-to-date" "$(grep -c 'Binaries   : 1 
 printf '/* komentar */\n' >> src/main.c
 "$SAT" -j${UNIT_JOBS:-2} > "$W/touch.txt" 2>&1
 check "build komentar: link up-to-date" "$(grep -c '(up-to-date)' "$W/touch.txt" || true)" "1"
+[ "$(grep -c '(up-to-date)' "$W/touch.txt" || true)" = "1" ] || {
+  echo "--- isi touch.txt (diagnostik) ---"; cat "$W/touch.txt"
+  echo "--- isi cold.txt (diagnostik) ---"; cat "$W/cold.txt"
+}
 "$SAT" -j${UNIT_JOBS:-2} > "$W/noop2.txt" 2>&1
 check "run no-op setelah up-to-date: 0 linked, 1 up-to-date" "$(grep -c 'Binaries   : 0 linked, 1 up-to-date' "$W/noop2.txt" || true)" "1"
+[ "$(grep -c 'Binaries   : 0 linked, 1 up-to-date' "$W/noop2.txt" || true)" = "1" ] || {
+  echo "--- isi noop2.txt (diagnostik) ---"; cat "$W/noop2.txt"
+}
 echo "lulus: $pass  gagal: $fail"
 [ "$fail" -eq 0 ]
