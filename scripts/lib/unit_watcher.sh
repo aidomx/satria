@@ -94,7 +94,10 @@ watcher_init() {
     [ -f "$f" ] || continue
     _bpid="$(basename "$f" .pid)"
     case "$_bpid" in
-      '' | *[!0-9]*) rm -f "$f"; continue ;;
+      '' | *[!0-9]*)
+        rm -f "$f"
+        continue
+        ;;
     esac
     [ "$_bpid" = "$$" ] && continue
     kill -0 "$_bpid" 2> /dev/null || rm -f "$f"
@@ -117,14 +120,14 @@ LIVE_100=""
 LIVE_MS=0 # milidetik terakhir yang sudah ditampilkan pada baris process
 
 # State fase prepare (build snap, design §9.1): sebelum run.env run ini muncul.
-PREP_PID=""   # pid runner yang sedang build
-PREP_T0=0     # epoch ms awal prepare (mtime run.pid)
-PREP_MS=0     # clamp: ms yang pernah ditampilkan
-PREP_PREV=0   # denominasi persen (byte build sebelumnya)
-PREP_COLD=""  # "cold" bila registri build menyatakan cold
-PREP_SHOWN=0  # baris prepare pernah ditampilkan
-PREP_DONE=0   # 0 belum mulai, 1 berjalan, 2 selesai/aborted
-EXEC_SHOWN=0  # "# Execution test" sudah tercetak
+PREP_PID=""  # pid runner yang sedang build
+PREP_T0=0    # epoch ms awal prepare (mtime run.pid)
+PREP_MS=0    # clamp: ms yang pernah ditampilkan
+PREP_PREV=0  # denominasi persen (byte build sebelumnya)
+PREP_COLD="" # "cold" bila registri build menyatakan cold
+PREP_SHOWN=0 # baris prepare pernah ditampilkan
+PREP_DONE=0  # 0 belum mulai, 1 berjalan, 2 selesai/aborted
+EXEC_SHOWN=0 # "# Execution test" sudah tercetak
 
 # Render entry tes selesai
 entry() { # entry <idx> <nama> <pass> <fail> <pre> <ms|->
@@ -284,8 +287,8 @@ watcher_run() {
       if [ "$PREP_SHOWN" -eq 1 ] && [ "$PREP_DONE" -ne 2 ]; then
         PREP_DONE=2
         [ "$TTY" -eq 1 ] && printf '\r\033[2K'
-        printf '# prepare : terhenti (run berhenti sebelum run.env)\n'
-        [ -n "${LOG:-}" ] && printf '# prepare : terhenti (run berhenti sebelum run.env)\n' >> "$LOG"
+        printf '# Prepare : terhenti (run berhenti sebelum run.env)\n'
+        [ -n "${LOG:-}" ] && printf '# Prepare : terhenti (run berhenti sebelum run.env)\n' >> "$LOG"
         watch_cleanup
         exit 1
       fi
@@ -312,7 +315,10 @@ watcher_run() {
         cold) PREP_COLD="cold" ;;
         *) PREP_COLD="" ;;
       esac
-      [ "$tn" = "$WTARGET" ] || { PREP_COLD=""; PREP_PREV=0; }
+      [ "$tn" = "$WTARGET" ] || {
+        PREP_COLD=""
+        PREP_PREV=0
+      }
     fi
     # Awal prepare: mtime run.pid sebagai epoch ms
     if [ "$PREP_T0" -eq 0 ]; then
@@ -344,7 +350,7 @@ watcher_run() {
       [ "$pct" -gt 99 ] && pct=99
       pctx=" ${pct}%"
     fi
-    PREP_TXT="# prepare : ${tms} ms${pctx}$(size_of "$STAGE/targets/$WTARGET/snap")"
+    PREP_TXT="# Prepare : ${tms} ms${pctx}$(size_of "$STAGE/targets/$WTARGET/snap")"
   }
 
   # Print "# Execution test" sekali sebelum entri pertama — setelah baris
@@ -369,8 +375,10 @@ watcher_run() {
           pctx=" ${pct}%${pctx}"
         fi
       fi
-      printf '\r\033[2K# prepare : %s ms%s\n' "$tms" "$pctx"
+      echo ""
+      printf '\r\033[2K# Prepare : %s ms%s\n' "$tms" "$pctx"
     fi
+    echo ""
     printf '# Execution test\n'
     [ -n "${LOG:-}" ] && printf '# Execution test\n' >> "$LOG"
     EXEC_SHOWN=1
@@ -400,6 +408,7 @@ watcher_run() {
 
   # Loop utama
   WAIT_UNKNOWN=0
+  PREP_DRAWN=0 # blank-gap antar header sudah dicetak untuk fase prepare aktif
   while :; do
     # Anti-stale (design §9.1): run.pid tidak ada dan bg.pid tidak lebih baru
     # dari run.env → ditolak terbaca. Jangan memaksakan run.env milik run
@@ -507,6 +516,7 @@ watcher_run() {
 
       if [ "$SUM_PRINTED" -eq 1 ] && [ "${SUM_SHOWN:-}" != 1 ]; then
         SUM_SHOWN=1
+        echo ""
         for line in "${SUM_LINES[@]}"; do
           printf '%s\n' "$line"
           [ -n "${LOG:-}" ] && printf '%s\n' "$line" >> "$LOG"
@@ -521,6 +531,10 @@ watcher_run() {
       # Bukan cerita run (run.env belum muncul): cek fase prepare — build
       # snap berjalan (registri $STAGE/snap/<pid>.pid) atau tunggu ringkas.
       if prep_check && [ "$TTY" -eq 1 ]; then
+        if [ "$PREP_DRAWN" -eq 0 ]; then
+          printf '\n' # gap antar header: header → # Prepare (sekali render pertama)
+          PREP_DRAWN=1
+        fi
         prep_text
         printf '\r\033[2K%s' "$PREP_TXT"
       fi
