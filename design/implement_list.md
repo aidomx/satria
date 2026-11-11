@@ -61,15 +61,16 @@ Berikut daftar design yang telah diimplementasikan :
   Bukti: `src/deps/`; tes `cdeps_flag`, `cdeps_group`, `cdeps_key_reject`
   (*klasifikasi [cold] sementara — tunggu tinjauan, lihat `classes.conf`*).
 - [packaging CI](../.github/workflows/tests-manual.yml) — workflow manual
-  Windows/MSVC: bootstrap→self-host→unit suite (24 tes)→smoke pack.optimize.
+  Windows/MSVC: bootstrap→self-host→unit suite (25 tes)→smoke pack.optimize.
 
 ## 🔶 Implement sebagian
 
 - [unit_test.md](unit_test.md) — runner `scripts/unit_dev.sh` (stabil `scripts/unit.sh`
   = konsumen tipis yang menyalin `unit_dev.sh` ke berkas sementara): scope v1
-  lengkap per bagian 2–6, 7, 8, 10-11 + `-t` seleksi. Interactive configuration
-  (mantan §7) dihapus dari design — hanya menambah beban kode runner. Sisa:
-  §9 watcher `-w`. Tabel status lengkap: unit_test.md §13.
+  lengkap per bagian 2–6, 7, 8, 10-11 + `-t` seleksi + §9 watcher `-w`
+  (pemantau read-only atas staging, bukan pemicu run). Interactive configuration
+  (mantan §7) dihapus dari design — hanya menambah beban kode runner. Tabel
+  status lengkap: unit_test.md §13.
 - [bench_ws_output.md](bench_ws_output.md) — `bench/run.sh`+`jobs.sh`+`scale-build.sh`
   ada; format keluaran ws belum sepenuhnya mengikat design.
 
@@ -81,7 +82,9 @@ Berikut daftar design yang telah diimplementasikan :
 
 ## Catatan status pengujian tim
 
-- miniws (runner stabil, 24 tes): **PASS=255 FAIL=0 PRE=0**.
+- complexws (runner stabil, 25 tes): **PASS=265 FAIL=0 PRE=0**, 244 s, `-j 2`.
+- miniws (runner stabil, 24 tes): PASS=255 FAIL=0 PRE=0 (rekaman sebelum
+  `watcher_staging` masuk).
 - rupaws: `background.sh` 39/39 pasca fix **fixture staged bersih** (`$FIX` di
   runner — akar: `tests/rupaws/.satria/startup.state` menyebabkan coldStart=false);
   suite penuh belum dijalankan lagi (berat — vendor ke CI/opsi `-t`).
