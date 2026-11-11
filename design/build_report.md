@@ -100,7 +100,7 @@ Desain ini dicocokkan dengan source `v0.2.4` sebelum implementasi penuh. Sebagia
 
 ### Dampak ke tes
 
-Sebelas tes bergantung pada string keluaran yang terdampak: `background_miniws`, `cache_noop_miniws`, `crud_touch_delete`, `faststate_external_header`, `legacy_sweep`, `opts_sources_sync`, `p_meta_noop`, `report_artifact`, `report_binaries_uptodate`, `router_noop_miniws`, `workspace_selective_target`. Setelah perubahan fallback no-op (single dan workspace), `tests/unit` 18/18 dan `scripts/unit.sh` 237 PASS. Asersi `report_artifact.sh` memakai blob yang dibuat build nyata, sehingga tidak terdampak fallback.
+Sebelas tes bergantung pada string keluaran yang terdampak: `common/background`, `common/cache_noop`, `crud_touch_delete`, `faststate_external_header`, `legacy_sweep`, `opts_sources_sync`, `p_meta_noop`, `report_artifact`, `report_binaries_uptodate`, `common/router_noop`, `workspace_selective_target`. Setelah perubahan fallback no-op (single dan workspace), `tests/unit` 18/18 dan `scripts/unit.sh` 237 PASS. Asersi `report_artifact.sh` memakai blob yang dibuat build nyata, sehingga tidak terdampak fallback.
 
 ### Item terbuka sebelum implementasi penuh
 
