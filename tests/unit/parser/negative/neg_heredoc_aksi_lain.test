@@ -1,0 +1,6 @@
+# expect: heredoc hanya sah pada file.write
+@suite project
+@purpose "heredoc pada aksi lain"
+file.append a.txt <<T
+isi
+T

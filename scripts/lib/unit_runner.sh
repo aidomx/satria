@@ -93,6 +93,7 @@ runner_staging() {
     say "> Staging : sinkronkan common/, lib/, classes.conf"
     rm -rf "$STAGE/common" "${STAGE:-/tmp/satria-unit}/lib"
     cp -a "$TESTS_DIR/common" "$TESTS_DIR/lib" "$STAGE/" || die "gagal menyalin tests/unit"
+    cp "$ROOT/scripts/lib/parser.sh" "$STAGE/lib/parser.sh" || die "gagal menyalin parser.sh"
     cp "$TESTS_DIR/classes.conf" "$STAGE/classes.conf" || die "gagal menyalin classes.conf"
     {
       echo "TEST_STATE_VERSION=1"
@@ -149,12 +150,29 @@ runner_validate() {
       \[*) die "classes.conf: bagian tidak dikenal: $line" ;;
     esac
     [ -n "$SEC" ] || die "classes.conf: entri '$line' di luar bagian"
-    [ -f "$STAGE/common/$line.sh" ] || die "classes.conf: '$line' tidak punya berkas common/$line.sh"
+    [ -f "$STAGE/common/$line.sh" ] || [ -f "$STAGE/common/$line.test" ] || [ -f "$STAGE/common/$line.t" ] \
+      || die "classes.conf: '$line' tidak punya berkas common/$line.sh|test|t"
     if [ "$SEC" = cold ]; then COLD+=("$line"); else SNAP+=("$line"); fi
   done < "$STAGE/classes.conf"
 
   ALL_TESTS=()
-  for f in "$STAGE"/common/*.sh; do ALL_TESTS+=("$(basename "$f" .sh)"); done
+  # Discovery: *.test/*.t (DSL) + *.sh; nama sama → .test/.t menang atas .sh.
+  declare -gA DSLFMT=() # global: dibaca run_phase saat eksekusi
+  local bf b
+  for bf in "$STAGE"/common/*.test "$STAGE"/common/*.t; do
+    [ -e "$bf" ] || continue
+    b=$(basename "$bf")
+    b=${b%.test}
+    b=${b%.t}
+    DSLFMT[$b]=1
+    ALL_TESTS+=("$b")
+  done
+  for bf in "$STAGE"/common/*.sh; do
+    [ -e "$bf" ] || continue
+    b=$(basename "$bf" .sh)
+    [ -n "${DSLFMT[$b]:-}" ] && continue
+    ALL_TESTS+=("$b")
+  done
   for t in "${ALL_TESTS[@]}"; do
     n=0
     for c in "${COLD[@]}" "${SNAP[@]}"; do [ "$c" = "$t" ] && n=$((n + 1)); done
@@ -162,6 +180,7 @@ runner_validate() {
   done
 
   for t in "${SNAP[@]}"; do
+    [ -f "$STAGE/common/$t.sh" ] || continue # gate .test ditegakkan dsl.sh (work.clean)
     if grep -qE 'rm -rf[^|;&]*(\.satria|/build|/bin|/lib)([^A-Za-z_]|$)' "$STAGE/common/$t.sh"; then
       die "tes [snap] '$t' menghapus state build. Pindahkan ke [cold] atau tulis ulang."
     fi
@@ -366,7 +385,14 @@ runner_exec() {
       TOT=$((TOT + 1))
       _rt="$(date +%s%3N 2> /dev/null)"
       case "$_rt" in *N* | '') _rt=$(($(date +%s) * 1000)) ;; esac
-      printf '> Running %s.sh [%s]... @%s\n' "$name" "$mode" "$_rt"
+      local dext=''
+      if [ -n "${DSLFMT[$name]:-}" ]; then
+        dext=.test
+        [ -f "$STAGE/common/$name.test" ] || dext=.t
+        printf '> Running %s%s [%s]... @%s\n' "$name" "$dext" "$mode" "$_rt"
+      else
+        printf '> Running %s.sh [%s]... @%s\n' "$name" "$mode" "$_rt"
+      fi
 
       local t0 t1 ms
       t0="$(now_ms)"
@@ -376,9 +402,17 @@ runner_exec() {
       mkdir -p "$TMPD"
       : > "$SLEEP_LOG"
 
-      (cd "$W" && UNIT_TEST_NAME="$name" UNIT_TMP="$TMPD" UNIT_BASE="$T" \
-        sh "$STAGE/common/$name.sh" "$WRAP" "$FIX") \
-        2>&1 | tee "$LOGDIR/$name.log"
+      if [ -n "$dext" ]; then
+        (cd "$W" && UNIT_TEST_NAME="$name" UNIT_TMP="$TMPD" UNIT_BASE="$T" \
+          UNIT_REPO="$ROOT" UNIT_CLASS="$mode" UNIT_FIXTURE="$FIX" \
+          SATRIA="$PIN" \
+          bash "$STAGE/lib/dsl.sh" "$STAGE/common/$name$dext") \
+          2>&1 | tee "$LOGDIR/$name.log"
+      else
+        (cd "$W" && UNIT_TEST_NAME="$name" UNIT_TMP="$TMPD" UNIT_BASE="$T" \
+          sh "$STAGE/common/$name.sh" "$WRAP" "$FIX") \
+          2>&1 | tee "$LOGDIR/$name.log"
+      fi
 
       t1="$(now_ms)"
       ms=$((t1 - t0))

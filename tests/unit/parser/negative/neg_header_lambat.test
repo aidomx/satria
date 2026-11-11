@@ -1,0 +1,5 @@
+# expect: direktif header setelah badan
+@suite project
+@purpose "header setelah badan"
+run.build
+@fixture miniws

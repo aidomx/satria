@@ -1,0 +1,4 @@
+# expect: aksi tidak dikenal: file.rewind
+@suite project
+@purpose "aksi asing"
+file.rewind Buildfile

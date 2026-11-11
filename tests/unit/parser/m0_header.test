@@ -1,0 +1,46 @@
+# Konforman M0: header lengkap + seluruh objek/aksi kosakata.
+@suite project,workspace
+@fixture miniws
+@purpose "Header lengkap dan sapuan objek"
+@requires cold
+@keep
+
+work.new khusus
+fixture.copy
+work.clean all
+env.set NO_COLOR=1
+env.unset NO_COLOR
+time.tick
+stage.set run.pid 1
+stage.log "startup"
+
+file.write Buildfile <<T
+use project
+T
+file.append Buildfile.ws "flags = MMD, MP"
+file.touch src/a.c
+file.delete src/b.c
+file.copy cmd.txt cmd.crlf crlf
+file.exists Buildfile
+file.absent .satria/build.log
+file.same a.txt b.txt
+
+run.build as cold
+run.cmd -w -g compdb as base
+run.exec bin/bade modules
+run.bg -w as bg
+run.stop bg
+run.wait bg 10
+run.tool scripts/gen.sh a b
+
+text.count out.txt "op"
+text.aggregate out.txt
+
+out.contains "Nothing to build"
+out.not-contains "Cache invalid"
+out.matches "Binaries *:"
+out.equals base grouped
+rc.ok
+rc.fail
+mtime.changed m0
+mtime.unchanged m0

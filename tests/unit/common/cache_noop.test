@@ -1,0 +1,104 @@
+# Port M0 dari cache_noop.sh: siklus cache no-op workspace (miniws).
+# Selektor project(core) membaca sources.tsv discovery; path ekstra
+# core/src/cache_noop_extra.c mengikuti layout miniws.
+# Asersi penulisan-ulang cache (alamat nol, self-heal SATRIASRC1) menunggu M1.
+@suite workspace
+@fixture miniws
+@purpose "Cache no-op: valid, invalidasi, cache rusak, format SATRIASRC2"
+@requires snap
+
+work.new
+fixture.copy
+file.append Buildfile.ws flags = MMD, MP
+time.tick
+
+env.set SATRIA_CACHE_NOOP=1
+run.build as cold
+@response cold
+  rc.ok
+  file.exists .satria/caches/fingerprint.cache
+  file.exists .satria/sources.cache
+@end
+
+run.build as noop
+@response noop
+  rc.ok
+  out.contains "Nothing to build"
+  out.matches "Cache valid *:"
+@end
+
+env.unset SATRIA_CACHE_NOOP
+run.build as defon
+@response defon
+  out.matches "Cache valid *:"
+@end
+
+env.set SATRIA_CACHE_NOOP=0
+run.build as off
+@response off
+  out.not-contains "Cache valid"
+@end
+env.set SATRIA_CACHE_NOOP=1
+
+time.tick
+file.touch project(core).source
+run.build as touch
+@response touch
+  out.contains "Nothing to build"
+  out.matches "Cache valid *:"
+@end
+
+time.tick
+file.append project(core).source /* edit */
+run.build as edit
+@response edit
+  out.not-contains "Cache valid"
+@end
+run.build as rebuild
+@response rebuild
+  out.matches "Cache valid *:"
+@end
+
+file.delete project(core).binary
+run.build as miss
+@response miss
+  out.not-contains "Cache valid"
+  file.exists project(core).binary
+@end
+run.build as recover
+@response recover
+  out.matches "Cache valid *:"
+@end
+
+time.tick
+file.append Buildfile.ws "# x"
+run.build as wsfresh
+@response wsfresh
+  out.not-contains "Cache valid"
+@end
+run.build as wssave
+@response wssave
+  out.matches "Cache valid *:"
+@end
+
+time.tick
+file.append core/src/cache_noop_extra.c /* baru */
+run.build as newsrc
+@response newsrc
+  out.not-contains "Cache valid"
+  file.exists core/src/cache_noop_extra.c
+@end
+
+file.append .satria/sources.cache P garbage
+run.build as corrupt
+@response corrupt
+  out.not-contains "Cache valid"
+@end
+run.build as healthy
+@response healthy
+  rc.ok
+@end
+
+file.contains .satria/sources.cache ^SATRIASRC2
+file.contains .satria/sources.cache ^[0-9a-f]{16} S [0-9]+ [0-9]+ core/
+file.contains .satria/sources.cache ^[0-9a-f]{16} D 0 -?[0-9]+

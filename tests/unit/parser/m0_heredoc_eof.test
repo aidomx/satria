@@ -1,0 +1,8 @@
+# Konforman M0: heredoc tanpa penutup sah — isi berakhir di EOF
+# (keputusan desain: penutup opsional).
+@suite project
+@purpose "Heredoc tanpa penutup berakhir di EOF"
+
+file.write Buildfile <<T
+use project
+sources = src

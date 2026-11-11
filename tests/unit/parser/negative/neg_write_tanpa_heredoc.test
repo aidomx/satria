@@ -1,0 +1,4 @@
+# expect: file.write memerlukan heredoc
+@suite project
+@purpose "file.write tanpa heredoc"
+file.write Buildfile

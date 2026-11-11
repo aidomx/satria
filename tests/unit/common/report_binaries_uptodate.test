@@ -1,0 +1,27 @@
+@suite project
+@purpose "Ringkasan binaries: up-to-date tercatat, bukan 0 linked, 0 up-to-date"
+
+file.write Buildfile <<T
+use project
+T
+
+file.write src/main.c <<T
+int main(void){return 0;}
+T
+
+run.build as cold
+run.build as noop1
+@response noop1
+  out.contains "Binaries   : 1 linked, 0 up-to-date"
+@end
+
+file.append src/main.c /* komentar */
+run.build as touch
+@response touch
+  out.contains "(up-to-date)"
+@end
+
+run.build as noop2
+@response noop2
+  out.contains "Binaries   : 0 linked, 1 up-to-date"
+@end

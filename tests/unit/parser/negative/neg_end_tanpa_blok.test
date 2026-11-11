@@ -1,0 +1,5 @@
+# expect: @end tanpa blok terbuka
+@suite project
+@purpose "end tanpa blok"
+run.build
+@end

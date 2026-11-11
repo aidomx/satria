@@ -1,13 +1,10 @@
 # todos — 4 November 2026: audit ruang optimasi performa
 
-> Audit ini MENGGABUNGKAN temuan baru hari ini (4/11/2026) dengan sisa ruang yang
-> sudah terpetakan di tiga audit sebelumnya (`problems/15_10_2026_audit_v94_optimasi.md`,
-> `problems/27_10_2026_cold_build_overhead.md`, `problems/30_10_2026_incremental_overhead.md`).
-> Tujuan: daftar tunggal "apa yang masih bisa ditingkatkan", terukur, dan tidak duplikatif.
->
-> Konteks mesin: aarch64 + proot, job efektif **j1–j2**, `stat()` 257–461 µs,
-> fork+exec ~9 ms (audit 27/10). Semua angka lokal EXTRAPOLASI harus per operasi
-> (metodologi audit 30/10), bukan ms mentah.
+Audit ini MENGGABUNGKAN temuan baru hari ini (4/11/2026) dengan sisa ruang yang sudah terpetakan di tiga audit sebelumnya (`problems/15_10_2026_audit_v94_optimasi.md`, `problems/27_10_2026_cold_build_overhead.md`, `problems/30_10_2026_incremental_overhead.md`).
+
+Tujuan: daftar tunggal "apa yang masih bisa ditingkatkan", terukur, dan tidak duplikatif.
+
+Konteks mesin: aarch64 + proot, job efektif **j1–j2**, `stat()` 257–461 µs, fork+exec ~9 ms (audit 27/10). Semua angka lokal EXTRAPOLASI harus per operasi (metodologi audit 30/10), bukan ms mentah.
 
 ## [x] Pengukuran baru hari ini (miniws, dir test tersisa + strace)
 
@@ -20,13 +17,11 @@
 | incremental (edit 1 source, wall) | **1,23 s** | termasuk tee/fork relay, 7 cache save, pack release (fixture punya `compress = gzip`) |
 | openat saat incremental (semua proses) | 440; cache yang paling sering: `lib.cache` 12×, `opts.cache` 11× (+5× `.tmp`), `deps.cache` 9×, `fingerprint.cache` 5× | pola buka-ulang memang pola fase, bukan bug |
 | cold build miniws (3 proyek + release) | 4,85 s | g++ floor (`bin/demo` saja) 0,38 s → toolchain dominan seperti temuan 30/10 |
-| `scripts/unit.sh -b -j2` | DIDUKUNG (opsi `-b`, `-o`) | rupaws suite dua kali terputus restart; **pakai ini**, jangan loop manual |
+| `scripts/unit.sh -b -j2` | DIDUKUNG (opsi `-b`, `-o`) | suite dua kali terputus restart; **pakai ini**, jangan loop manual |
 
 ## Ruang optimasi — peringkat (sisa dari audit 30/10 §11–13 + temuan baru)
 
-> Yang sudah dikerjakan DAN terukur: `.d` dibaca sekali (−2,8 s), `fs-save`
-> reuse-hash (−1,5 s), vonis miss pasti + entri basi diutamakan (−1,1 s),
-> memo stat induk (−50 %), memo object/`.d` (−37 %), pemulihan `O`/`.d` hilang.
+Yang sudah dikerjakan DAN terukur: `.d` dibaca sekali (−2,8 s), `fs-save` reuse-hash (−1,5 s), vonis miss pasti + entri basi diutamakan (−1,1 s), memo stat induk (−50 %), memo object/`.d` (−37 %), pemulihan `O`/`.d` hilang.
 
 1. **[ ] `.d-cek` di `save-walk` — 1 stat per `.d` per build (n=500: 1.001 stat ≈ 286 ms).**
    Keputusan "`.d` ditulis ulang run ini?" butuh pengetahuan milik anak (fork).
@@ -51,7 +46,7 @@
    route di akhir fase (satu rewrite) — setara semantik karena PATCH additive.
    Kertas kaji: `src/cache/opts_update.c` (4 `csOpen`), `opts_read.c`.
 7. **[x] Opsi level kompresi release — TERSELESAIKAN sebagai
-   `release.optimize` / `pack.optimize` (default `false`)** — rupaws:
+   `release.optimize` / `pack.optimize` (default `false`)** — pengukuran:
    tar 5 ms, gzip -6 174 ms, gzip -1 56 ms (+18 % ukuran). Keputusan produk:
    biaya kompresi diserahkan ke user; `true` = kompresor level ter-FASTEST
    (gzip -1 / xz -1 / bzip2 -1) lewat dua langkah (`tar cf` flat lalu
@@ -72,15 +67,13 @@
 
 ## Tindak lanjut infrastruktur uji (j1–j2)
 
-- [ ] Validasi suite `tests/rupaws` (pernah dua-gagal-putus-restart):
-      `bash scripts/unit.sh -b -o /tmp/opencode/unit_rupaws.log -j 2
-      /home/aidomx/satria/tests/rupaws` — target WAJIB path ABSOLUT:
-      runner men-cd ke salinan tmp sebelum mengeksekusi test, sehingga
-      target relatif membuat fixture arg `$2` test gagal di-abspath
-      (ditemukan 05/11/2026). Log + PID otomatis; jangan loop manual.
+- Catatan runner (pelajaran suite lama): target `scripts/unit.sh -b` WAJIB
+  path ABSOLUT — runner men-cd ke salinan tmp sebelum mengeksekusi test,
+  sehingga target relatif membuat fixture arg `$2` test gagal di-abspath
+  (ditemukan 05/11/2026). Log + PID otomatis; jangan loop manual.
 - [ ] Setelah item 1–3 dieksekusi: re-basel benchmark harian via
       `scripts/bench_check.sh` (9 skenario) + satu run `bench_real_project.sh`
-      (rupaws, `-t satria -s leaf,noop`) sebagai titik pembanding audit ini.
+      (complexws) sebagai titik pembanding audit ini.
 
 ## Kontrak hasil audit ini
 

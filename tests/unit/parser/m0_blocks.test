@@ -1,0 +1,41 @@
+# Konforman M0: blok kendali — response/if/else/for/while + guard/include/return/set.
+# Parse-only: ekspresi dan interpolasi disimpan verbatim (evaluasi = M1+).
+@suite project
+@purpose "Blok kendali dan direktif satu baris"
+@requires snap
+@keep
+
+@guard exists(Buildfile)
+
+@set toolchain gcc
+@get toolchain
+@include fragmen/toolchain.test as tool
+@if {tool} == cl
+  run.build as msvc
+@else
+  run.build as gcc
+@end
+
+@find objek build/**/*.o
+@for p in {objek}
+  file.exists {p}
+@end
+
+@for i in 1..30
+  file.write src/f{i}.c <<T
+int f{i}(void){return {i};}
+T
+@end
+
+run.bg -w as bg
+@while not exists(.satria/background.startup)
+  time.tick
+@end
+
+@response bg
+  out.contains "summary"
+  file.same a b
+  mtime.unchanged m0
+@end
+
+@return rc(bg) == 0 ? lulus : gagal

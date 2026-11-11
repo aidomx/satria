@@ -1,0 +1,4 @@
+# expect: bentuk: @set
+@suite project
+@purpose "set tanpa nilai"
+@set alat

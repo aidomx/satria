@@ -1,0 +1,4 @@
+# expect: @else di luar @if
+@suite project
+@purpose "else tanpa if"
+@else

@@ -1,0 +1,29 @@
+# Konforman M0: heredoc — isi diteruskan apa adanya; baris `#include` dan
+# baris kosong di dalam isi TIDAK boleh diproses sebagai klausa.
+@suite workspace
+@fixture miniws
+@purpose "Heredoc dan pernyataan dasar"
+
+file.write Buildfile <<T
+use project
+sources = src
+
+# komentar di dalam isi berkas, bukan komentar DSL
+T
+
+file.write src/main.c <<EOF
+#include "x.h"
+int main(void){return 0;}
+EOF
+
+run.build as cold
+run.cmd -w -g compdb as base
+
+@response cold
+  rc.ok
+  out.contains "Nothing to build"
+@end
+
+@response base
+  out.equals cold base
+@end

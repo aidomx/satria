@@ -1,0 +1,4 @@
+# expect: objek tidak dikenal: foo
+@suite project
+@purpose "objek asing"
+foo.bar
