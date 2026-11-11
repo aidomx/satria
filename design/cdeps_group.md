@@ -55,5 +55,5 @@ Kesalahan dicetak dengan lokasi baris Buildfile.ws, dan parse gagal:
 
 ## Verifikasi
 
-- `tests/unit/cdeps_group.sh`: kesetaraan `compile_commands.json` grup vs per proyek,
+- `tests/unit/common/cdeps_group.sh`: kesetaraan `compile_commands.json` grup vs per proyek,
   penggabungan grup tumpang tindih, dan kelima kasus error di atas.
