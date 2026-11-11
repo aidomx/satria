@@ -2,7 +2,7 @@
 # gen_tracer_src.sh  Buat src/trace/tracer_src.h dari src/trace/tracer.src.
 # Tracer disimpan sebagai string C agar binary satria bisa menulis dan
 # membangunnya sendiri (tanpa berkas luar). Jalankan ulang setiap kali
-# tracer.src berubah; tests/unit/trace_src_sync.sh memastikan tidak basi.
+# tracer.src berubah; tests/unit/common/trace_src_sync.sh memastikan tidak basi.
 #
 # Usage: sh scripts/gen_tracer_src.sh [in.src] [out.h]
 set -eu
