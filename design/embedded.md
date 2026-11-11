@@ -196,7 +196,7 @@ Mode ikut tercatat di stamp (`mode incbin|carray`). Stamp versi `1` (sebelum mod
 - Payload 60 MB: cold build sukses, byte yang dibaca identik dengan arsip, perubahan isi (ukuran berbeda) menghasilkan ukuran baru di tabel.
 - `touch` arsip (isi sama): 0 compile.
 - Path dengan spasi: sukses.
-- `tests/unit/embed_stamp_skip.sh` dan seluruh tes unit lulus.
+- `tests/unit/common/embed_stamp_skip.sh` dan seluruh tes unit lulus.
 
 ## Migrasi & Kompatibilitas
 
