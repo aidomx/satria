@@ -16,8 +16,8 @@ persyaratan Windows yang belum ada sama sekali.
 | `sources.cache` format `SATRIASRC2`, self-heal dari `SATRIASRC1` | Uji header sebelum & sesudah |
 | Route `sources` di `opts.cache` = `st_mtime_ns` `sources.cache` | Perbandingan nilai persis |
 | Sinkronisasi dua arah | `opts_sources_sync.sh` 26/26 |
-| Cache no-op | `cache_noop_miniws.sh` 24/24 |
-| Router | `router_noop_miniws.sh` 12/12 |
+| Cache no-op | `common/cache_noop.sh` 24/24 |
+| Router | `common/router_noop.sh` 12/12 |
 | Benchmark `bench/ws.sh` (cache off & on) | satria 12/12, pembanding 11/11 |
 | `paths.cache` dihapus saat save sukses | `ws_cache_save.c` + uji build |
 | Build log (`log = true`, `satria log`) | `build_log` diuji dengan target yang ada |
@@ -84,7 +84,7 @@ artefak `.deb` diubah → no-op batal dan fase release berjalan lagi; file input
 - `startup.md` dan `19_10_2026_startup.md` ada di root arsip, bukan di `problems/`. Duplikasi
   dokumen; tentukan satu sumber.
 - File `*.orig` tertinggal di `src/` (contoh `src/cmds/cmds_wsstate.c.orig`).
-- `tests/unit/build_log_miniws.sh` dahulu gagal (rc=1, tanpa pesan karena `set -eu`) karena menulis
+- `tests/unit/common/build_log.sh` dahulu gagal (rc=1, tanpa pesan karena `set -eu`) karena menulis
   `#warning` ke `a/src/main.c`, padahal `a` tidak ada di `projects` `Buildfile.ws` fixture,
   sehingga warning tidak pernah dikompilasi. **Sudah diperbaiki** (target `core/src/core.c`);
   skrip lulus penuh.
