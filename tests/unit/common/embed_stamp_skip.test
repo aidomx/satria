@@ -1,0 +1,31 @@
+# Port M1 dari embed_stamp_skip.sh (versi doc): codegen embedded dilewati
+# bila arsip tak berubah (stamp), isi baru tetap memicu regenerasi.
+@suite workspace
+@fixture miniws
+@purpose "Stamp arsip: isi sama dilewati; isi baru hanya regenerasi embedded.c"
+@requires cold
+
+fixture.copy
+run.build as cold
+@response cold
+  rc.ok
+  file.exists project(bade).stamp
+  file.exists project(bade).embedded
+@end
+
+time.mark project(bade).embedded as m0
+time.mark project(bade).binary as b0
+
+run.build as noop
+@response noop
+  out.contains "Nothing to build"
+  mtime.unchanged m0
+  mtime.unchanged b0
+@end
+
+file.append project(bade).archive isi arsip berubah
+run.build as regen
+@response regen
+  mtime.changed m0
+  out.not-contains "Nothing to build"
+@end

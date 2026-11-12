@@ -1,0 +1,20 @@
+# Tabel ekspresi: pembanding + and/or/not — nilai ditulis lewat {var} lalu dicek.
+# expect: lulus=1 gagal=0 rc=0
+@suite project
+@purpose "Tabel ekspresi: pembanding dan logika"
+
+@set a 1 < 2
+@set b 2 <= 2
+@set c "abc" == "abc"
+@set d "abc" != "abd"
+@set e 1 > 2 and 2 > 1
+@set f 1 > 2 or 2 > 1
+@set g not (1 > 2)
+@set h 5 >= 5
+@set i "abc" ~ b+
+@set j "abc" !~ x+
+
+file.write tabel.txt <<T
+{a} {b} {c} {d} {e} {f} {g} {h} {i} {j}
+T
+file.contains tabel.txt ^1 1 1 1 0 1 1 1 1 1$

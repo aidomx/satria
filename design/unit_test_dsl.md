@@ -175,11 +175,14 @@ runtime sehingga `contains` aman dari SGR.
 - **Selektor**: `project(p).source|sources|binary|dir|embedded|stamp|archive`
   (sources.tsv + micro-read Buildfile.ws, perilaku `lib/layout.sh` termasuk
   fallback proyek-pertama; `embedded.c` selalu di-skip) dan `repo(<rel>)`
-  (berkas di UNIT_REPO, untuk cmdhelp/trace_src_sync). Selektor yang tidak
-  terurai di argumen → PRECONDITION otomatis.
+  (berkas di UNIT_REPO, untuk cmdhelp/trace_src_sync), `work(<rel>)`
+  (berkas/berkasar di WORK, mendukung path absolut), `ws(<kunci-Buildfile.ws>)`
+  (nilai kunci workspace). Selektor yang tidak terurai di argumen →
+  PRECONDITION otomatis.
 - **Predikat**: `exists(<path>)`, `contains(<label>,"teks")`,
   `matches(<label>,<regex>)`, `rc(<label>)`, `lines(<path>)`,
-  `count(<path>,<pola>)`, `changed(n)`, `unchanged(n)`, `same(a,b)`.
+  `count(<path>,<pola>)`, `size(<path>)` (byte, mengikuti `wc -c`),
+  `changed(n)`, `unchanged(n)`, `same(a,b)`.
 - **Pembanding**: `== != < > <= >= ~ !~`, `and or not`; ternary
   `<kondisi> ? <a> : <b>`.
 - **Interpolasi**: `{expr}` di argumen dan isi heredoc (untuk `@for`);
@@ -434,7 +437,7 @@ tercapai, tes itu tetap `.sh` (transisi, bukan pengecualian desain).
 | Milestone | Isi parser | Uji konforman sebelum migrasi |
 | --- | --- | --- |
 | M0 | Header + pernyataan objek dasar + `@response/@guard/@requires/@include/@set/@get/@find` (tanpa ekspresi) + selektor source/binary + verdict | contoh kecil tiap aksi M0 |
-| M1 | Evaluator ekspresi (predikat, pembanding, ternary), variabel `@set/@get/@find`, `@return` badan utama, interpolasi `{}`, escape, selektor embed + `repo()` | tabel ekspresi benar/salah |
+| M1 (✓) | Evaluator ekspresi (predikat, pembanding, ternary), variabel `@set/@get/@find`, `@return` badan utama, interpolasi `{}`, escape, selektor embed + `repo()`/`work()`/`ws()` | tabel ekspresi benar/salah — `tests/unit/dsl/` 8/8 |
 | M2 | `@if/@else`, `@for` + rentang/koleksi, `@while` | loop kecil + kondisi bertingkat |
 | M3 | `run.bg/stop/wait`, `stage`, `text`, `run.tool` | staging sintetis + siklus proses |
 
@@ -498,8 +501,8 @@ resmi untuk tes di `tests/unit/common`.
 - [x] M0: gate `work.clean` pada [snap]; kesalahan parse bernomor baris
 - [x] M0: integrasi `unit.sh` (discovery `*.test`/`*.t` + `*.sh`, nama sama `.test`/`.t` menang; staging `parser.sh`; eksekusi via `dsl.sh` dengan env `UNIT_CLASS/UNIT_FIXTURE/UNIT_DISCOVERY/SATRIA`)
 - [x] M0 pilot: report_binaries_uptodate.test (3/3) + cache_noop.test (24/24) lewat `unit.sh`; asersi cache yang butuh penulisan-ulang berkas (alamat nol, self-heal SATRIASRC1) menunggu M1
-- [ ] M1: evaluator ekspresi + ternary; variabel `@set/@get/@find`; `@return` badan utama; interpolasi `{}`; escape; `time.mark`/mtime; `run.exec`; `env.set`; `file.copy crlf`; `repo()`
-- [ ] M1 pilot: embed_stamp_skip.test + p_meta_noop.test + cmdhelp_crlf.test
+- [x] M1: evaluator ekspresi + ternary; variabel `@set/@get/@find`; `@return` badan utama; interpolasi `{}`; escape; `time.mark`/mtime; `run.exec`; `env.set`; `file.copy crlf`; `repo()`/`work()`/`ws()`; predikat `size()` — kit konforman `tests/unit/dsl/` 8/8
+- [x] M1 pilot: embed_stamp_skip.test (8/8) + cmdhelp_crlf.test (7/7) + embed_getembed.test (24/24) lewat `unit.sh` miniws; `p_meta_noop` menunggu M2 (butuh penulisan-ulang cache via `sed -i`, tak terekspresikan DSL)
 - [ ] M2: `@if/@else`, `@for` + interpolasi blok, `@while`
 - [ ] M2 pilot: build_resume.test (+ fragmen toolchain.test)
 - [ ] M3: `run.bg/stop/wait`, `stage`, `text.count/aggregate`, `run.tool`

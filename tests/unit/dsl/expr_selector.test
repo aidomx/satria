@@ -1,0 +1,17 @@
+# Selektor repo() + ws() (baca kunci Buildfile.ws).
+# expect: lulus=2 gagal=0 rc=0
+@suite project
+@purpose "Selektor repo() dan ws()"
+
+file.write Buildfile.ws <<T
+use project
+kit.key = nilai-kit
+T
+file.copy repo(tests/unit/dsl/repo.txt) k.txt
+file.contains k.txt ^repo-ok$
+
+@set v ws(kit.key)
+file.write v.txt <<T
+{v}
+T
+file.contains v.txt ^nilai-kit$

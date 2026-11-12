@@ -1,0 +1,36 @@
+# Tabel ekspresi: predikat — contains/matches/rc/lines/count/same/changed.
+# expect: lulus=2 gagal=0 rc=0
+@suite project
+@purpose "Predikat ekspresi"
+
+file.write data.txt <<T
+alpha
+beta
+alpha
+T
+
+env.set SATRIA_CMD=repo(src/cmd.txt)
+run.cmd help as h
+
+@set c1 contains(h, "usage:")
+@set c2 contains(h, "zz-tidak-ada")
+@set m1 matches(h, "usage: satria")
+@set rc1 rc(h) == 0
+@set l1 lines(data.txt) == 3
+@set n1 count(data.txt, ^alpha$) == 2
+@set s1 same(data.txt, data.txt)
+
+file.write stat.txt <<T
+{c1} {c2} {m1} {rc1} {l1} {n1} {s1}
+T
+file.contains stat.txt ^1 0 1 1 1 1 1$
+
+time.mark data.txt as m0
+time.tick
+file.append data.txt gamma
+@set ch changed(m0)
+@set uc unchanged(m0)
+file.write mt.txt <<T
+{ch} {uc}
+T
+file.contains mt.txt ^1 0$

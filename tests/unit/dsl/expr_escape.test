@@ -1,0 +1,13 @@
+# Escape literal \r \n \t di file.append, nilai variabel, dan pola asersi.
+# expect: lulus=2 gagal=0 rc=0
+@suite project
+@purpose "Escape literal"
+
+file.append esc.txt a\tb\rc
+file.contains esc.txt ^a\tb\rc$
+
+@set t "x\ty"
+file.write t.txt <<T
+{t}
+T
+file.contains t.txt ^x\ty$

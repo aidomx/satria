@@ -1,0 +1,6 @@
+# ws() dengan kunci yang tidak ada → PRECONDITION (rc 0 atau 3).
+# expect: pre=1 lulus=0 gagal=0
+@suite project
+@purpose "ws() kunci tak ada"
+
+@set v ws(tidak.ada)

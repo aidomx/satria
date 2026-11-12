@@ -1,0 +1,10 @@
+# @guard dengan ekspresi penuh, semuanya benar → tidak PRECONDITION.
+# expect: lulus=0 gagal=0 rc=0
+@suite project
+@purpose "Guard ekspresi benar"
+
+file.write data.txt <<T
+satu
+T
+@guard exists(data.txt) and lines(data.txt) == 1
+@guard 2 >= 2 and "x" != "y"

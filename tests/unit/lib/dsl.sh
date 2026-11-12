@@ -1,12 +1,14 @@
 #!/bin/bash
-# dsl.sh — eksekutor berkas `.test` (M0) di atas event dari scripts/lib/parser.sh.
+# dsl.sh — eksekutor berkas `.test` (M0+M1) di atas event dari scripts/lib/parser.sh.
 #
-# Menjalankan: work/fixture/file(write|append|touch|delete)/env/time.tick/
+# M0: work/fixture/file(write|append|touch|delete|contains)/env/time.tick/
 # time.mark/run.build/run.cmd, @response @guard @requires @include @set @get
-# @find @keep @return, selektor project(p).source|binary dari sources.tsv,
-# gate work.clean pada [snap], verdict PASS/FAIL/PRECONDITION + ringkasan.
-# Belum (M1+/M2/M3): ekspresi, run.exec|bg|stop|wait|tool, stage, text,
-# file.copy, @if/@while/@for (parse lolos, eksekusi ditolak).
+# @find @keep @return, selektor project(p).source|binary, gate work.clean
+# pada [snap], verdict PASS/FAIL/PRECONDITION + ringkasan.
+# M1: evaluator ekspresi (predikat/pembanding/and/or/not/ternary), variabel,
+# interpolasi + escape \r\n\t, @return badan utama, selektor project(p).sources|
+# dir|embedded|stamp|archive + repo()/work()/ws(), run.exec, file.copy lf|crlf.
+# Belum (M2/M3): @if/@while/@for, run.bg|stop|wait|tool, stage, text.
 #
 # Pemakaian: SATRIA=bin/satria bash tests/unit/lib/dsl.sh <file.test>
 # Env: SATRIA, UNIT_REPO, UNIT_TMP, UNIT_JOBS, UNIT_CLASS (cold|snap),
@@ -29,7 +31,7 @@ UNIT_JOBS=${UNIT_JOBS:-2}
 UNIT_CLASS=${UNIT_CLASS:-}
 UNIT_DISCOVERY=${UNIT_DISCOVERY:-}
 
-declare -A VAR OUT RC MTIME
+declare -A VAR OUT RC MTIME MTIME_T
 PASSN=0 FAILN=0 KEEP=0 WORK='' MODE='workspace' FIX='' RESP=''
 COLLECT=0 CBUF='' PEND=''
 COLLECT=0 CBUF='' PEND=''
@@ -38,7 +40,7 @@ WORKS=()
 mkdir -p "$UNIT_TMP"
 
 die()     { echo "FAIL dsl: $*" >&2; exit 1; }
-precond() { echo "PRECONDITION $*"; exit 0; }
+precond() { echo "PRECONDITION $*" >&2; exit 3; } # rc 3: PRECONDITION (log tetap terbaca runner)
 ok()      { PASSN=$((PASSN+1)); echo "PASS: $1"; }
 no()      { FAILN=$((FAILN+1)); echo "FAIL: $1 (dapat $2, harap $3)"; }
 unq()     { local s=$1; [[ "$s" == \"*\" && ${#s} -ge 2 ]] && s=${s:1:${#s}-2}; printf '%s' "$s"; }
@@ -74,14 +76,73 @@ sel_binary() { # $1=proyek → bin/<binaryName> (micro-read Buildfile.ws di WORK
   printf 'bin/%s' "$name"
 }
 
-resolve_args() { # interpolasi {var} + selektor project(p).source|binary
+sel_sources() { # semua sumber `<p>/<src>` (skip embedded.c), dipisah spasi
+  local tsv="$UNIT_DISCOVERY/sources.tsv" p=$1 want have
+  [ -s "$tsv" ] || return 1
+  have=$(awk -F'\t' -v w="$p" '$1==w{f=1}END{print f+0}' "$tsv")
+  want=$p
+  [ "$have" = "1" ] || want=$(awk -F'\t' '{print $1}' "$tsv" | head -1)
+  [ -n "$want" ] || return 1
+  awk -F'\t' -v w="$want" '$1==w && $2!~/(^|\/)embedded\.c$/ {print w "/" $2}' "$tsv" \
+    | tr '\n' ' ' | sed 's/ $//'
+}
+
+sel_dir() { # proyek → root dir-nya relatif WORK (fallback proyek-pertama)
+  local tsv="$UNIT_DISCOVERY/sources.tsv" p=$1 have want
+  [ -s "$tsv" ] || return 1
+  have=$(awk -F'\t' -v w="$p" '$1==w{f=1}END{print f+0}' "$tsv")
+  want=$p
+  [ "$have" = "1" ] || want=$(awk -F'\t' '{print $1}' "$tsv" | head -1)
+  [ -n "$want" ] || return 1
+  printf '%s' "$want"
+}
+
+sel_archive() { # berkas arsip proyek: alias embed (`<p>.embedded.<x> as a` → a.file)
+  local p=$1 alias f dir name          # fallback: <p>.archive.dir + <p>.archive.name
+  alias=$(sed -n "s/^$p\.embedded\.[A-Za-z0-9_]* as *//p" "$WORK/Buildfile.ws" 2>/dev/null | head -1 | tr -d ' \t')
+  if [ -n "$alias" ]; then
+    f=$(sed -n "s/^$alias\.file *= *//p" "$WORK/Buildfile.ws" 2>/dev/null | head -1 | tr -d ' \t')
+    [ -n "$f" ] && { printf '%s' "$f"; return 0; }
+  fi
+  dir=$(sed -n "s/^$p\.archive\.dir *= *//p" "$WORK/Buildfile.ws" 2>/dev/null | head -1 | tr -d ' \t')
+  name=$(sed -n "s/^$p\.archive\.name *= *//p" "$WORK/Buildfile.ws" 2>/dev/null | head -1 | tr -d ' \t')
+  [ -n "$dir" ] && [ -n "$name" ] && { printf '%s/%s.tar' "$dir" "$name"; return 0; }
+  return 1
+}
+
+resolve_args() { # interpolasi {var} + selektor project(p).* / repo() / work() / ws()
   local s; s=$(interp "$1")
-  local re='project\(([A-Za-z0-9_]+)\)\.(source|binary)' p at r
+  local re='project\(([A-Za-z0-9_]+)\)\.(source|sources|binary|dir|embedded|stamp|archive)' p at r
   while [[ "$s" =~ $re ]]; do
     p=${BASH_REMATCH[1]} at=${BASH_REMATCH[2]} r=''
-    if [ "$at" = source ]; then r=$(sel_source "$p") || precond "selektor project($p).source tak terpenuhi"
-    else r=$(sel_binary "$p") || precond "selektor project($p).binary tak terpenuhi"; fi
+    case "$at" in
+      source)   r=$(sel_source "$p") || precond "selektor project($p).source tak terpenuhi" ;;
+      sources)  r=$(sel_sources "$p") || precond "selektor project($p).sources tak terpenuhi" ;;
+      binary)   r=$(sel_binary "$p") || precond "selektor project($p).binary tak terpenuhi" ;;
+      dir)      r=$(sel_dir "$p") || precond "selektor project($p).dir tak terpenuhi" ;;
+      embedded) r="build/$p/embedded.c" ;;
+      stamp)    r="build/$p/embedded.stamp" ;;
+      archive)  r=$(sel_archive "$p") || precond "selektor project($p).archive tak terpenuhi" ;;
+    esac
     s=${s/"project($p).$at"/$r}
+  done
+  local re2='repo\(([^)]+)\)' w
+  while [[ "$s" =~ $re2 ]]; do
+    w=${BASH_REMATCH[1]}
+    [ -e "$UNIT_REPO/$w" ] || precond "repo($w) tidak ada"
+    s=${s/"repo($w)"/"$UNIT_REPO/$w"}
+  done
+  local re3='work\(([^)]+)\)'
+  while [[ "$s" =~ $re3 ]]; do
+    w=${BASH_REMATCH[1]}
+    s=${s/"work($w)"/"$WORK/$w"}
+  done
+  local re4='ws\(([^)]+)\)'
+  while [[ "$s" =~ $re4 ]]; do
+    w=${BASH_REMATCH[1]}
+    r=$(sed -n "s/^$w *= *//p" "$WORK/Buildfile.ws" 2>/dev/null | head -1 | tr -d ' \t')
+    [ -n "$r" ] || precond "kunci Buildfile.ws tidak ada: $w"
+    s=${s/"ws($w)"/$r}
   done
   printf '%s' "$s"
 }
@@ -89,6 +150,212 @@ resolve_args() { # interpolasi {var} + selektor project(p).source|binary
 set_work() {
   WORK="$UNIT_TMP/$1"; WORKS+=("$WORK")
   rm -rf "$WORK"; mkdir -p "$WORK"
+}
+
+# ===== Ekspresi (L3, M1) =====
+unesc() { # escape literal: \r \n \t \\ → karakter aslinya
+  local s=$1
+  s=${s//\\r/$'\r'}; s=${s//\\n/$'\n'}; s=${s//\\t/$'\t'}; s=${s//\\\\/\\}
+  printf '%s' "$s"
+}
+ev_truthy() { case "$1" in '' | 0 | false) return 1 ;; esac; return 0; }
+
+scan_top() { # $1=teks $2=pemisah-1-char → OUT=kiri REST=kanan (rc0); rc1: tak ketemu
+  local s=$1 sep=$2 i c q='' d=0
+  OUT=''; REST=''
+  for ((i = 0; i < ${#s}; i++)); do
+    c=${s:i:1}
+    if [ -n "$q" ]; then [ "$c" = '"' ] && q=''; OUT+=$c; continue; fi
+    case "$c" in
+      '"') q=1; OUT+=$c ;;
+      '(') d=$((d + 1)); OUT+=$c ;;
+      ')') ((d > 0)) && d=$((d - 1)); OUT+=$c ;;
+      "$sep") if [ "$d" -eq 0 ]; then REST=${s:i+1}; return 0; fi; OUT+=$c ;;
+      *) OUT+=$c ;;
+    esac
+  done
+  return 1
+}
+
+scan_topw() { # sama, pemisah kata ber-spasi (mis. " and "/" or ") di luar kutip/kurung
+  local s=$1 w=$2 i c q='' d=0
+  local n=${#w}
+  OUT=''; REST=''
+  for ((i = 0; i < ${#s}; i++)); do
+    c=${s:i:1}
+    if [ -n "$q" ]; then [ "$c" = '"' ] && q=''; OUT+=$c; continue; fi
+    case "$c" in
+      '"') q=1; OUT+=$c; continue ;;
+      '(') d=$((d + 1)); OUT+=$c; continue ;;
+      ')') ((d > 0)) && d=$((d - 1)); OUT+=$c; continue ;;
+    esac
+    if [ "$d" -eq 0 ] && [ "${s:i:n}" = "$w" ]; then REST=${s:i+n}; return 0; fi
+    OUT+=$c
+  done
+  return 1
+}
+
+out_path() { # $1=label → berkas out; rc1 bila run belum ada
+  local o=${OUT[$1]:-}
+  [ -n "$o" ] && [ -f "$o" ] || return 1
+  printf '%s' "$o"
+}
+
+ev_pred() { # $1=nama predikat $2=argumen dipisah ',' (top-level) → EV=nilai
+  local name=$1 rest=$2 a1=$2 a2='' f c
+  scan_top "$rest" ',' && { a1=$OUT; a2=$REST; }
+  a1=${a1#" "}; a2=${a2#" "}   # spasi setelah ',' atau '('
+  case "$name" in
+    exists)    { [ -e "$WORK/$a1" ]; } && EV=1 || EV=0 ;;
+    contains)  EV=0
+               f=$(out_path "$(unq "$a1")") && grep -qF -- "$(unq "$a2")" "$f" && EV=1 ;;
+    matches)   EV=0
+               f=$(out_path "$(unq "$a1")") && grep -qE -- "$(unq "$a2")" "$f" && EV=1 ;;
+    rc)        EV=${RC[$(unq "$a1")]:-} ;;
+    lines)     EV=0; [ -f "$WORK/$a1" ] && EV=$(wc -l < "$WORK/$a1" | tr -d ' ') ;;
+    count)     EV=0; [ -f "$WORK/$a1" ] && EV=$(grep -cE -- "$(unq "$a2")" "$WORK/$a1" 2>/dev/null) ;;
+    size)      EV=0; [ -f "$WORK/$a1" ] && EV=$(wc -c < "$WORK/$a1" | tr -d ' ') ;;
+    changed)   EV=0; [ -n "${MTIME[$a1]:-}" ] || return
+               c=$(stat -c %y "${MTIME[$a1]}" 2>/dev/null)
+               { [ -n "$c" ] && [ "$c" != "${MTIME_T[$a1]:-}" ]; } && EV=1 ;;
+    unchanged) EV=0; [ -n "${MTIME[$a1]:-}" ] || return
+               c=$(stat -c %y "${MTIME[$a1]}" 2>/dev/null)
+               [ -n "$c" ] && [ "$c" = "${MTIME_T[$a1]:-}" ] && EV=1 ;;
+    same)      { cmp -s "$WORK/$a1" "$WORK/$a2"; } && EV=1 || EV=0 ;;
+    *) die "predikat tak dikenal: $name(...)" ;;
+  esac
+}
+
+CUR=''
+ev_primary() { # parse satu primary dari CUR → EV=nilai; CUR maju ke sisa
+  local s=$CUR v c d=0 i
+  while [ "${s:0:1}" = ' ' ]; do s=${s:1}; done
+  case "${s:0:1}" in
+    '')
+      EV=''; CUR=''; return ;;
+    '(')
+      for ((i = 0; i < ${#s}; i++)); do
+        c=${s:i:1}
+        [ "$c" = '(' ] && d=$((d + 1))
+        if [ "$c" = ')' ]; then d=$((d - 1)); [ "$d" -eq 0 ] && break; fi
+      done
+      v=${s:1:i-1}; CUR=${s:i+1}
+      ev_run "$v"
+      return ;;
+    '"')
+      for ((i = 1; i < ${#s}; i++)); do [ "${s:i:1}" = '"' ] && break; done
+      v=${s:1:i-1}; CUR=${s:i+1}
+      EV=$(unesc "$v")
+      return ;;
+  esac
+  if [[ "$s" =~ ^([A-Za-z_][A-Za-z0-9_]*)\((.*)$ ]]; then
+    local name=${BASH_REMATCH[1]} rest=${BASH_REMATCH[2]} a='' d2=1
+    for ((i = 0; i < ${#rest}; i++)); do
+      c=${rest:i:1}
+      [ "$c" = '(' ] && d2=$((d2 + 1))
+      if [ "$c" = ')' ]; then d2=$((d2 - 1)); [ "$d2" -eq 0 ] && break; fi
+      a+=$c
+    done
+    CUR=${rest:i+1}
+    ev_pred "$name" "$a"
+    return
+  fi
+  v=${s%% *}   # bareword/angka: operator dipisah spasi
+  CUR=${s:${#v}}
+  EV=$v
+}
+
+ev_cmp() { # lhs [op rhs] → EV = 1/0 atau nilai mentah
+  local op lhs rhs
+  ev_primary
+  while [ "${CUR:0:1}" = ' ' ]; do CUR=${CUR:1}; done
+  if [[ "$CUR" =~ ^(==|!=|<=|>=|!~|<|>|~) ]]; then
+    op=${BASH_REMATCH[1]}
+    CUR=${CUR:${#op}}
+    lhs=$EV
+    ev_primary
+    rhs=$EV
+    case "$op" in
+      '==') { [ "$lhs" = "$rhs" ]; } && EV=1 || EV=0 ;;
+      '!=') { [ "$lhs" != "$rhs" ]; } && EV=1 || EV=0 ;;
+      '<' | '>' | '<=' | '>=')
+        if [[ "$lhs" =~ ^-?[0-9]+$ && "$rhs" =~ ^-?[0-9]+$ ]]; then
+          case "$op" in
+            '<') { ((lhs < rhs)); } && EV=1 || EV=0 ;;
+            '>') { ((lhs > rhs)); } && EV=1 || EV=0 ;;
+            '<=') { ((lhs <= rhs)); } && EV=1 || EV=0 ;;
+            '>=') { ((lhs >= rhs)); } && EV=1 || EV=0 ;;
+          esac
+        else
+          case "$op" in
+            '<') { [[ "$lhs" < "$rhs" ]]; } && EV=1 || EV=0 ;;
+            '>') { [[ "$lhs" > "$rhs" ]]; } && EV=1 || EV=0 ;;
+            '<=') { [[ "$lhs" < "$rhs" || "$lhs" = "$rhs" ]]; } && EV=1 || EV=0 ;;
+            '>=') { [[ "$lhs" > "$rhs" || "$lhs" = "$rhs" ]]; } && EV=1 || EV=0 ;;
+          esac
+        fi ;;
+      '~') { [[ "$lhs" =~ $rhs ]]; } && EV=1 || EV=0 ;;
+      '!~') { [[ "$lhs" =~ $rhs ]]; } && EV=0 || EV=1 ;;
+    esac
+    return
+  fi
+}
+
+ev_not() {
+  local s=$CUR
+  while [ "${s:0:1}" = ' ' ]; do s=${s:1}; done
+  CUR=$s
+  if [[ "$CUR" =~ ^not[[:space:]] ]]; then
+    CUR=${CUR:4}
+    ev_cmp
+    ev_truthy "$EV" && EV=0 || EV=1
+  else
+    ev_cmp
+  fi
+}
+
+ev_and() {
+  local l r
+  if ! scan_topw "$CUR" ' and '; then ev_not; return; fi
+  l=$OUT; r=$REST
+  CUR=$l; ev_and
+  if ! ev_truthy "$EV"; then CUR=$r; ev_and >/dev/null; EV=0; return; fi
+  CUR=$r; ev_and
+}
+
+ev_or() {
+  local l r
+  if ! scan_topw "$CUR" ' or '; then ev_and; return; fi
+  l=$OUT; r=$REST
+  CUR=$l; ev_or
+  if ev_truthy "$EV"; then CUR=$r; ev_or >/dev/null; EV=1; return; fi
+  CUR=$r; ev_or
+}
+
+ev_run() { # $1=ekspresi (sudah resolve) → EV=hasil; ternary terendah, kanan-asosiatif
+  CUR=$1
+  local l c a b v
+  if scan_top "$CUR" '?'; then
+    l=$OUT; c=$REST
+    CUR=$l; ev_or; v=$EV
+    scan_top "$c" ':' || die "ternary tanpa ':': $1"
+    a=$OUT; b=$REST
+    if ev_truthy "$v"; then CUR=$a; ev_or; else ev_run "$b"; fi
+    return
+  fi
+  ev_or
+}
+
+ev_expr() { # $1=ekspresi → echo nilai (API publik: dipakai via $( ))
+  ev_run "$(resolve_args "$1")"
+  printf '%s' "$EV"
+}
+
+wpath() { # argumen path → absolut: absolut diteruskan, relatif ditempel $WORK
+  case "$1" in
+    /*) printf '%s' "$1" ;;
+    *)  printf '%s/%s' "$WORK" "$1" ;;
+  esac
 }
 
 tick() {
@@ -131,7 +398,7 @@ assert_exec() { # $1=obj $2=aksi $3=argumen(sudah resolve) $4=klausa
       fi ;;
     out.contains|out.not-contains|out.matches)
       o=$(label_out "$label") || return
-      args=$(unq "$args")
+      args=$(unesc "$(unq "$args")")
       case "$aksi" in
         contains)      grep -qF -- "$args" "$o" && ok "$klausa" || no "$klausa" "tidak ada" "$args" ;;
         not-contains)  grep -qF -- "$args" "$o" && no "$klausa" "ada" "tiada $args" || ok "$klausa" ;;
@@ -143,25 +410,24 @@ assert_exec() { # $1=obj $2=aksi $3=argumen(sudah resolve) $4=klausa
       b=$(label_out "${AB[1]}") || return
       cmp -s "$a" "$b" && ok "$klausa" || no "$klausa" "berbeda" "identik" ;;
     file.exists)
-      [ -e "$WORK/$args" ] && ok "$klausa" || no "$klausa" "absen" "ada $args" ;;
+      [ -e "$(wpath "$args")" ] && ok "$klausa" || no "$klausa" "absen" "ada $args" ;;
     file.absent)
-      [ ! -e "$WORK/$args" ] && ok "$klausa" || no "$klausa" "ada" "absen $args" ;;
+      [ ! -e "$(wpath "$args")" ] && ok "$klausa" || no "$klausa" "ada" "absen $args" ;;
     file.same)
       read -r -a AB <<<"$args"
-      cmp -s "$WORK/${AB[0]}" "$WORK/${AB[1]}" && ok "$klausa" || no "$klausa" "berbeda" "identik" ;;
+      cmp -s "$(wpath "${AB[0]}")" "$(wpath "${AB[1]}")" && ok "$klausa" || no "$klausa" "berbeda" "identik" ;;
     file.contains)
       local p pat
-      p=${args%% *}; pat=${args#* }
+      p=${args%% *}; pat=$(unesc "${args#* }")
       [ "$p" != "$pat" ] || die "bentuk: file.contains <path> <pola>"
-      grep -qE -- "$pat" "$WORK/$p" && ok "$klausa" || no "$klausa" "tidak ada" "$pat" ;;
+      grep -qE -- "$pat" "$(wpath "$p")" && ok "$klausa" || no "$klausa" "tidak ada" "$pat" ;;
     mtime.changed|mtime.unchanged)
-      cur=$(stat -c %y "$WORK/${MTIME[$args]:-}" 2>/dev/null)
       [ -n "${MTIME[$args]:-}" ] || { no "$klausa" "rekaman $args tidak ada" "time.mark dulu"; return; }
-      cur=$(stat -c %y "$WORK/${MTIME[$args]}")
+      cur=$(stat -c %y "${MTIME[$args]}" 2>/dev/null)
       if [ "$aksi" = changed ]; then
-        [ "$cur" != "${MTIME[$args]}" ] && ok "$klausa" || no "$klausa" "sama" "berubah"
+        [ "$cur" != "${MTIME_T[$args]}" ] && ok "$klausa" || no "$klausa" "sama" "berubah"
       else
-        [ "$cur" = "${MTIME[$args]}" ] && ok "$klausa" || no "$klausa" "berubah" "sama"
+        [ "$cur" = "${MTIME_T[$args]}" ] && ok "$klausa" || no "$klausa" "berubah" "sama"
       fi ;;
   esac
 }
@@ -179,15 +445,19 @@ dir_exec() { # $1=direktif $2=argumen
   local d=$1 rest=$2 args name val pat ip as list
   case "$d" in
     return)
-      RET_VALUE=$(unq "$(interp "$rest")"); RET_HIT=1 ;;
+      RET_VALUE=$(ev_expr "$rest"); RET_HIT=1 ;;
     guard)
-      [[ "$rest" =~ ^exists\((.*)\)$ ]] || die "@guard M0 hanya exists(<path>): $rest"
-      args=$(resolve_args "${BASH_REMATCH[1]}")
-      [ -e "$WORK/$args" ] || precond "@guard: $rest" ;;
+      local gv rcgv=0
+      gv=$(ev_expr "$rest") || rcgv=$?
+      [ "$rcgv" -eq 3 ] && precond "@guard: $rest"
+      [ "$rcgv" -eq 0 ] || die "@guard evaluasi gagal: $rest"
+      ev_truthy "$gv" || precond "@guard salah: $rest" ;;
     set)
-      args=$(interp "$rest")
-      name=${args%% *}; val=$(unq "${args#* }")
-      VAR[$name]=$val ;;
+      local sv rcsv=0
+      sv=$(ev_expr "${rest#* }") || rcsv=$?
+      [ "$rcsv" -eq 3 ] && precond "@set: $rest"
+      [ "$rcsv" -eq 0 ] || die "@set evaluasi gagal: $rest"
+      VAR[${rest%% *}]=$sv ;;
     get)
       echo "INFO: $rest = ${VAR[$rest]:-}" ;;
     find)
@@ -231,18 +501,32 @@ stmt_exec() { # $1=obj $2=aksi $3=argumen mentah $4=baris
       COLLECT=1; CBUF=''; PEND=${args%% <<*} ;;
     file.append)
       local p=${args%% *} t
-      t=$(unq "${args#* }")
+      t=$(unesc "$(unq "${args#* }")")
       mkdir -p "$WORK/$(dirname "$p")"
       printf '%s\n' "$t" >> "$WORK/$p" ;;
-    file.touch)  touch "$WORK/$args" ;;
-    file.delete) rm -f "$WORK/$args" ;;
+    file.touch)  touch "$(wpath "$args")" ;;
+    file.delete) rm -f "$(wpath "$args")" ;;
+    file.copy)
+      local -a F=()
+      read -r -a F <<<"$args"
+      local src=${F[0]:-} dst=${F[1]:-} conv=${F[2]:-}
+      [ -n "$src" ] && [ -n "$dst" ] || die "bentuk: file.copy <src> <dst> [lf|crlf]"
+      [ -e "$src" ] || die "file.copy: sumber tidak ada: $src"
+      mkdir -p "$WORK/$(dirname "$dst")"
+      case "$conv" in
+        '')    cp "$src" "$WORK/$dst" ;;
+        lf)    tr -d '\r' < "$src" > "$WORK/$dst" ;;
+        crlf)  awk '{ printf "%s\r\n", $0 }' "$src" > "$WORK/$dst" ;;
+        *)     die "file.copy: konversi tidak dikenal: $conv" ;;
+      esac ;;
     env.set)     export "${args%%=*}=${args#*=}" ;;
     env.unset)   unset "${args%%=*}" 2>/dev/null || true ;;
     time.tick)   tick ;;
     time.mark)
       local p=${args%%" as "*} n=${args##*" as "}
-      MTIME[$n]=$(stat -c %y "$WORK/$p") ;;
-    run.build|run.cmd)
+      MTIME[$n]=$(wpath "$p")
+      MTIME_T[$n]=$(stat -c %y "$(wpath "$p")") ;;
+    run.build|run.cmd|run.exec)
       [ -x "$SATRIA" ] || precond "binary satria tidak ada: $SATRIA (set SATRIA=...)"
       local -a A=()
       read -r -a A <<<"$args"
@@ -255,6 +539,12 @@ stmt_exec() { # $1=obj $2=aksi $3=argumen mentah $4=baris
       label=${label:-last}
       if [ "$obj.$aksi" = run.build ]; then
         case "$MODE" in workspace) do_run "$label" -j"$UNIT_JOBS" -w ;; *) do_run "$label" -j"$UNIT_JOBS" ;; esac
+      elif [ "$obj.$aksi" = run.exec ]; then
+        [ ${#A[@]} -gt 0 ] || die "run.exec butuh program"
+        local rf="$WORK/.out.$label.txt"
+        ( cd "$WORK" && "${A[0]}" "${A[@]:1}" > "$rf" 2>&1 )
+        OUT[$label]=$rf
+        RC[$label]=$?
       else
         [ ${#A[@]} -gt 0 ] || die "run.cmd butuh argumen"
         do_run "$label" "${A[@]}"

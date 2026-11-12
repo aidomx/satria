@@ -1,0 +1,64 @@
+# Port M1 dari embed_getembed.sh: codegen embedded sebagai satu-satunya
+# mekanisme — embedded.c/h/o, runtime getEmbed, touch-proof, rebuild isi arsip.
+@suite workspace
+@fixture miniws
+@purpose "Embedded: codegen, getEmbed runtime, touch-proof, rebuild isi arsip"
+@requires cold
+
+fixture.copy
+run.build as cold
+@response cold
+  rc.ok
+  file.exists project(bade).embedded
+  file.exists build/bade/embedded.h
+  file.exists build/bade/embedded.o
+  file.exists build/bade/embedded.stamp
+  file.contains build/bade/embedded.h getEmbed
+  file.contains build/bade/embedded.h typedef struct
+  file.contains build/bade/embedded.h EMBED_MODULES_SYMBOL_LEN
+  file.contains project(bade).embedded embed_table
+  file.contains project(bade).embedded "modules"
+@end
+
+file.delete ws(bademod.extract)/rupa_modules.tar
+run.exec bin/bade as run1
+@response run1
+  rc.ok
+  out.contains "bade=7"
+  file.exists ws(bademod.extract)/rupa_modules.tar
+  file.same project(mod).archive ws(bademod.extract)/rupa_modules.tar
+@end
+
+run.build as noop
+@response noop
+  out.not-contains "["
+@end
+
+time.mark project(bade).embedded as e0
+time.mark build/bade/embedded.o as o0
+time.mark project(bade).binary as b0
+
+time.tick
+file.touch project(mod).archive
+run.build as touch
+@response touch
+  out.not-contains "["
+  mtime.unchanged e0
+  mtime.unchanged o0
+  mtime.unchanged b0
+@end
+
+time.tick
+file.append project(mod).archive X
+run.build as regen
+@response regen
+  out.contains "build/bade/embedded.c"
+  mtime.changed e0
+  mtime.changed b0
+@end
+
+run.exec bin/bade as run2
+@response run2
+  rc.ok
+  out.contains "bade=7"
+@end

@@ -1,0 +1,30 @@
+# Port M1 dari cmdhelp_crlf.sh: `satria help` tetap utuh walau cmd.txt
+# ber-terminasi CRLF (seperti hasil checkout Windows), dan setara salinan LF.
+@suite project
+@purpose "help: cmd.txt CRLF setara LF"
+@requires snap
+
+file.copy repo(src/cmd.txt) cmd/crlf/cmd.txt crlf
+file.contains cmd/crlf/cmd.txt \r
+
+env.set SATRIA_CMD=work(cmd/crlf/cmd.txt)
+run.cmd help as h_crlf
+@response h_crlf
+  rc.ok
+  out.contains "usage: satria"
+@end
+run.cmd help workspace as t_crlf
+@response t_crlf
+  rc.ok
+  out.contains "workspace"
+@end
+
+file.copy repo(src/cmd.txt) cmd/lf/cmd.txt
+env.set SATRIA_CMD=work(cmd/lf/cmd.txt)
+run.cmd help as h_lf
+@response h_lf
+  rc.ok
+@end
+@response
+  out.equals h_crlf h_lf
+@end

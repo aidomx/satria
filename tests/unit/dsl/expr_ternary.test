@@ -1,0 +1,19 @@
+# Ternary kanan-asosiatif + @return berhenti lebih awal (asersi setelahnya
+# tidak boleh tercapai: bila @return diabaikan, file.exists t2.txt gagal).
+# expect: lulus=1 gagal=0 rc=0
+@suite project
+@purpose "Ternary dan @return badan utama"
+
+@set r1 1 < 2 ? ya : tidak
+@set r3 1 > 2 ? ya : 2 > 1 ? betul : salah
+
+file.write tern.txt <<T
+{r1} {r3}
+T
+file.contains tern.txt ^ya betul$
+
+@return stop
+file.write t2.txt <<T
+sesudah
+T
+file.exists t2.txt

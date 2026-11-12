@@ -1,0 +1,6 @@
+# @guard salah → PRECONDITION (rc 0 atau 3, keduanya sah).
+# expect: pre=1 lulus=0 gagal=0
+@suite project
+@purpose "Guard ekspresi salah"
+
+@guard 1 > 2
