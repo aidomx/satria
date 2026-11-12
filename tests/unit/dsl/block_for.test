@@ -1,0 +1,36 @@
+# @for: rentang 1..3 (naik), 3..1 (turun), dan koleksi @find; {var}
+# diinterpolasi ke argumen aksi.
+# expect: lulus=6 gagal=0 rc=0
+@suite project
+@purpose "@for: rentang dua arah dan koleksi"
+
+file.write n.txt <<T
+T
+@for i in 1..3
+file.append n.txt baris-{i}
+@end
+file.contains n.txt ^baris-1$
+file.contains n.txt ^baris-3$
+
+file.write d.txt <<T
+T
+@for i in 3..1
+file.append d.txt urut-{i}
+@end
+file.contains d.txt ^urut-3$
+file.contains d.txt ^urut-1$
+
+file.write a1.txt <<T
+satu
+T
+file.write a2.txt <<T
+dua
+T
+@find fs a?.txt
+file.write k.txt <<T
+T
+@for p in {fs}
+file.append k.txt ketemu {p}
+@end
+file.contains k.txt ^ketemu a1.txt$
+file.contains k.txt ^ketemu a2.txt$

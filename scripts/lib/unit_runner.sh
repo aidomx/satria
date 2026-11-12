@@ -165,7 +165,8 @@ runner_validate() {
     b=${b%.test}
     b=${b%.t}
     DSLFMT[$b]=1
-    ALL_TESTS+=("$b")
+    # nama sama via .test dan .t tetap satu entri (urutan .test > .t)
+    [[ " ${ALL_TESTS[*]} " == *" $b "* ]] || ALL_TESTS+=("$b")
   done
   for bf in "$STAGE"/common/*.sh; do
     [ -e "$bf" ] || continue

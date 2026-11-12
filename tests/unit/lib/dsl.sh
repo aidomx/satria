@@ -1,5 +1,5 @@
 #!/bin/bash
-# dsl.sh — eksekutor berkas `.test` (M0+M1) di atas event dari scripts/lib/parser.sh.
+# dsl.sh — eksekutor berkas `.test`/`.t` (M0+M1+M2) di atas event dari scripts/lib/parser.sh.
 #
 # M0: work/fixture/file(write|append|touch|delete|contains)/env/time.tick/
 # time.mark/run.build/run.cmd, @response @guard @requires @include @set @get
@@ -8,7 +8,9 @@
 # M1: evaluator ekspresi (predikat/pembanding/and/or/not/ternary), variabel,
 # interpolasi + escape \r\n\t, @return badan utama, selektor project(p).sources|
 # dir|embedded|stamp|archive + repo()/work()/ws(), run.exec, file.copy lf|crlf.
-# Belum (M2/M3): @if/@while/@for, run.bg|stop|wait|tool, stage, text.
+# M2: @if/@else, @while (guard 1000 iterasi), @for (rentang a..b dua arah,
+# koleksi selektor/{var}).
+# Belum (M3): run.bg|stop|wait|tool, stage, text.
 #
 # Pemakaian: SATRIA=bin/satria bash tests/unit/lib/dsl.sh <file.test>
 # Env: SATRIA, UNIT_REPO, UNIT_TMP, UNIT_JOBS, UNIT_CLASS (cold|snap),
@@ -129,7 +131,7 @@ resolve_args() { # interpolasi {var} + selektor project(p).* / repo() / work() /
   local re2='repo\(([^)]+)\)' w
   while [[ "$s" =~ $re2 ]]; do
     w=${BASH_REMATCH[1]}
-    [ -e "$UNIT_REPO/$w" ] || precond "repo($w) tidak ada"
+    # tanpa precond: berkas boleh belum ada — exists()/absent yang memutuskan
     s=${s/"repo($w)"/"$UNIT_REPO/$w"}
   done
   local re3='work\(([^)]+)\)'
@@ -206,22 +208,22 @@ ev_pred() { # $1=nama predikat $2=argumen dipisah ',' (top-level) → EV=nilai
   scan_top "$rest" ',' && { a1=$OUT; a2=$REST; }
   a1=${a1#" "}; a2=${a2#" "}   # spasi setelah ',' atau '('
   case "$name" in
-    exists)    { [ -e "$WORK/$a1" ]; } && EV=1 || EV=0 ;;
+    exists)    { [ -e "$(wpath "$a1")" ]; } && EV=1 || EV=0 ;;
     contains)  EV=0
                f=$(out_path "$(unq "$a1")") && grep -qF -- "$(unq "$a2")" "$f" && EV=1 ;;
     matches)   EV=0
                f=$(out_path "$(unq "$a1")") && grep -qE -- "$(unq "$a2")" "$f" && EV=1 ;;
     rc)        EV=${RC[$(unq "$a1")]:-} ;;
-    lines)     EV=0; [ -f "$WORK/$a1" ] && EV=$(wc -l < "$WORK/$a1" | tr -d ' ') ;;
-    count)     EV=0; [ -f "$WORK/$a1" ] && EV=$(grep -cE -- "$(unq "$a2")" "$WORK/$a1" 2>/dev/null) ;;
-    size)      EV=0; [ -f "$WORK/$a1" ] && EV=$(wc -c < "$WORK/$a1" | tr -d ' ') ;;
+    lines)     EV=0; [ -f "$(wpath "$a1")" ] && EV=$(wc -l < "$(wpath "$a1")" | tr -d ' ') ;;
+    count)     EV=0; [ -f "$(wpath "$a1")" ] && EV=$(grep -cE -- "$(unq "$a2")" "$(wpath "$a1")" 2>/dev/null) ;;
+    size)      EV=0; [ -f "$(wpath "$a1")" ] && EV=$(wc -c < "$(wpath "$a1")" | tr -d ' ') ;;
     changed)   EV=0; [ -n "${MTIME[$a1]:-}" ] || return
                c=$(stat -c %y "${MTIME[$a1]}" 2>/dev/null)
                { [ -n "$c" ] && [ "$c" != "${MTIME_T[$a1]:-}" ]; } && EV=1 ;;
     unchanged) EV=0; [ -n "${MTIME[$a1]:-}" ] || return
                c=$(stat -c %y "${MTIME[$a1]}" 2>/dev/null)
                [ -n "$c" ] && [ "$c" = "${MTIME_T[$a1]:-}" ] && EV=1 ;;
-    same)      { cmp -s "$WORK/$a1" "$WORK/$a2"; } && EV=1 || EV=0 ;;
+    same)      { cmp -s "$(wpath "$a1")" "$(wpath "$a2")"; } && EV=1 || EV=0 ;;
     *) die "predikat tak dikenal: $name(...)" ;;
   esac
 }
@@ -556,6 +558,72 @@ stmt_exec() { # $1=obj $2=aksi $3=argumen mentah $4=baris
   esac
 }
 
+# ===== Blok (M2): @if/@else, @while, @for =====
+BLKN=0
+run_block() { # $1=if|while|for $2=isi-direktif $3=baris
+  # stdin: event isi blok (pasca baris BLOCK) sampai ENDB pasangannya —
+  # badan dikumpulkan ke berkas dulu, lalu diputar ulang per iterasi;
+  # RET_HIT dan PRECONDITION (rc 3) memotong semuanya.
+  local kind=$1 ex=$2 ln=$3 ev l a b c depth=0
+  BLKN=$((BLKN + 1)); local id=$BLKN   # unik: run_block bersarang tidak boleh
+  local mf="$UNIT_TMP/ev.$$.b$id" af="$UNIT_TMP/ev.$$.c$id"  # saling memotong
+  : > "$mf"; : > "$af"; local tf=$mf
+  while IFS=$'\t' read -r ev l a b c; do
+    if [ "$depth" -eq 0 ] && [ "$ev" = DIR ] && [ "$a" = else ]; then
+      tf=$af; continue
+    fi
+    [ "$ev" = BLOCK ] && depth=$((depth + 1))
+    if [ "$ev" = ENDB ]; then
+      [ "$depth" -eq 0 ] && break
+      depth=$((depth - 1))
+    fi
+    printf '%s\t%s\t%s\t%s\t%s\n' "$ev" "$l" "$a" "$b" "$c" >> "$tf"
+  done
+  [ "$ev" = ENDB ] || die "baris $ln: @$kind tanpa @end"
+  local rf
+  case "$kind" in
+    if)
+      local gv rcgv=0
+      gv=$(ev_expr "$ex") || rcgv=$?
+      [ "$rcgv" -eq 3 ] && precond "@if: $ex"
+      [ "$rcgv" -eq 0 ] || die "@if evaluasi gagal: $ex"
+      if ev_truthy "$gv"; then rf=$mf; else rf=$af; fi
+      execute_events < "$rf" ;;
+    while)
+      local n=0 rcgv=0
+      while :; do
+        n=$((n + 1)); [ "$n" -le 1000 ] || die "@while lebih dari 1000 iterasi: $ex"
+        gv=$(ev_expr "$ex") || rcgv=$?
+        [ "$rcgv" -eq 3 ] && precond "@while: $ex"
+        [ "$rcgv" -eq 0 ] || die "@while evaluasi gagal: $ex"
+        ev_truthy "$gv" || break
+        execute_events < "$mf"
+        [ "$RET_HIT" -eq 1 ] && break
+      done ;;
+    for)
+      local fvar rem spec lo hi st v
+      fvar=${ex%% *}; rem=${ex#* }
+      [[ "$rem" = "in "* ]] || die "baris $ln: bentuk @for: @for <var> in <rentang|koleksi>"
+      spec=$(resolve_args "${rem#in }") || precond "@for: $rem"
+      if [[ "$spec" =~ ^(-?[0-9]+)\.\.(-?[0-9]+)$ ]]; then
+        lo=${BASH_REMATCH[1]} hi=${BASH_REMATCH[2]} st=1
+        [ "$lo" -le "$hi" ] || st=-1
+        for ((v = lo; st == 1 ? v <= hi : v >= hi; v += st)); do
+          VAR[$fvar]=$v
+          execute_events < "$mf"
+          [ "$RET_HIT" -eq 1 ] && break
+        done
+      else
+        for v in $spec; do
+          VAR[$fvar]=$v
+          execute_events < "$mf"
+          [ "$RET_HIT" -eq 1 ] && break
+        done
+      fi ;;
+  esac
+  rm -f "$mf" "$af"
+}
+
 execute_events() { # event TSV dari parser di stdin
   local EV LN A B C
   while IFS=$'\t' read -r EV LN A B C; do
@@ -573,7 +641,8 @@ execute_events() { # event TSV dari parser di stdin
       BLOCK)
         case "$A" in
           response) RESP=$B ;;
-          *) die "baris $LN: @$A belum dieksekusi (M2)" ;;
+          if|while|for) run_block "$A" "$B" "$LN" ;;
+          *) die "baris $LN: @$A belum dieksekusi (M3)" ;;
         esac ;;
       ENDB) RESP='' ;;
       OPEN) : ;;

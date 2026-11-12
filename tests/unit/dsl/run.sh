@@ -10,8 +10,8 @@ export UNIT_TMP=${UNIT_TMP:-/tmp/satria-dsl-kit}
 export UNIT_REPO=$ROOT
 
 N=0; G=0
-for f in expr_*.test; do
-  [ -e "$f" ] || { echo "FAIL dsl-kit: tidak ada expr_*.test"; exit 1; }
+for f in *.test; do
+  [ -e "$f" ] || { echo "FAIL dsl-kit: tidak ada *.test"; exit 1; }
   N=$((N + 1))
   exp=$(grep -m1 '^# expect:' "$f"); exp=${exp#\# expect: }
   out=$(mktemp /tmp/opencode/kit-XXXXXX)

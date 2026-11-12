@@ -1,0 +1,38 @@
+# @if/@else: cabang benar, salah, bersarang; cabang yang tak diambil tak
+# meninggalkan jejak (count == 0).
+# expect: lulus=6 gagal=0 rc=0
+@suite project
+@purpose "@if/@else: cabang dan bersarang"
+
+file.write log.txt <<T
+mulai
+T
+
+@if 1 < 2
+file.append log.txt ya
+@else
+file.append log.txt tidak
+@end
+@if 1 > 2
+file.append log.txt ya
+@else
+file.append log.txt betul
+@end
+@if 1 < 2
+@if 2 < 3
+file.append log.txt dalam
+@end
+file.append log.txt luar
+@end
+
+file.contains log.txt ^mulai$
+file.contains log.txt ^ya$
+file.contains log.txt ^betul$
+file.contains log.txt ^dalam$
+file.contains log.txt ^luar$
+
+@set n count(log.txt, ^tidak$) == 0
+file.write n.txt <<T
+{n}
+T
+file.contains n.txt ^1$

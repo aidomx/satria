@@ -177,8 +177,9 @@ runtime sehingga `contains` aman dari SGR.
   fallback proyek-pertama; `embedded.c` selalu di-skip) dan `repo(<rel>)`
   (berkas di UNIT_REPO, untuk cmdhelp/trace_src_sync), `work(<rel>)`
   (berkas/berkasar di WORK, mendukung path absolut), `ws(<kunci-Buildfile.ws>)`
-  (nilai kunci workspace). Selektor yang tidak terurai di argumen →
-  PRECONDITION otomatis.
+  (nilai kunci workspace). `repo()` tidak mem-validasi keberadaan berkas —
+  predikat `exists`/`absent` yang memutuskan; selektor lain yang tidak
+  terurai di argumen → PRECONDITION otomatis.
 - **Predikat**: `exists(<path>)`, `contains(<label>,"teks")`,
   `matches(<label>,<regex>)`, `rc(<label>)`, `lines(<path>)`,
   `count(<path>,<pola>)`, `size(<path>)` (byte, mengikuti `wc -c`),
@@ -421,7 +422,7 @@ run.cmd watch as w
 | embed_stamp_skip | cold* | workspace | M1 | contoh §terjemahan (time.mark/mtime) |
 | p_meta_noop | snap | workspace | M1 | `env.set SATRIA_CACHE_TRACE` + contains |
 | cmdhelp_crlf | snap | — | M1 | `file.copy crlf` + escape `\r` |
-| build_resume | cold | project | M2 | `@for 1..30`, interpolasi, fail/fix |
+| build_resume | cold | project | M2 | `@for 1..30`, interpolasi, fail/fix — A–C di `build_resume_abc.test`; D (Ctrl+C) menunggu M3 |
 | background | cold | project,workspace | M3 | `run.bg`, `@while` polling, replay watch |
 | watcher_staging | snap | — | M3 | `stage.set/log`, multi-watch, lock basi |
 | trace_summary | cold* | workspace | M3 | `text.count/aggregate` vs `satria trace` |
@@ -438,7 +439,7 @@ tercapai, tes itu tetap `.sh` (transisi, bukan pengecualian desain).
 | --- | --- | --- |
 | M0 | Header + pernyataan objek dasar + `@response/@guard/@requires/@include/@set/@get/@find` (tanpa ekspresi) + selektor source/binary + verdict | contoh kecil tiap aksi M0 |
 | M1 (✓) | Evaluator ekspresi (predikat, pembanding, ternary), variabel `@set/@get/@find`, `@return` badan utama, interpolasi `{}`, escape, selektor embed + `repo()`/`work()`/`ws()` | tabel ekspresi benar/salah — `tests/unit/dsl/` 8/8 |
-| M2 | `@if/@else`, `@for` + rentang/koleksi, `@while` | loop kecil + kondisi bertingkat |
+| M2 (✓) | `@if/@else`, `@for` + rentang/koleksi, `@while` | kit `tests/unit/dsl/` (blok + `@include as`) + pilot `build_resume_abc` |
 | M3 | `run.bg/stop/wait`, `stage`, `text`, `run.tool` | staging sintetis + siklus proses |
 
 - Runtime M0 cukup parser baris (`read`); evaluator M1+ diekstrak jadi fungsi
@@ -503,8 +504,9 @@ resmi untuk tes di `tests/unit/common`.
 - [x] M0 pilot: report_binaries_uptodate.test (3/3) + cache_noop.test (24/24) lewat `unit.sh`; asersi cache yang butuh penulisan-ulang berkas (alamat nol, self-heal SATRIASRC1) menunggu M1
 - [x] M1: evaluator ekspresi + ternary; variabel `@set/@get/@find`; `@return` badan utama; interpolasi `{}`; escape; `time.mark`/mtime; `run.exec`; `env.set`; `file.copy crlf`; `repo()`/`work()`/`ws()`; predikat `size()` — kit konforman `tests/unit/dsl/` 8/8
 - [x] M1 pilot: embed_stamp_skip.test (8/8) + cmdhelp_crlf.test (7/7) + embed_getembed.test (24/24) lewat `unit.sh` miniws; `p_meta_noop` menunggu M2 (butuh penulisan-ulang cache via `sed -i`, tak terekspresikan DSL)
-- [ ] M2: `@if/@else`, `@for` + interpolasi blok, `@while`
-- [ ] M2 pilot: build_resume.test (+ fragmen toolchain.test)
+- [x] M2: `@if/@else`, `@for` + interpolasi blok, `@while` — badan blok dikumpulkan ke berkas event lalu diputar ulang (id unik per invokasi, aman bersarang); rentang `a..b` dua arah; koleksi selektor/`{var}`; guard 1000 iterasi `@while` — kit `tests/unit/dsl/` 12/12
+- [x] M2 pilot: `build_resume_abc.test` (A–C, 8/8 via `unit.sh`) + fragmen `tests/unit/fragmen/toolchain.test` (`@return` ternary, dikonsumsi `@include … as` di kit) — `build_resume.sh` tetap berjalan (kasus D Ctrl+C menunggu M3 `run.bg/stop`); satria keluar rc 0 walau compile/link gagal, jadi asersi pakai hitungan `OK ` + keberadaan binary
+- [x] Contoh acuan `example.test` + `example.t` (8/8 via `unit.sh`) — nama sama `.test` > `.t` > `.sh`, discovery mendeduplikasi supaya keduanya bisa hidup berdampingan
 - [ ] M3: `run.bg/stop/wait`, `stage`, `text.count/aggregate`, `run.tool`
 - [ ] M3 pilot: background.test + watcher_staging.test + trace_summary.test + trace_src_sync.test
-- [ ] Contoh acuan `example.test` untuk penulis tes baru
+- [x] Contoh acuan `example.test` untuk penulis tes baru (lihat butir M2 pilot)

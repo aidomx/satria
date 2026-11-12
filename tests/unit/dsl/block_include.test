@@ -1,0 +1,25 @@
+# @include … as: nilai @return fragmen (ternary) masuk sebagai variabel,
+# lalu @if bercabang atas nilai itu.
+# expect: lulus=3 gagal=0 rc=0
+@suite project
+@purpose "@include as + @if pada nilai fragmen"
+
+@include fragmen/toolchain.test as tool
+@set t {tool} == gcc
+file.write tool.txt <<T
+{t} {tool}
+T
+file.contains tool.txt ^1 gcc$
+
+@if {tool} == cl
+file.append br.txt msvc
+@else
+file.append br.txt gcc-cabang
+@end
+file.contains br.txt ^gcc-cabang$
+
+@set g not ({tool} != gcc)
+file.write g.txt <<T
+{g}
+T
+file.contains g.txt ^1$

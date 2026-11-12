@@ -1,0 +1,89 @@
+@suite project
+@purpose "Resume build: perbaikan hanya kompilasi ulang yang gagal (A-C)"
+
+# A. cold gagal di satu sumber -> perbaikan hanya mengompilasi sumber itu
+work.new ra
+file.write Buildfile <<T
+use project
+T
+file.write src/main.c <<T
+int main(void){return 0;}
+T
+@for i in 1..30
+file.append src/f{i}.c int f{i}(void){{return {i};}}
+@end
+file.append src/f15.c int broken = ;
+
+run.build as a1
+file.write src/f15.c <<T
+int f15(void){{return 15;}}
+T
+run.build as a2
+@response a2
+  rc.ok
+@end
+@set a2 count(.out.a2.txt, "OK ") == 1
+file.write va.txt <<T
+{a2}
+T
+file.contains va.txt ^1$
+
+# B. 30 sumber berubah, satu gagal -> perbaikan hanya kompilasi sumber gagal
+work.new rb
+file.write Buildfile <<T
+use project
+T
+file.write src/main.c <<T
+int main(void){return 0;}
+T
+@for i in 1..30
+file.append src/f{i}.c int f{i}(void){{return {i};}}
+@end
+run.build as b0
+@response b0
+  rc.ok
+@end
+@for i in 1..30
+file.write src/f{i}.c <<T
+int f{i}(void){{return {i}+0;}}
+T
+@end
+file.append src/f15.c int broken = ;
+
+run.build as b1
+file.write src/f15.c <<T
+int f15(void){{return 15+0;}}
+T
+run.build as b2
+@response b2
+  rc.ok
+@end
+@set b2 count(.out.b2.txt, "OK ") == 1
+file.write vb.txt <<T
+{b2}
+T
+file.contains vb.txt ^1$
+
+# C. semua compile sukses, link gagal -> perbaikan tidak mengompilasi object
+work.new rc
+file.write Buildfile <<T
+use project
+T
+file.write src/main.c <<T
+int g_missing(void);
+int main(void){return g_missing();}
+T
+run.build as c1
+file.write src/g.c <<T
+int g_missing(void){return 0;}
+T
+run.build as c2
+@response c2
+  rc.ok
+  file.exists bin/rc
+@end
+@set c2 count(.out.c2.txt, "OK ") == 1
+file.write vc.txt <<T
+{c2}
+T
+file.contains vc.txt ^1$

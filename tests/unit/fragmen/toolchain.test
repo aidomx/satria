@@ -1,0 +1,3 @@
+# Fragmen bersama: nilai balik = ternary atas ada-tidaknya binary Windows.
+# Pemakaian: @include fragmen/toolchain.test as tool   → {tool} = cl | gcc
+@return exists(repo(bin/satria.exe)) ? cl : gcc

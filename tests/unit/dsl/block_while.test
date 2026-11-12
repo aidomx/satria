@@ -1,0 +1,21 @@
+# @while: badan dieksekusi ulang dan kondisi dievaluasi ulang tiap putaran
+# (tanpa math: predikat lines() naik karena file.append di badan).
+# expect: lulus=3 gagal=0 rc=0
+@suite project
+@purpose "@while: poling sampai predikat salah"
+
+file.write w.txt <<T
+1
+T
+
+@while lines(w.txt) < 4
+file.append w.txt x
+@end
+
+file.contains w.txt ^1$
+file.contains w.txt ^x$
+@set l lines(w.txt) == 4
+file.write l.txt <<T
+{l}
+T
+file.contains l.txt ^1$
