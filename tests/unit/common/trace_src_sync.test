@@ -1,0 +1,9 @@
+@suite project
+@requires snap
+@purpose "tracer_src.h sinkron dengan tracer.src (run.tool + file.same)"
+
+run.tool scripts/gen_tracer_src.sh src/trace/tracer.src work(tracer_src.h) as gen
+@response gen
+  rc.ok
+  file.same repo(src/trace/tracer_src.h) tracer_src.h
+@end

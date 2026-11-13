@@ -26,7 +26,8 @@ typedef enum {
   CMD_TRACE,
   CMD_LOG,
   CMD_WATCH, /* pantau build background (design/background.md §3) */
-  CMD_INTERACTIVE_INIT
+  CMD_INTERACTIVE_INIT,
+  CMD_TEST
 } Command;
 
 typedef struct {

@@ -1,5 +1,5 @@
 #!/bin/bash
-# dsl.sh — eksekutor berkas `.test`/`.t` (M0+M1+M2) di atas event dari scripts/lib/parser.sh.
+# dsl.sh — eksekutor berkas `.test`/`.t` (M0+M1+M2+M3) di atas event dari scripts/lib/parser.sh.
 #
 # M0: work/fixture/file(write|append|touch|delete|contains)/env/time.tick/
 # time.mark/run.build/run.cmd, @response @guard @requires @include @set @get
@@ -10,7 +10,9 @@
 # dir|embedded|stamp|archive + repo()/work()/ws(), run.exec, file.copy lf|crlf.
 # M2: @if/@else, @while (guard 1000 iterasi), @for (rentang a..b dua arah,
 # koleksi selektor/{var}).
-# Belum (M3): run.bg|stop|wait|tool, stage, text.
+# M3: run.bg/stop/wait (proses latar, sinyal INT, batas tunggu), run.tool
+# (alat repo, cwd=UNIT_REPO), stage.set/log (rekaman staging sintetis),
+# text.count/aggregate (hitung baris; agregasi sort|uniq -c|sort -rn|head).
 #
 # Pemakaian: SATRIA=bin/satria bash tests/unit/lib/dsl.sh <file.test>
 # Env: SATRIA, UNIT_REPO, UNIT_TMP, UNIT_JOBS, UNIT_CLASS (cold|snap),
@@ -33,7 +35,7 @@ UNIT_JOBS=${UNIT_JOBS:-2}
 UNIT_CLASS=${UNIT_CLASS:-}
 UNIT_DISCOVERY=${UNIT_DISCOVERY:-}
 
-declare -A VAR OUT RC MTIME MTIME_T
+declare -A VAR OUT RC MTIME MTIME_T BGPID
 PASSN=0 FAILN=0 KEEP=0 WORK='' MODE='workspace' FIX='' RESP=''
 COLLECT=0 CBUF='' PEND=''
 COLLECT=0 CBUF='' PEND=''
@@ -372,11 +374,12 @@ tick() {
 }
 
 do_run() { # $1=label, sisanya argumen satria (verbatim)
-  local label=$1; shift
+  local label=$1 _rc; shift
   local outf="$WORK/.out.$label.txt"
   ( cd "$WORK" && env NO_COLOR=1 "$SATRIA" "$@" > "$outf" 2>&1 )
+  _rc=$?   # assignment array me-reset $? — rekam dulu
   OUT[$label]=$outf
-  RC[$label]=$?
+  RC[$label]=$_rc
 }
 
 label_out() { # $1=label → berkas out; gagal bila run belum ada
@@ -528,7 +531,7 @@ stmt_exec() { # $1=obj $2=aksi $3=argumen mentah $4=baris
       local p=${args%%" as "*} n=${args##*" as "}
       MTIME[$n]=$(wpath "$p")
       MTIME_T[$n]=$(stat -c %y "$(wpath "$p")") ;;
-    run.build|run.cmd|run.exec)
+    run.build|run.cmd|run.exec|run.bg|run.wait|run.stop|run.tool)
       [ -x "$SATRIA" ] || precond "binary satria tidak ada: $SATRIA (set SATRIA=...)"
       local -a A=()
       read -r -a A <<<"$args"
@@ -543,14 +546,69 @@ stmt_exec() { # $1=obj $2=aksi $3=argumen mentah $4=baris
         case "$MODE" in workspace) do_run "$label" -j"$UNIT_JOBS" -w ;; *) do_run "$label" -j"$UNIT_JOBS" ;; esac
       elif [ "$obj.$aksi" = run.exec ]; then
         [ ${#A[@]} -gt 0 ] || die "run.exec butuh program"
-        local rf="$WORK/.out.$label.txt"
+        local rf="$WORK/.out.$label.txt" _rc
         ( cd "$WORK" && "${A[0]}" "${A[@]:1}" > "$rf" 2>&1 )
+        _rc=$?   # assignment array me-reset $? — rekam dulu
         OUT[$label]=$rf
-        RC[$label]=$?
+        RC[$label]=$_rc
+      elif [ "$obj.$aksi" = run.bg ]; then
+        [ ${#A[@]} -gt 0 ] || die "run.bg butuh argumen"
+        local rf="$WORK/.out.$label.txt"
+        # exec: PID latar = satria itu sendiri (run.stop menarget sinyal benar)
+        ( cd "$WORK" && exec "$SATRIA" "${A[@]}" ) > "$rf" 2>&1 &
+        BGPID[$label]=$!
+        OUT[$label]=$rf
+      elif [ "$obj.$aksi" = run.wait ]; then
+        local wl=${A[0]:-last} lim=${A[1]:-120} n=0 _rc
+        [ -n "${BGPID[$wl]:-}" ] || die "run.wait: tidak ada proses latar '$wl' (run.bg dulu)"
+        while kill -0 "${BGPID[$wl]}" 2> /dev/null; do
+          sleep 0.1; n=$((n + 1))
+          [ "$n" -le $((lim * 10)) ] || die "run.wait: lewat batas ${lim}s: $wl"
+        done
+        wait "${BGPID[$wl]}"; _rc=$?; RC[$wl]=$_rc
+      elif [ "$obj.$aksi" = run.stop ]; then
+        local sl=${A[0]:-last}
+        [ -n "${BGPID[$sl]:-}" ] || die "run.stop: tidak ada proses latar '$sl'"
+        kill -INT "${BGPID[$sl]}" 2> /dev/null || true
+      elif [ "$obj.$aksi" = run.tool ]; then
+        [ ${#A[@]} -gt 0 ] || die "run.tool butuh skrip"
+        local ts=${A[0]} rf="$WORK/.out.$label.txt"
+        [ -f "$UNIT_REPO/$ts" ] || die "run.tool: skrip tidak ada: $ts"
+        ( cd "$UNIT_REPO" && sh "$UNIT_REPO/$ts" "${A[@]:1}" > "$rf" 2>&1 )
+        _rc=$?
+        OUT[$label]=$rf
+        RC[$label]=$_rc
       else
         [ ${#A[@]} -gt 0 ] || die "run.cmd butuh argumen"
         do_run "$label" "${A[@]}"
       fi ;;
+    stage.set)   # <berkas> <isi> — rekaman staging sintetis (kontrak run)
+      local sp=${args%% *} sc
+      sc=$(unesc "$(unq "${args#* }")")
+      mkdir -p "$WORK/$(dirname "$sp")"
+      printf '%s\n' "$sc" > "$WORK/$sp" ;;
+    stage.log)   # <berkas> <teks> — tambah satu baris log staging
+      local lp=${args%% *} lc
+      lc=$(unesc "$(unq "${args#* }")")
+      mkdir -p "$WORK/$(dirname "$lp")"
+      printf '%s\n' "$lc" >> "$WORK/$lp" ;;
+    text.count)  # <path> <pola> [as <nama>] — jumlah baris cocok (grep -cE)
+      local -a T=()
+      read -r -a T <<<"$args"
+      [ ${#T[@]} -ge 2 ] || die "bentuk: text.count <path> <pola> [as <nama>]"
+      local tc
+      tc=$(grep -cE -- "${T[1]}" "$WORK/${T[0]}" 2> /dev/null) || true
+      if [ -n "${T[2]:-}" ] && [ "${T[2]}" = as ]; then
+        [ -n "${T[3]:-}" ] || die "text.count: nama variabel kosong setelah as"
+        VAR[${T[3]}]=$tc
+      else
+        echo "INFO: text.count ${T[0]} = $tc"
+      fi ;;
+    text.aggregate) # <src> <dst> — sort | uniq -c | sort -rn | head
+      local -a T2=()
+      read -r -a T2 <<<"$args"
+      [ ${#T2[@]} -eq 2 ] || die "bentuk: text.aggregate <src> <dst>"
+      sort "$WORK/${T2[0]}" | uniq -c | sort -rn | head > "$WORK/${T2[1]}" ;;
     rc.*|out.*|file.exists|file.absent|file.same|file.contains|mtime.*)
       assert_exec "$obj" "$aksi" "$args" "$klausa" ;;
     *)

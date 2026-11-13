@@ -1,0 +1,25 @@
+# run.bg + run.wait: spawn SATRIA di latar, tunggu, rc & output tercatat.
+# expect: lulus=3 gagal=0 rc=0
+@suite project
+@purpose "run.bg/run.wait: siklus proses latar"
+
+file.write Buildfile <<T
+use project
+T
+file.write src/main.c <<T
+int main(void){return 0;}
+T
+run.build as cold
+
+run.bg -j2 as app
+run.wait app 30
+@response app
+  rc.ok
+  out.contains "Nothing to build"
+@end
+
+@set gone exists(.out.app.txt)
+file.write v.txt <<T
+{gone}
+T
+file.contains v.txt ^1$

@@ -149,10 +149,10 @@ Kaidah penulisan:
 | `run.cmd <args…> [as <label>]` | M0 | Panggilan satria verbatim | `version`, `-w -g compdb`, `help`, `trace` |
 | `run.exec <bin> [args…] [as <label>]` | M1 | Jalankan program HASIL build | embed_getembed (`bin/bade`) |
 | `run.bg <args…> [as <label>]` | M3 | Run di latar + rekam startup | background (`-w &`) |
-| `run.stop [label]` / `run.wait [label] [batas]` | M3 | Kendali proses run | build_resume (Ctrl+C), background |
-| `run.tool <skrip> [args…] [as <label>]` | M3 | Jalankan alat repo (bukan shell inline) | `scripts/gen_tracer_src.sh` |
-| `stage.set <berkas> <isi>` / `stage.log <teks>` | M3 | Rekaman staging sintetis (run.pid, run.env, plan.tsv, timing) tanpa run nyata | watcher_staging |
-| `text.count <path> <pola>` / `text.aggregate <path>` | M3 | Hitung baris cocok; agregasi `sort\|uniq -c\|sort -rn\|head` | trace_summary (pipeline manual) |
+| `run.stop [label]` / `run.wait [label] [batas]` | M3 | Kendali proses latar: `stop` kirim SIGINT; `wait` tunggu + rc tercatat, batas detik (default 120) | build_resume (Ctrl+C), background |
+| `run.tool <skrip> [args…] [as <label>]` | M3 | Jalankan alat repo (cwd=UNIT_REPO; bukan shell inline) | `scripts/gen_tracer_src.sh` |
+| `stage.set <berkas> <isi>` / `stage.log <berkas> <teks>` | M3 | Rekaman staging sintetis (run.pid, run.env, plan.tsv, timing) tanpa run nyata | watcher_staging |
+| `text.count <path> <pola> [as <nama>]` / `text.aggregate <src> <dst>` | M3 | Hitung baris cocok (`as` → variabel `{nama}`); agregasi `sort\|uniq -c\|sort -rn\|head` | trace_summary (pipeline manual) |
 
 ## Objek hasil (asersi — di dalam `@response`)
 
@@ -423,10 +423,10 @@ run.cmd watch as w
 | p_meta_noop | snap | workspace | M1 | `env.set SATRIA_CACHE_TRACE` + contains |
 | cmdhelp_crlf | snap | — | M1 | `file.copy crlf` + escape `\r` |
 | build_resume | cold | project | M2 | `@for 1..30`, interpolasi, fail/fix — A–C di `build_resume_abc.test`; D (Ctrl+C) menunggu M3 |
-| background | cold | project,workspace | M3 | `run.bg`, `@while` polling, replay watch |
-| watcher_staging | snap | — | M3 | `stage.set/log`, multi-watch, lock basi |
-| trace_summary | cold* | workspace | M3 | `text.count/aggregate` vs `satria trace` |
-| trace_src_sync | snap | — | M3 | `run.tool` + `file.same` + `repo()` |
+| background | cold | project,workspace | M3 | `run.bg`, `@while` polling, replay watch — subset DSL di `background_watch.test`; SIGSTOP/kalibrasi Ctrl+C tetap di `.sh` |
+| watcher_staging | snap | — | M3 | tetap `.sh` (proses-latar non-satria + sinyal); `stage.set/log` didemonstrasi di kit |
+| trace_summary | cold* | workspace | M3 | `text.count/aggregate` — subset DSL di `trace_summary_basic.test`; paritas hitungan `top` (ekstraksi kunci) tetap di `.sh` |
+| trace_src_sync | snap | — | M3 | `run.tool` + `file.same` + `repo()` — penuh di `.test` (`.sh` ter-shadow) |
 
 `*` = klasifikasi "sementara cold" di classes.conf. Sampai milestone-nya
 tercapai, tes itu tetap `.sh` (transisi, bukan pengecualian desain).
@@ -440,7 +440,7 @@ tercapai, tes itu tetap `.sh` (transisi, bukan pengecualian desain).
 | M0 | Header + pernyataan objek dasar + `@response/@guard/@requires/@include/@set/@get/@find` (tanpa ekspresi) + selektor source/binary + verdict | contoh kecil tiap aksi M0 |
 | M1 (✓) | Evaluator ekspresi (predikat, pembanding, ternary), variabel `@set/@get/@find`, `@return` badan utama, interpolasi `{}`, escape, selektor embed + `repo()`/`work()`/`ws()` | tabel ekspresi benar/salah — `tests/unit/dsl/` 8/8 |
 | M2 (✓) | `@if/@else`, `@for` + rentang/koleksi, `@while` | kit `tests/unit/dsl/` (blok + `@include as`) + pilot `build_resume_abc` |
-| M3 | `run.bg/stop/wait`, `stage`, `text`, `run.tool` | staging sintetis + siklus proses |
+| M3 (✓) | `run.bg/stop/wait`, `stage`, `text`, `run.tool` | kit (run_bg, stage_text) + pilot trace/background |
 
 - Runtime M0 cukup parser baris (`read`); evaluator M1+ diekstrak jadi fungsi
   tersendiri agar mudah diuji tanpa menjalankan satria.
@@ -507,6 +507,6 @@ resmi untuk tes di `tests/unit/common`.
 - [x] M2: `@if/@else`, `@for` + interpolasi blok, `@while` — badan blok dikumpulkan ke berkas event lalu diputar ulang (id unik per invokasi, aman bersarang); rentang `a..b` dua arah; koleksi selektor/`{var}`; guard 1000 iterasi `@while` — kit `tests/unit/dsl/` 12/12
 - [x] M2 pilot: `build_resume_abc.test` (A–C, 8/8 via `unit.sh`) + fragmen `tests/unit/fragmen/toolchain.test` (`@return` ternary, dikonsumsi `@include … as` di kit) — `build_resume.sh` tetap berjalan (kasus D Ctrl+C menunggu M3 `run.bg/stop`); satria keluar rc 0 walau compile/link gagal, jadi asersi pakai hitungan `OK ` + keberadaan binary
 - [x] Contoh acuan `example.test` + `example.t` (8/8 via `unit.sh`) — nama sama `.test` > `.t` > `.sh`, discovery mendeduplikasi supaya keduanya bisa hidup berdampingan
-- [ ] M3: `run.bg/stop/wait`, `stage`, `text.count/aggregate`, `run.tool`
-- [ ] M3 pilot: background.test + watcher_staging.test + trace_summary.test + trace_src_sync.test
+- [x] M3: `run.bg/stop/wait`, `stage`, `text.count/aggregate`, `run.tool` — `run.bg` memakai `exec` dalam subshell (PID latar = satria; sinyal benar); `run.stop` = SIGINT, `run.wait [label] [batas]` rekam rc; `run.tool` cwd=UNIT_REPO; `stage.set <berkas> <isi>`/`stage.log <berkas> <teks>`; `text.count … [as <nama>]` (pola tanpa spasi — kutip tak diproses), `text.aggregate <src> <dst>`. Bug laten ditemukan: assignment elemen array me-reset `$?` → `RC[label]` selalu 0; semua rc kini direkam via `_rc=$?` — kit `tests/unit/dsl/` 14/14
+- [x] M3 pilot: `trace_src_sync.test` penuh via `run.tool` (2/2, `.sh` ter-shadow); `trace_summary_basic.test` (8/8 — paritas hitungan `top` tetap di `.sh`); `background_watch.test` (14/14 — spawn/startup/watch saat berjalan/ditolak setelah selesai; SIGSTOP + Ctrl+C tetap di `background.sh`); `watcher_staging` tetap `.sh` (proses-latar non-satria) — sweep miniws penuh 348 asersi / 29 tes, 0 gagal
 - [x] Contoh acuan `example.test` untuk penulis tes baru (lihat butir M2 pilot)

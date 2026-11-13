@@ -1,0 +1,33 @@
+# run.tool: alat repo (cwd = UNIT_REPO) + stage.set/log + text.count/aggregate.
+# expect: lulus=8 gagal=0 rc=0
+@suite project
+@purpose "run.tool, stage, text"
+
+run.tool tests/unit/dsl/tool.sh work(t.txt) satu dua as tl
+@response tl
+  rc.ok
+  file.contains t.txt ^satu dua$
+@end
+
+stage.set targets/demo/log/run.pid 4242
+stage.log targets/demo/log/run.log "> Running alpha [cold]"
+file.exists targets/demo/log/run.pid
+file.contains targets/demo/log/run.pid ^4242$
+file.contains targets/demo/log/run.log ^> Running alpha \[cold\]$
+
+file.write log.txt <<T
+a
+b
+a
+c
+T
+text.count log.txt ^a$ as na
+@set ok {na} == 2
+file.write v.txt <<T
+{ok}
+T
+file.contains v.txt ^1$
+
+text.aggregate log.txt agg.txt
+file.contains agg.txt 2 a$
+file.contains agg.txt 1 b$

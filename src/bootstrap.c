@@ -268,6 +268,8 @@ int bootstrapParse(int argc, const char *argv[], Bootstrap *bs) {
       bs->cmd = CMD_RELEASE;
     } else if (strcmp(cmd, "log") == 0 || strcmp(cmd, "--log") == 0) {
       bs->cmd = CMD_LOG;
+    } else if (strcmp(cmd, "test") == 0) {
+      bs->cmd = CMD_TEST;
     } else if (strcmp(cmd, "watch") == 0) {
       bs->cmd = CMD_WATCH;
     } else if (strcmp(cmd, "version") == 0 || strcmp(cmd, "--version") == 0) {

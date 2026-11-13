@@ -245,6 +245,11 @@ int satriaRun(int argc, const char *argv[]) {
     rc = 2;
     break;
 
+  case CMD_TEST:
+    fprintf(stderr,"[satria]: satria test is not ready implementation\n");
+    rc = 0;
+    break;
+
   case CMD_WATCH: /* `satria watch` — pantau build background satu-proyek (§3) */
     rc = bgWatch(false, bs.watch_full);
     break;

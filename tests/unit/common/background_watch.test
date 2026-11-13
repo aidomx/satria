@@ -1,0 +1,53 @@
+@suite workspace
+@fixture miniws
+@requires cold
+@purpose "Background + watch: spawn, startup direkam, watch saat berjalan, ditolak setelah selesai"
+
+# port subset background.sh (bagian yang terekspresikan DSL):
+# SIGSTOP/kalibrasi tidak memungkinkan di sini — watch dipasang segera
+# setelah berkas startup muncul (cold miniws jauh lebih lambat dari itu).
+
+fixture.copy
+file.append Buildfile.ws flags = MMD, MP
+file.append Buildfile.ws background = true
+
+run.bg -j2 -w as bg
+
+# spawn: kontrol kembali segera; startup direkam (cold), PID tertulis
+@while not exists(.satria/background.startup)
+  time.tick
+@end
+file.exists .satria/workspace.pid
+file.contains .satria/background.startup discovery
+
+# watch terpasang SAAT build berjalan: replay startup + status success
+run.cmd -j2 -w watch as w
+@response w
+  rc.ok
+  out.matches "^startup$"
+  out.contains "> status : success"
+  out.contains Summary
+@end
+
+# teardown: PID dihapus, log berisi output build
+@while exists(.satria/workspace.pid)
+  time.tick
+@end
+file.absent .satria/workspace.pid
+file.contains .satria/background.log Summary
+file.contains .satria/background.status success
+
+# watch baru setelah run selesai: DITOLAK
+run.cmd -j2 -w watch as w2
+@response w2
+  rc.fail
+  out.contains "tidak ada build background"
+@end
+
+# no-op berikutnya dilayani inline (router), tanpa child
+run.build as noop
+@response noop
+  rc.ok
+  out.contains "Nothing to build"
+  file.absent .satria/workspace.pid
+@end

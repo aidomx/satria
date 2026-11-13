@@ -1,0 +1,43 @@
+@suite workspace
+@fixture miniws
+@requires cold
+@purpose "satria trace: ringkasan, format gaya-strace, setara wc -l, raw, tracer"
+
+fixture.copy
+work.clean all
+run.build as cold
+@response cold
+  rc.ok
+@end
+
+# 1) satria trace berjalan, rc child diteruskan (0 pada no-op), ringkasan tercetak
+run.cmd -j2 trace --out work(t.log) -- -w core as tr
+@response tr
+  rc.ok
+  out.contains "> trace   : "
+@end
+
+# log terbentuk dan berisi baris gaya-strace: <op>(...) = <hasil>
+file.exists t.log
+text.count t.log ^[a-z_0-9]+\(.+\).= as fmt
+@set fmtok {fmt} == lines(t.log)
+file.write fmt.txt <<T
+{fmtok}
+T
+file.contains fmt.txt ^1$
+
+# 2) total akses pada ringkasan = jumlah baris log (wc -l)
+@set m lines(t.log)
+file.contains .out.tr.txt trace   : {m} akses
+
+# 3) --raw: stream isi log setelah ringkasan, setara jumlah baris log
+run.cmd -j2 trace --raw --out work(t2.log) -- -w core as tr2
+text.count .out.tr2.txt ^[a-z_0-9]+\( as raw
+@set rawok {raw} == lines(t2.log)
+file.write raw.txt <<T
+{rawok}
+T
+file.contains raw.txt ^1$
+
+# 4) tracer tersimpan di .satria/trace (dibangun otomatis bila belum ada)
+file.exists .satria/trace/openat_trace.so
