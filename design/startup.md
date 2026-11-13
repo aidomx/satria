@@ -172,7 +172,7 @@ Daftar seluruh sumber workspace. Tempat resmi untuk memetakan alamat ke path.
 > - Build menulis dan membaca format `<alamat> <type> <size> <mtime> <path>` di atas. Header file `SATRIASRC2 <cwd>`; record `R <folder> <ext>` tetap dipakai untuk indeks discovery. File format lama `SATRIASRC1` ditolak saat dibaca → di-walk ulang dan ditulis ulang sebagai `SATRIASRC2` (self-heal), tanpa migrasi manual.
 > - `<alamat>` diverifikasi terhadap `csHash(path)` saat dibaca. Tabrakan hash (alamat sama, path beda) membuat kedua entri invalid → dihitung ulang.
 > - Tabel alamat -> path untuk cache no-op sekarang ada di `sources.cache` (satu sumber kebenaran). `caches/paths.cache` sudah tidak ditulis: file itu dihapus saat save build sukses.
-> - Cache no-op aktif secara default; nonaktifkan dengan `SATRIA_CACHE_NOOP=0`. Terverifikasi: `common/cache_noop.sh` 24/24, `common/router_noop.sh` 12/12, `opts_sources_sync.sh` 26/26, `cache_store` unit 5096 pengecekan.
+> - Cache no-op aktif secara default; nonaktifkan dengan `SATRIA_CACHE_NOOP=0`. Terverifikasi: `common/cache_noop.test` 24/24, `common/router_noop.sh` 12/12, `opts_sources_sync.sh` 26/26, `cache_store` unit 5096 pengecekan.
 > - **Baris P kini bermetadata** (2026-10-20): `P <alamat> <tipe> <content> <time> <size> <path>` — inilah basis **fast path no-op**: semua baris P + stat cocok (non-racy) -> no-op sah TANPA membuka `fingerprint.cache` (satu baca sources.cache + N stat; trace `P-fast hit` via `SATRIA_CACHE_TRACE`). Sentuh -> fast path menolak; jalur penuh memvalidasi (hash isi), PATCH fingerprint, menyegarkan baris P + menyinkronkan route sources di opts.cache; run berikutnya kembali P-fast. Format lama tanpa metadata: fast path ditolak (jalur penuh menilai), di-upgrade otomatis pada no-op valid berikutnya. Terverifikasi: `p_meta_noop.sh` 32/32; 30 run pada workspace uji: P-fast 2.68s vs jalur penuh 5.24s per no-op; fingerprint.cache 42KB tidak dibaca sama sekali pada fast path.
 
 ### `caches/*`
@@ -407,7 +407,7 @@ Legenda: `[x]` selesai dan terverifikasi · `[~]` sebagian · `[ ]` belum · `[-
 - [x] `sources.cache` format `SATRIASRC2` (`<alamat> <type> <size> <mtime> <path>`), dengan alamat diverifikasi terhadap `csHash(path)` dan self-heal dari `SATRIASRC1`.
 - [x] Migrasi `caches/paths.cache` ke `sources.cache` (paths.cache dihapus saat save sukses).
 - [x] Perluasan `tests/miniws` untuk archive, embed, library, alias, dan dependensi sirkular.
-- [x] Cache no-op untuk archive-only, objek bersarang, embed, dan output alias. *`common/cache_noop.sh` 24/24. Parser `.d` membuang `:` pada target kosong `-MP`; proyek tanpa objek tidak menggagalkan cache.*
+- [x] Cache no-op untuk archive-only, objek bersarang, embed, dan output alias. *`common/cache_noop.test` 24/24. Parser `.d` membuang `:` pada target kosong `-MP`; proyek tanpa objek tidak menggagalkan cache.*
 - [x] Cache no-op dengan release aktif lewat `artifact.cache` (§9). *Terverifikasi dengan perubahan artefak dan input pack.*
 - [x] Default `SATRIA_CACHE_NOOP` aktif (on); nonaktif dengan `SATRIA_CACHE_NOOP=0`. *`bench/ws.sh` 12/12 di kedua jalur.*
 - [x] `report.blob` diputar ulang pada no-op (§10).

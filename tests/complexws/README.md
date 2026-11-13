@@ -17,7 +17,7 @@ nyata (`tests/rupaws`) yang build-nya butuh puluhan menit.
 
 Store catatan memakai direktori `$RUPA_HOME` (default `.rupa`) dan satu
 catatan per baris di `notes.txt`, jadi tes bisa memeriksa efek sampingnya di
-disk. Keluaran tanpa argumen sengaja dipertahankan: `tests/unit/common/embed_getembed.sh`
+disk. Keluaran tanpa argumen sengaja dipertahankan: `tests/unit/common/embed_getembed.test`
 memeriksa `bade=7` dan `tests/miniws` memakai keluaran yang sama.
 
 Modul tersimpan di `modules/rupa_modules.tar` (diproduksi `rupamod`, arsip

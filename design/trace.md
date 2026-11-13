@@ -57,7 +57,7 @@ ulang bila sumber berubah atau `.so` belum ada. `--so FILE` memakai tracer
 prebuilt tanpa build.
 
 Ubah tracer: edit `src/trace/tracer.src`, lalu jalankan
-`sh scripts/gen_tracer_src.sh`. `tests/unit/common/trace_src_sync.sh` gagal bila
+`sh scripts/gen_tracer_src.sh`. `tests/unit/common/trace_src_sync.test` gagal bila
 header belum digenerate ulang.
 
 ## Ringkasan
@@ -97,4 +97,4 @@ No-op `satria -w core` menghasilkan ~90–230 akses. Yang dominan:
 `tests/unit/common/trace_summary.sh`: total akses = `wc -l` log, dan hitungan teratas
 = key `op+path` (dikstrak dari baris strace-gaya lalu `sort | uniq -c`), pada
 log yang sama.
-`tests/unit/common/trace_src_sync.sh`: `tracer_src.h` sama dengan hasil generate dari `tracer.src`.
+`tests/unit/common/trace_src_sync.test`: `tracer_src.h` sama dengan hasil generate dari `tracer.src`.

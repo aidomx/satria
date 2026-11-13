@@ -211,7 +211,8 @@ runtime sehingga `contains` aman dari SGR.
 
 # Contoh terjemahan dari tests/unit/common
 
-Ilustrasi rancangan (bukan migrasi final); teks asersi dikutip dari tes aslinya.
+Migrasi final — berkas `.sh` asli yang jadi acuan ada di
+`tests/unit/common/arsip/` (skrip aslinya dikutip di tiap judul).
 
 ### report_binaries_uptodate.sh → report_binaries_uptodate.test
 
@@ -422,11 +423,11 @@ run.cmd watch as w
 | embed_stamp_skip | cold* | workspace | M1 | contoh §terjemahan (time.mark/mtime) |
 | p_meta_noop | snap | workspace | M1 | `env.set SATRIA_CACHE_TRACE` + contains |
 | cmdhelp_crlf | snap | — | M1 | `file.copy crlf` + escape `\r` |
-| build_resume | cold | project | M2 | `@for 1..30`, interpolasi, fail/fix — A–C di `build_resume_abc.test`; D (Ctrl+C) menunggu M3 |
+| build_resume | cold | project | M2 | `@for 1..30`, interpolasi, fail/fix — A–C di `build_resume_abc.test`; D (Ctrl+C) tetap di `.sh` (kalibrasi timing tak terekspresikan DSL) |
 | background | cold | project,workspace | M3 | `run.bg`, `@while` polling, replay watch — subset DSL di `background_watch.test`; SIGSTOP/kalibrasi Ctrl+C tetap di `.sh` |
 | watcher_staging | snap | — | M3 | tetap `.sh` (proses-latar non-satria + sinyal); `stage.set/log` didemonstrasi di kit |
 | trace_summary | cold* | workspace | M3 | `text.count/aggregate` — subset DSL di `trace_summary_basic.test`; paritas hitungan `top` (ekstraksi kunci) tetap di `.sh` |
-| trace_src_sync | snap | — | M3 | `run.tool` + `file.same` + `repo()` — penuh di `.test` (`.sh` ter-shadow) |
+| trace_src_sync | snap | — | M3 | `run.tool` + `file.same` + `repo()` — port penuh; `.sh` asli di `arsip/` |
 
 `*` = klasifikasi "sementara cold" di classes.conf. Sampai milestone-nya
 tercapai, tes itu tetap `.sh` (transisi, bukan pengecualian desain).
@@ -484,8 +485,9 @@ baris. Status: `unit_runner.sh` mengonsumsi parser via `tests/unit/lib/dsl.sh`
    keduanya.
 8. **Heredoc fleksibel**: penutup opsional — tanpa penutup, isi berakhir di
    EOF (sah); marker bebas satu token; hanya pada `file.write`.
-9. **`satria test` (parser berpindah ke satria)**: menunggu M0–M3 selesai dan
-   stabil — sudah bagian dari rencana.
+9. **`satria test` (parser berpindah ke satria)**: M0–M3 sudah selesai dan
+   stabil — siap menjadi langkah berikutnya (stub `CMD_TEST` sudah ada di
+   `src/satria.c`).
 
 Tersisa terbuka (kecil): varian `<<-T` buang-indentasi; kapan `.t` dipakai
 resmi untuk tes di `tests/unit/common`.
@@ -503,10 +505,11 @@ resmi untuk tes di `tests/unit/common`.
 - [x] M0: integrasi `unit.sh` (discovery `*.test`/`*.t` + `*.sh`, nama sama `.test`/`.t` menang; staging `parser.sh`; eksekusi via `dsl.sh` dengan env `UNIT_CLASS/UNIT_FIXTURE/UNIT_DISCOVERY/SATRIA`)
 - [x] M0 pilot: report_binaries_uptodate.test (3/3) + cache_noop.test (24/24) lewat `unit.sh`; asersi cache yang butuh penulisan-ulang berkas (alamat nol, self-heal SATRIASRC1) menunggu M1
 - [x] M1: evaluator ekspresi + ternary; variabel `@set/@get/@find`; `@return` badan utama; interpolasi `{}`; escape; `time.mark`/mtime; `run.exec`; `env.set`; `file.copy crlf`; `repo()`/`work()`/`ws()`; predikat `size()` — kit konforman `tests/unit/dsl/` 8/8
-- [x] M1 pilot: embed_stamp_skip.test (8/8) + cmdhelp_crlf.test (7/7) + embed_getembed.test (24/24) lewat `unit.sh` miniws; `p_meta_noop` menunggu M2 (butuh penulisan-ulang cache via `sed -i`, tak terekspresikan DSL)
+- [x] M1 pilot: embed_stamp_skip.test (8/8) + cmdhelp_crlf.test (7/7) + embed_getembed.test (24/24) lewat `unit.sh` miniws; `p_meta_noop` tidak diport — butuh penulisan-ulang cache via `sed -i`, tak terekspresikan DSL (tetap `.sh`)
 - [x] M2: `@if/@else`, `@for` + interpolasi blok, `@while` — badan blok dikumpulkan ke berkas event lalu diputar ulang (id unik per invokasi, aman bersarang); rentang `a..b` dua arah; koleksi selektor/`{var}`; guard 1000 iterasi `@while` — kit `tests/unit/dsl/` 12/12
-- [x] M2 pilot: `build_resume_abc.test` (A–C, 8/8 via `unit.sh`) + fragmen `tests/unit/fragmen/toolchain.test` (`@return` ternary, dikonsumsi `@include … as` di kit) — `build_resume.sh` tetap berjalan (kasus D Ctrl+C menunggu M3 `run.bg/stop`); satria keluar rc 0 walau compile/link gagal, jadi asersi pakai hitungan `OK ` + keberadaan binary
+- [x] M2 pilot: `build_resume_abc.test` (A–C, 8/8 via `unit.sh`) + fragmen `tests/unit/fragmen/toolchain.test` (`@return` ternary, dikonsumsi `@include … as` di kit) — `build_resume.sh` tetap berjalan (kasus D Ctrl+C: kalibrasi + sinyal timing, tetap `.sh`); satria keluar rc 0 walau compile/link gagal, jadi asersi pakai hitungan `OK ` + keberadaan binary
 - [x] Contoh acuan `example.test` + `example.t` (8/8 via `unit.sh`) — nama sama `.test` > `.t` > `.sh`, discovery mendeduplikasi supaya keduanya bisa hidup berdampingan
 - [x] M3: `run.bg/stop/wait`, `stage`, `text.count/aggregate`, `run.tool` — `run.bg` memakai `exec` dalam subshell (PID latar = satria; sinyal benar); `run.stop` = SIGINT, `run.wait [label] [batas]` rekam rc; `run.tool` cwd=UNIT_REPO; `stage.set <berkas> <isi>`/`stage.log <berkas> <teks>`; `text.count … [as <nama>]` (pola tanpa spasi — kutip tak diproses), `text.aggregate <src> <dst>`. Bug laten ditemukan: assignment elemen array me-reset `$?` → `RC[label]` selalu 0; semua rc kini direkam via `_rc=$?` — kit `tests/unit/dsl/` 14/14
-- [x] M3 pilot: `trace_src_sync.test` penuh via `run.tool` (2/2, `.sh` ter-shadow); `trace_summary_basic.test` (8/8 — paritas hitungan `top` tetap di `.sh`); `background_watch.test` (14/14 — spawn/startup/watch saat berjalan/ditolak setelah selesai; SIGSTOP + Ctrl+C tetap di `background.sh`); `watcher_staging` tetap `.sh` (proses-latar non-satria) — sweep miniws penuh 348 asersi / 29 tes, 0 gagal
+- [x] M3 pilot: `trace_src_sync.test` penuh via `run.tool` (2/2, port utuh); `trace_summary_basic.test` (8/8 — paritas hitungan `top` tetap di `.sh`); `background_watch.test` (14/14 — spawn/startup/watch saat berjalan/ditolak setelah selesai; SIGSTOP + Ctrl+C tetap di `background.sh`); `watcher_staging` tetap `.sh` (proses-latar non-satria) — sweep miniws penuh 348 asersi / 29 tes, 0 gagal
+- [x] Arsip `.sh` yang sudah tergantikan port `.test` penuh ke `tests/unit/common/arsip/` (cache_noop, report_binaries_uptodate, cmdhelp_crlf, embed_stamp_skip, embed_getembed, trace_src_sync) — discovery `.test` > `.t` > `.sh` membuat mereka tak pernah dieksekusi lagi; `.sh` yang masih berjalan tetap di `common/`
 - [x] Contoh acuan `example.test` untuk penulis tes baru (lihat butir M2 pilot)

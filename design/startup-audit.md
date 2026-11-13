@@ -16,7 +16,7 @@ persyaratan Windows yang belum ada sama sekali.
 | `sources.cache` format `SATRIASRC2`, self-heal dari `SATRIASRC1` | Uji header sebelum & sesudah |
 | Route `sources` di `opts.cache` = `st_mtime_ns` `sources.cache` | Perbandingan nilai persis |
 | Sinkronisasi dua arah | `opts_sources_sync.sh` 26/26 |
-| Cache no-op | `common/cache_noop.sh` 24/24 |
+| Cache no-op | `common/cache_noop.test` 24/24 |
 | Router | `common/router_noop.sh` 12/12 |
 | Benchmark `bench/ws.sh` (cache off & on) | satria 12/12, pembanding 11/11 |
 | `paths.cache` dihapus saat save sukses | `ws_cache_save.c` + uji build |
