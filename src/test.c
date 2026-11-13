@@ -1,7 +1,13 @@
 /* satria test — delegasi ke scripts/unit.sh (design/unit_test.md).
-   Tidak mem-parse argumen unit.sh sama sekali: satria hanya menemukan root
-   repo, lalu exec `bash <root>/scripts/unit.sh <args…>`. Porting runner ke C
-   adalah milestone M4 (design/unit_test_dsl.md). */
+   Satria hanya menemukan root repo, lalu exec `bash <root>/scripts/unit.sh
+   <args…>`. Satu-satunya manipulasi argumen (lihat cmdTest):
+   - bila argumen pertama jelas bukan binary (bukan opsi, bukan kata mode,
+     bukan path ke berkas yang ada), path binary satria itu sendiri
+     disisipkan sebagai <binary> — sehingga cukup `satria test miniws`;
+   - bila argumen pertama adalah path binary relatif-repo (mis. `bin/satria`
+     dijalankan dari subdirektori), ia diabsolutkan karena unit.sh
+     me-resolve binary relatif cwd. Dari root repo: verbatim.
+   Porting runner ke C = milestone M4 (design/unit_test_dsl.md). */
 
 #include "test.h"
 
@@ -51,40 +57,97 @@ static bool selfExeDir(const char *argv0, char *out, size_t cap) {
   return true;
 }
 
+/* Path binary ini, lengkap — untuk disisipkan sebagai <binary> shorthand. */
+static bool selfExePath(const char *argv0, char *out, size_t cap) {
+#if defined(__linux__)
+  ssize_t n = readlink("/proc/self/exe", out, cap - 1);
+  if (n > 0) {
+    out[n] = '\0';
+    return true;
+  }
+#elif defined(__APPLE__)
+  uint32_t size = (uint32_t)cap;
+  if (_NSGetExecutablePath(out, &size) == 0) return true;
+#endif
+  (void)argv0;
+  (void)cap;
+  return false;
+}
+
+/* True bila a jelas adalah binary unit.sh: berisi '/' DAN dapat dieksekusi
+   (relatif cwd, atau relatif root repo — agar jalan dari subdirektori). */
+static bool looksLikeBinary(const char *a, const char *root) {
+  if (!strchr(a, '/')) return false;
+  if (a[0] == '/') return access(a, X_OK) == 0;
+  if (access(a, X_OK) == 0) return true;
+  char p[SATRIA_MAX_PATH];
+  if ((size_t)snprintf(p, sizeof(p), "%s/%s", root, a) >= sizeof(p)) return false;
+  return access(p, X_OK) == 0;
+}
+
 /* Root repo: cwd bila scripts/unit.sh ada di sana, else parent exe dir
-   (bin/satria → repo). Path absolut dipertahankan agar `satria test` jalan
-   dari subdirektori mana pun. */
-static bool unitScriptPath(const char *argv0, char *out, size_t cap) {
-  if (fsFileExists("scripts/unit.sh")) {
-    char cwd[SATRIA_MAX_PATH];
-    if (!fsGetCwd(cwd, sizeof(cwd))) return false;
+   (bin/satria → repo). Keluarkan path skrip (out) DAN root repo (rootOut) —
+   direktori pemilik scripts/ — untuk heuristik path binary relatif-repo. */
+static bool unitScriptPath(const char *argv0, char *out, size_t cap, char *rootOut,
+                           size_t rcap) {
+  char cwd[SATRIA_MAX_PATH];
+  if (fsGetCwd(cwd, sizeof(cwd)) && fsFileExists("scripts/unit.sh")) {
     if ((size_t)snprintf(out, cap, "%s/scripts/unit.sh", cwd) >= cap) return false;
+    if ((size_t)snprintf(rootOut, rcap, "%s", cwd) >= rcap) return false;
     return true;
   }
   char dir[SATRIA_MAX_PATH];
   if (!selfExeDir(argv0, dir, sizeof(dir))) return false;
-  char root[SATRIA_MAX_PATH];
-  if ((size_t)snprintf(root, sizeof(root), "%s/..", dir) >= sizeof(root)) return false;
-  if ((size_t)snprintf(out, cap, "%s/scripts/unit.sh", root) >= cap) return false;
+  if ((size_t)snprintf(rootOut, rcap, "%s/..", dir) >= rcap) return false;
+  if ((size_t)snprintf(out, cap, "%s/scripts/unit.sh", rootOut) >= cap) return false;
   return true;
 }
 
+/* Kata mode unit_dev.sh (argumen pertama mereka bukan binary). */
+static bool isUnitModeWord(const char *a) {
+  return strcmp(a, "start") == 0 || strcmp(a, "stop") == 0 || strcmp(a, "pause") == 0 ||
+         strcmp(a, "resume") == 0;
+}
+
 int cmdTest(const char *const *args, int nargs, const char *argv0) {
-  char script[SATRIA_MAX_PATH];
-  if (!unitScriptPath(argv0, script, sizeof(script)) || !fsFileExists(script)) {
+  char script[SATRIA_MAX_PATH], root[SATRIA_MAX_PATH];
+  if (!unitScriptPath(argv0, script, sizeof(script), root, sizeof(root)) ||
+      !fsFileExists(script)) {
     fprintf(stderr, "satria test: scripts/unit.sh tidak ditemukan (bukan root repo satria?).\n");
     return 2;
   }
+  /* Shorthand + absolutisasi binary:
+     - argumen pertama bukan opsi, bukan kata mode, dan bukan path binary →
+       sisipkan binary satria ini sendiri sebagai <binary>
+       (contoh: `satria test miniws` == `satria test bin/satria miniws`);
+     - argumen pertama TERNATA path binary relatif-repo (mis. `bin/satria`
+       dari subdirektori) → absolutkan, karena unit.sh me-resolve binary
+       relatif cwd. Dari root repo tetap verbatim. */
+  const char *inject = NULL;
+  const char *rewrite = NULL; /* pengganti args[0] bila perlu absolut */
+  char self[SATRIA_MAX_PATH], abin[SATRIA_MAX_PATH];
+  if (nargs >= 1 && args[0][0] != '-' && !isUnitModeWord(args[0])) {
+    if (!looksLikeBinary(args[0], root)) {
+      if (selfExePath(argv0, self, sizeof(self))) inject = self;
+    } else if (access(args[0], X_OK) != 0) {
+      if ((size_t)snprintf(abin, sizeof(abin), "%s/%s", root, args[0]) < sizeof(abin))
+        rewrite = abin;
+    }
+  }
+
   /* exec bash langsung: tanpa shell, tanpa quoting — argumen verbatim. */
-  const char **argv = malloc((size_t)(nargs + 3) * sizeof(*argv));
+  const char **argv =
+      malloc((size_t)(nargs + 3 + (inject || rewrite ? 1 : 0)) * sizeof(*argv));
   if (!argv) {
     fprintf(stderr, "satria test: kehabisan memori.\n");
     return 2;
   }
   argv[0] = "bash";
   argv[1] = script;
-  for (int i = 0; i < nargs; i++) argv[i + 2] = args[i];
-  argv[nargs + 2] = NULL;
+  int k = 2;
+  if (inject) argv[k++] = inject;
+  for (int i = 0; i < nargs; i++) argv[k++] = (i == 0 && rewrite) ? rewrite : args[i];
+  argv[k] = NULL;
 
   pid_t pid = fork();
   if (pid < 0) {

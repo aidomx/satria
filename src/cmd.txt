@@ -321,16 +321,19 @@ Not supported on Windows (uses LD_PRELOAD/dlsym).
 ---test
 Run the repo's unit tests (delegation to scripts/unit.sh)
 
-  satria test <binary> <target> [-b] [-j N] [-o LOG] [-t TEST] [--clean]
+  satria test [binary] <target> [-b] [-j N] [-o LOG] [-t TEST] [--clean]
 
-All arguments are passed verbatim to scripts/unit.sh — satria adds nothing
-and parses nothing (the test DSL still lives in bash; porting it to C is
-milestone M4, see design/unit_test_dsl.md).
+All arguments are passed to scripts/unit.sh. If the first argument is not an
+option, a unit_dev mode word (start/stop/pause/resume), or a path to an
+existing executable, the running satria binary itself is inserted as
+<binary> — so `satria test miniws` means `satria test bin/satria miniws`.
+A repo-relative binary path given from a subdirectory is absolutized
+(unit.sh resolves <binary> against the current directory).
 
-  satria test bin/satria miniws            Full miniws sweep (cold + snap)
-  satria test bin/satria miniws -b         Baseline run
-  satria test bin/satria miniws -t cache_noop  Single test
-  satria test bin/satria miniws --clean    Clean staging first
+  satria test miniws            Full miniws sweep (cold + snap)
+  satria test miniws -t cache_noop        Single test (binary = satria itself)
+  satria test bin/satria miniws -b        Explicit binary, baseline run
+  satria test miniws --clean              Clean staging first
 
 The repo root is found from the running binary (bin/../), so `satria test`
 works from any directory inside the repo. The exit code of unit.sh is the

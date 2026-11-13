@@ -518,9 +518,10 @@ Catatan rancangan:
    keduanya.
 8. **Heredoc fleksibel**: penutup opsional — tanpa penutup, isi berakhir di
    EOF (sah); marker bebas satu token; hanya pada `file.write`.
-9. **`satria test` (parser berpindah ke satria)**: fase 1 jalan — delegasi
-   verbatim ke `scripts/unit.sh` (`src/test.c`, root dari exe). Porting mesin
-   ke C = milestone M4 (fase M4a–M4d di atas).
+9. **`satria test` (parser berpindah ke satria)**: fase 1 jalan — delegasi ke
+   `scripts/unit.sh` (`src/test.c`, root dari exe; shorthand `satria test
+   miniws` menyisipkan binary sendiri). Porting mesin ke C = milestone M4
+   (fase M4a–M4d di atas).
 
 Tersisa terbuka (kecil): varian `<<-T` buang-indentasi; kapan `.t` dipakai
 resmi untuk tes di `tests/unit/common`.
@@ -546,7 +547,7 @@ resmi untuk tes di `tests/unit/common`.
 - [x] M3 pilot: `trace_src_sync.test` penuh via `run.tool` (2/2, port utuh); `trace_summary_basic.test` (8/8 — paritas hitungan `top` tetap di `.sh`); `background_watch.test` (14/14 — spawn/startup/watch saat berjalan/ditolak setelah selesai; SIGSTOP + Ctrl+C tetap di `background.sh`); `watcher_staging` tetap `.sh` (proses-latar non-satria) — sweep miniws penuh 348 asersi / 29 tes, 0 gagal
 - [x] Arsip `.sh` yang sudah tergantikan port `.test` penuh ke `tests/unit/common/arsip/` (cache_noop, report_binaries_uptodate, cmdhelp_crlf, embed_stamp_skip, embed_getembed, trace_src_sync) — discovery `.test` > `.t` > `.sh` membuat mereka tak pernah dieksekusi lagi; `.sh` yang masih berjalan tetap di `common/`
 - [x] Contoh acuan `example.test` untuk penulis tes baru (lihat butir M2 pilot)
-- [x] `satria test` fase 1 (delegasi, tanpa porting): parsing standalone-break (pola `trace`) + `src/test.c` menemukan root repo dari exe (`/proc/self/exe`, fallback cwd bila `scripts/unit.sh` ada di cwd) lalu exec `bash scripts/unit.sh <args…>` verbatim — rc unit.sh = rc satria; sweep miniws via `satria test` 348/29, rc 0; `help test` tersedia
+- [x] `satria test` fase 1 (delegasi, tanpa porting): parsing standalone-break (pola `trace`) + `src/test.c` menemukan root repo dari exe (`/proc/self/exe`, fallback cwd bila `scripts/unit.sh` ada di cwd) lalu exec `bash scripts/unit.sh <args…>`; shorthand `satria test miniws` — binary satria sendiri disisipkan bila argumen pertama bukan opsi/kata mode/path binary, dan path binary relatif-repo dari subdirektori diabsolutkan (unit.sh me-resolve relatif cwd); rc unit.sh = rc satria; sweep miniws via `satria test miniws` 348/29, rc 0; `help test` tersedia
 - [ ] M4a: parser → C (`src/test/parser.c`) — uji unit C positif+negatif, jejak event identik
 - [ ] M4b: evaluator + eksekutor → C (`src/test/eval.c`, `src/test/exec.c`) — kit dsl 14/14 via runner C
 - [ ] M4c: runner/discovery/klasifikasi → C (`src/test/runner.c`) — sweep miniws 348/29 via runner C
