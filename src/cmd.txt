@@ -16,6 +16,7 @@ satria init -w           Create Buildfile.ws (workspace template)
 satria clean             Remove build artifacts
 satria profile <ctx>     Measure operation costs (see: help profile)
 satria trace [opts] -- <args>  Trace file access via LD_PRELOAD (see: help trace)
+satria test <args>          Run unit tests via scripts/unit.sh (see: help test)
 satria -w                Build all projects in workspace (Buildfile.ws)
 satria -w <name>         Build <name> and its dependencies
 satria -w <name> --with-cdeps  ...plus its cdeps providers (see: help workspace)
@@ -316,3 +317,22 @@ fopen/opendir print `= ok` instead of a pointer, and no per-call timing.
 
 Not supported on Windows (uses LD_PRELOAD/dlsym).
 ---endtrace
+
+---test
+Run the repo's unit tests (delegation to scripts/unit.sh)
+
+  satria test <binary> <target> [-b] [-j N] [-o LOG] [-t TEST] [--clean]
+
+All arguments are passed verbatim to scripts/unit.sh — satria adds nothing
+and parses nothing (the test DSL still lives in bash; porting it to C is
+milestone M4, see design/unit_test_dsl.md).
+
+  satria test bin/satria miniws            Full miniws sweep (cold + snap)
+  satria test bin/satria miniws -b         Baseline run
+  satria test bin/satria miniws -t cache_noop  Single test
+  satria test bin/satria miniws --clean    Clean staging first
+
+The repo root is found from the running binary (bin/../), so `satria test`
+works from any directory inside the repo. The exit code of unit.sh is the
+exit code of satria. Not available on Windows.
+---endtest

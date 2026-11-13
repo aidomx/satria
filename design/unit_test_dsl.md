@@ -442,6 +442,7 @@ tercapai, tes itu tetap `.sh` (transisi, bukan pengecualian desain).
 | M1 (✓) | Evaluator ekspresi (predikat, pembanding, ternary), variabel `@set/@get/@find`, `@return` badan utama, interpolasi `{}`, escape, selektor embed + `repo()`/`work()`/`ws()` | tabel ekspresi benar/salah — `tests/unit/dsl/` 8/8 |
 | M2 (✓) | `@if/@else`, `@for` + rentang/koleksi, `@while` | kit `tests/unit/dsl/` (blok + `@include as`) + pilot `build_resume_abc` |
 | M3 (✓) | `run.bg/stop/wait`, `stage`, `text`, `run.tool` | kit (run_bg, stage_text) + pilot trace/background |
+| M4 | Port infrastruktur test bash → C di dalam satria (parser, evaluator/eksekutor, `satria test` native tanpa bash) | kit konforman `.test` tetap hijau — output runner C harus identik |
 
 - Runtime M0 cukup parser baris (`read`); evaluator M1+ diekstrak jadi fungsi
   tersendiri agar mudah diuji tanpa menjalankan satria.
@@ -461,6 +462,38 @@ bash scripts/lib/parser.sh <file.test>   # jejak event TSV untuk inspeksi
 Event jejak: `HDR DIR BLOCK ENDB STMT OPEN TEXT CLOSE CMT`, semua bernomor
 baris. Status: `unit_runner.sh` mengonsumsi parser via `tests/unit/lib/dsl.sh`
 (staging `$STAGE/lib/parser.sh`); `unit_dev.sh` tetap tidak menyentuh keduanya.
+
+---
+
+# M4 — port infrastruktur test bash → C
+
+Tujuan: seluruh mesin test hidup di dalam binary satria — `satria test`
+menjadi runner asli, tanpa bash sama sekali. Tes tetap berkas `.test`/`.t`
+(DSL tidak berubah); yang berpindah adalah mesinnya. Setelah M4 paritas penuh,
+`scripts/unit.sh`+`unit_dev.sh`+`lib/unit_*.sh` dipensiunkan (diarsipkan).
+
+| Fase | Port dari → ke | Kriteria lulus |
+| --- | --- | --- |
+| M4a parser | `scripts/lib/parser.sh` → `src/test/parser.c` | kit parser (positif + negatif) diport jadi uji unit C; jejak event TSV identik byte-per-byte dengan parser bash |
+| M4b evaluator+eksekutor | `tests/unit/lib/dsl.sh` → `src/test/eval.c` + `exec.c` (konvensi `EV`/`CUR`, tabel `obj.aksi` → fungsi C) | kit konforman `tests/unit/dsl/` 14/14 dijalankan runner C, hasil verdict identik |
+| M4c runner/discovery | `lib/unit_runner.sh`+`unit_watcher.sh` → `src/test/runner.c`: discovery `.test`>`.t`>`.sh` + dedupe, `classes.conf`, staging/snapshot, `-j`, log/timing | sweep miniws via runner C = 348 asersi / 29 tes, log & timing.tsv setara |
+| M4d `satria test` native | delegasi `cmdTest` (src/test.c) diganti pemanggilan runner C langsung (in-process, tanpa exec) | semua tes lulus tanpa bash; arsip bash dipensiunkan |
+
+Catatan rancangan:
+
+- **Snapshot lazy-load tidak diperlukan lagi**: alasan `unit.sh` menyalin
+  loader per proses adalah bash membaca skrip secara lazy saat berjalan;
+  binary yang sudah ditautkan tidak berubah di tengah run.
+- **Runner C tetap mengisolasi kerja per tes** (staging/UNIT_TMP/kontrak cold
+  vs snap) — semantik `classes.conf` dan guard "tes [snap] tidak boleh
+  menghapus .satria" dipertahankan apa adanya.
+- **Fitur proses `.sh` sisa** (background D/Ctrl+C, trace_summary paritas
+  `top`, watcher_staging) diekspresikan di DSL C (`run.stop` = sinyal INT,
+  `text.aggregate` penuh, sinyal + kalibrasi waktu) atau diberi jalan keluar
+  eksplisit sebelum arsip bash.
+- **Klaim "tanpa bash" diverifikasi**: unit test repo sendiri (miniws +
+  complexws) dijalankan dengan binary yang tidak menyentuh sh/bash —
+  dites dengan `satria trace` (tidak ada exec bash).
 
 ---
 
@@ -485,9 +518,9 @@ baris. Status: `unit_runner.sh` mengonsumsi parser via `tests/unit/lib/dsl.sh`
    keduanya.
 8. **Heredoc fleksibel**: penutup opsional — tanpa penutup, isi berakhir di
    EOF (sah); marker bebas satu token; hanya pada `file.write`.
-9. **`satria test` (parser berpindah ke satria)**: M0–M3 sudah selesai dan
-   stabil — siap menjadi langkah berikutnya (stub `CMD_TEST` sudah ada di
-   `src/satria.c`).
+9. **`satria test` (parser berpindah ke satria)**: fase 1 jalan — delegasi
+   verbatim ke `scripts/unit.sh` (`src/test.c`, root dari exe). Porting mesin
+   ke C = milestone M4 (fase M4a–M4d di atas).
 
 Tersisa terbuka (kecil): varian `<<-T` buang-indentasi; kapan `.t` dipakai
 resmi untuk tes di `tests/unit/common`.
@@ -513,3 +546,8 @@ resmi untuk tes di `tests/unit/common`.
 - [x] M3 pilot: `trace_src_sync.test` penuh via `run.tool` (2/2, port utuh); `trace_summary_basic.test` (8/8 — paritas hitungan `top` tetap di `.sh`); `background_watch.test` (14/14 — spawn/startup/watch saat berjalan/ditolak setelah selesai; SIGSTOP + Ctrl+C tetap di `background.sh`); `watcher_staging` tetap `.sh` (proses-latar non-satria) — sweep miniws penuh 348 asersi / 29 tes, 0 gagal
 - [x] Arsip `.sh` yang sudah tergantikan port `.test` penuh ke `tests/unit/common/arsip/` (cache_noop, report_binaries_uptodate, cmdhelp_crlf, embed_stamp_skip, embed_getembed, trace_src_sync) — discovery `.test` > `.t` > `.sh` membuat mereka tak pernah dieksekusi lagi; `.sh` yang masih berjalan tetap di `common/`
 - [x] Contoh acuan `example.test` untuk penulis tes baru (lihat butir M2 pilot)
+- [x] `satria test` fase 1 (delegasi, tanpa porting): parsing standalone-break (pola `trace`) + `src/test.c` menemukan root repo dari exe (`/proc/self/exe`, fallback cwd bila `scripts/unit.sh` ada di cwd) lalu exec `bash scripts/unit.sh <args…>` verbatim — rc unit.sh = rc satria; sweep miniws via `satria test` 348/29, rc 0; `help test` tersedia
+- [ ] M4a: parser → C (`src/test/parser.c`) — uji unit C positif+negatif, jejak event identik
+- [ ] M4b: evaluator + eksekutor → C (`src/test/eval.c`, `src/test/exec.c`) — kit dsl 14/14 via runner C
+- [ ] M4c: runner/discovery/klasifikasi → C (`src/test/runner.c`) — sweep miniws 348/29 via runner C
+- [ ] M4d: `satria test` native in-process; pensiunkan `unit.sh`/`unit_dev.sh`/`lib/unit_*.sh` (arsip) — verifikasi "tanpa bash" via `satria trace`

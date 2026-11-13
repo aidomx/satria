@@ -73,6 +73,11 @@ typedef struct {
   int trace_argc;
   const char **trace_argv;
 
+  // Test specific (satria test <args unit.sh> — delegasi penuh ke
+  // scripts/unit.sh, tanpa porting; argv milik caller, tanpa strdup)
+  int test_argc;
+  const char **test_argv;
+
   // Konversi Ninja/Make (-xf / -xcf)
   const char *conv_file;
   bool conv_keep;       // true jika -xcf, false jika -xf

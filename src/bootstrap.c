@@ -68,6 +68,7 @@ static bool parseJobsArg(const char *inlineVal, bool hasInline, int *outJobs, co
 static bool bootstrapIsCommandWord(const char *s) {
   static const char *const kCommands[] = {
     "build", "clean", "init", "help", "version", "--version", "release", "watch", "log", "trace",
+    "test",
   };
   for (size_t k = 0; k < sizeof(kCommands) / sizeof(kCommands[0]); k++)
     if (strcmp(s, kCommands[k]) == 0) return true;
@@ -245,6 +246,16 @@ int bootstrapParse(int argc, const char *argv[], Bootstrap *bs) {
         brokeAtProfile = true;
         break;
       }
+      /* `test` berdiri sendiri: SEMUA argumen setelahnya milik unit.sh
+         (mis. `satria test bin/satria miniws -b -t cache_noop`) — tidak
+         diparse sebagai opsi global satria. Delegasi, tanpa porting. */
+      if (strcmp(a, "test") == 0) {
+        bs->cmd = CMD_TEST;
+        bs->test_argv = argv + i + 1;
+        bs->test_argc = argc - i - 1;
+        brokeAtProfile = true;
+        break;
+      }
     }
   }
 
@@ -268,8 +279,6 @@ int bootstrapParse(int argc, const char *argv[], Bootstrap *bs) {
       bs->cmd = CMD_RELEASE;
     } else if (strcmp(cmd, "log") == 0 || strcmp(cmd, "--log") == 0) {
       bs->cmd = CMD_LOG;
-    } else if (strcmp(cmd, "test") == 0) {
-      bs->cmd = CMD_TEST;
     } else if (strcmp(cmd, "watch") == 0) {
       bs->cmd = CMD_WATCH;
     } else if (strcmp(cmd, "version") == 0 || strcmp(cmd, "--version") == 0) {

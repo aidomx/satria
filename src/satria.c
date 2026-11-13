@@ -14,6 +14,7 @@
 #include "prof/prof.h"
 #include "trace.h"
 #include "profile.h"
+#include "test.h"
 #include "uses/workspace.h"
 
 #if __has_include("version.h")
@@ -122,6 +123,12 @@ int satriaRun(int argc, const char *argv[]) {
   if (bs.cmd == CMD_TRACE) {
     bootstrapCleanup(&bs);
     return cmdTrace(bs.trace_argv, bs.trace_argc, argv[0]);
+  }
+
+  /* satria test <args unit.sh…> — delegasi penuh ke scripts/unit.sh. */
+  if (bs.cmd == CMD_TEST) {
+    bootstrapCleanup(&bs);
+    return cmdTest(bs.test_argv, bs.test_argc, argv[0]);
   }
 
   /* Workspace hanya dipilih melalui -w. Keberadaan Buildfile.ws tidak
@@ -245,12 +252,7 @@ int satriaRun(int argc, const char *argv[]) {
     rc = 2;
     break;
 
-  case CMD_TEST:
-    fprintf(stderr,"[satria]: satria test is not ready implementation\n");
-    rc = 0;
-    break;
-
-  case CMD_WATCH: /* `satria watch` — pantau build background satu-proyek (§3) */
+  case CMD_WATCH: /* `satria watch` — pantau build background satu-proyek (§3) */
     rc = bgWatch(false, bs.watch_full);
     break;
 
