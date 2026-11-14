@@ -246,6 +246,15 @@ int runnerParallel(const WsModel *m, const WsWork *work, int n, int jobs,
              terminal/ERRLOG) — tidak memengaruhi penggretan unit test. */
           if (fd > STDERR_FILENO) close(fd);
           stateBlobForkChild(); /* buang warisan; tulisan anak ke stage sendiri */
+          /* Memo stat induk TIDAK boleh diwarisi: ia memuat stamp file yang
+             dibaca induk sebelum fork (mis. arsip embed saat gerbang no-op),
+             sementara anak yang lebih dulu selesai bisa sudah menulis ulang
+             file itu (rupamod -> modules/rupa_modules.tar). Anak bade lalu
+             melihat arsip BASI, menganggap fast-state-nya valid, dan melewatkan
+             rebuild embedded.c — pekerjaan tertinggal satu run (audit ws
+             skenario mod/dep). Serial aman karena cmdsStatMemoForget di proses
+             yang sama; di fork, tiap anak butuh memo bersih sendiri. */
+          cmdsStatMemoReset();
           /* Staging: record artefak anak TIDAK dirender live (heading & baris
              arsip adalah tanggung jawab induk saat flush worklist) — anak
              cukup mengekspornya lewat file fragment di bawah. */
