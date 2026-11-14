@@ -96,6 +96,9 @@ release.files = bin/satria:bin/satria,
 release.format = deb
 release.checksum = sha256
 
+# Optimize for release
+release.optimize = true
+
 # Metadata khusus untuk paket Debian (.deb).
 release.deb.install_prefix = /usr/local
 release.deb.maintainer = "Aidomx <aidomxdev@gmail.com>"
