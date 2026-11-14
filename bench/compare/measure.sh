@@ -28,6 +28,8 @@ run_once() {
         cold) [ "$nobj" -eq "$((NSRC+1))" ] || rc=96 ;;
         noop) [ "$nobj" -eq 0 ] || rc=96 ;;
         edit) [ "$nobj" -eq 1 ] || rc=96 ;;
+        editrel) [ "$nobj" -eq 1 ] || rc=96
+                 [ -z "$binary" ] || [ "$binary" -nt "$MARK" ] || rc=95 ;;
       esac
     fi
   fi
@@ -63,21 +65,22 @@ report() {
       if ($4 == 0) { n[g]++; v[g, n[g]] = $3; rb[g] += $5 } else bad[g]++
     }
     END {
-      nsc = split("cold noop touch edit compdb", SC, " ")
+      nsc = split("cold noop touch edit editrel compdb", SC, " ")
       desc["cold"]   = "build dari nol (Ninja graph gen, CMake/Meson configure included)"
       desc["noop"]   = "tanpa perubahan"
       desc["touch"]  = "touch 1 header, konten sama"
-      desc["edit"]   = "edit 1 source (vs lantai gcc)"
+      desc["edit"]    = "edit 1 source KOMENTAR - satria boleh no-relink; BUKAN pembanding link"
+      desc["editrel"] = "edit 1 source + fungsi baru - relink wajib semua tool (pembanding link jujur vs lantai gcc)"
       desc["compdb"] = "compile_commands.json (bear = build penuh)"
       for (si = 1; si <= nsc; si++) {
-        s = SC[si]; k = 0; nf = 0; hasfl = 0
+        s = SC[si]; k = 0; nf = 0; hasfl = 0; nofl = 0
         for (i = 1; i <= ng; i++) {
           if (gscen[i] != s) continue
           g = gs[i]
           if (n[g] > 0) {
             m = n[g]
             med = (m % 2) ? v[g, (m + 1) / 2] : (v[g, m / 2] + v[g, m / 2 + 1]) / 2
-            if (glab[i] == "gcc-floor") { FL = med; FLLO = v[g, 1]; FLHI = v[g, m]; hasfl = 1; continue }
+            if (glab[i] == "gcc-floor") { if (s != "edit") { FL = med; FLLO = v[g, 1]; FLHI = v[g, m]; hasfl = 1 } else nofl = 1; continue }
             k++; L[k] = glab[i]; M[k] = med; LO[k] = v[g, 1]; HI[k] = v[g, m]
             RB[k] = rb[g] / m; BD[k] = bad[g] + 0
           } else fl[++nf] = glab[i]
@@ -95,11 +98,16 @@ report() {
         printf "\n%s%s%s %s%s%s\n", B, toupper(s), Z, D, desc[s], Z
         mx = (k > 0) ? M[k] : 1; if (mx < 1) mx = 1
         best = (k > 0) ? M[1] : 1; if (best < 1) best = 1
+        # Seri: yang tercepat dan saingannya selisih <= 5% atau <= 1 ms.
+        # Pada kondisi seri TIDAK ada yang disebut tercepat (tanpa ★).
+        tol = best * 0.05; if (tol < 1) tol = 1
+        ntie = 0; for (i = 1; i <= k; i++) if (M[i] - M[1] <= tol) ntie++
+        seri = (ntie >= 2)
         for (i = 1; i <= k; i++) {
           len = int(M[i] / mx * BW + 0.5); if (len < 1) len = 1
           br = ""; for (j = 1; j <= BW; j++) br = br (j <= len ? "█" : "░")
-          col = (i == 1) ? G : ""
-          mark = (i == 1) ? "★" : " "
+          if (seri) { col = (i <= ntie) ? Y : ""; mark = (i <= ntie) ? "≈" : " " }
+          else      { col = (i == 1) ? G : ""; mark = (i == 1) ? "★" : " " }
           printf "  %s%s %-12s %s %6d ms %5.2f×%s", col, mark, L[i], br, M[i], M[i] / best, Z
           if (WIDE) printf "  %s(%d–%d) obj:%d%s", D, LO[i], HI[i], RB[i] + 0.5, Z
           if (WIDE && hasfl) printf " %s%+dms%s", D, M[i] - FL, Z
@@ -108,6 +116,7 @@ report() {
           printf "\n"
         }
         if (hasfl) printf "  %s┄ %-12s %6d ms  lantai: gcc -c + link (+N = overhead)%s\n", D, "gcc-floor", FL, Z
+        if (nofl) printf "  %s lantai gcc tidak dibandingkan di sini (edit komentar, tanpa relink); lihat editrel%s\n", Y, Z
         for (i = 1; i <= nf; i++) printf "  %s✗ %-12s semua run gagal%s\n", R, fl[i], Z
       }
     }' "$sorted"

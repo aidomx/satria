@@ -70,6 +70,33 @@ s_touch() {
   done
 }
 
+# Edit yang mengubah codegen (fungsi baru per run) — .o pasti berubah byte,
+# jadi SEMUA tool wajib relink. Skenario editrel memakai ini supaya perbandingan
+# terhadap gcc-floor (yang selalu link) jujur; edit komentar murni pada
+# skenario `edit` membiarkan satria lewat tanpa relink (verdict byte-object).
+relink_edit() {
+  ( cd "$PROJ" && printf '\nint bench_r%s_%s(void) { return %s; }\n' "$1" "$2" "$2" >>src/t1.c )
+}
+
+# ---- EDITREL: edit 1 source + relink pasti (vs lantai gcc) ---------------
+s_editrel() {
+  have_scenario editrel || return 0
+  local k r
+  for k in "${TOOLS[@]}"; do
+    prime_tool "$k"
+    for ((r = 1; r <= NRUN; r++)); do
+      relink_edit "$k" "$r"
+      run_once "$(label_of "$k")" editrel tool_cmd "$k"
+    done
+  done
+  # lantai (gcc langsung) — objek disiapkan lewat make
+  prime_tool make
+  for ((r = 1; r <= NRUN; r++)); do
+    relink_edit floor "$r"
+    run_once gcc-floor editrel floor_run
+  done
+}
+
 # ---- EDIT: edit 1 source (file & jumlah edit sama untuk semua tool) -------
 floor_run() {  # lantai: compile 1 file + link, tanpa build tool
   gcc -O2 -std=gnu11 -Iinclude -MMD -MP -c src/t1.c -o build/t1.o && gcc build/*.o -o bin/app

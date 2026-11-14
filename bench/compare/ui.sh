@@ -33,6 +33,7 @@ box_width() {
 rules_header() {
   echo 'Legend :'
   echo '  ★    : Tercepat pada skenario ini'
+  echo '      ≈ : Seri dengan yang tercepat (selisih <=5% atau <=1 ms, tanpa juara)'
   echo '  ×    : Rasio waktu terhadap yang tercepat'
   echo '  ✗    : Eksekusi gagal (exit non-zero)'
   echo

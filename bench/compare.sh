@@ -12,9 +12,14 @@
 #   cold   : build dari nol (cmake/meson TERMASUK langkah configure)
 #   noop   : build tanpa perubahan apa pun (metrik utama overhead)
 #   touch  : touch 1 header (konten sama) — satria: 0 recompile (content-based)
-#   edit   : edit isi 1 source — tepat 1 recompile + relink
+#   edit   : edit isi 1 source (komentar) — tepat 1 recompile; satria boleh
+#            no-relink (verdict byte-object), jadi BUKAN pembanding link yang
+#            adil terhadap lantai
 #            + baris "gcc-floor" (gcc -c 1 file + link langsung, tanpa build
 #              tool) sebagai lantai; selisih tool vs lantai = overhead tool
+#   editrel: edit 1 source dengan perubahan codegen (fungsi baru per run) —
+#            .o pasti berubah byte sehingga SEMUA tool (dan lantai gcc-floor)
+#            wajib relink; pembandingan link yang jujur
 #   compdb : generate compile_commands.json (bear: butuh build bersih)
 #   strace : hitung syscall no-op (opsional: -s strace; jika tersedia)
 #
@@ -31,6 +36,7 @@
 #   ./bench/compare.sh                # default: 150 source, 30 header, 5 run
 #   ./bench/compare.sh -n 40 -H 10    # project kecil, cepat
 #   ./bench/compare.sh -s edit,touch  # subset skenario
+#   ./bench/compare.sh -s editrel     # edit + relink pasti (vs lantai gcc)
 #   ./bench/compare.sh -s strace      # syscall profiling (opt-in)
 #   NO_COLOR=1 ./bench/compare.sh     # tanpa warna / progress bar
 #
@@ -94,6 +100,7 @@ for s in cold noop touch edit; do
   have_scenario "$s" && TOTAL=$(( TOTAL + ${#TOOLS[@]} * NRUN ))
 done
 have_scenario edit && TOTAL=$(( TOTAL + NRUN ))   # baris gcc-floor
+have_scenario editrel && TOTAL=$(( TOTAL + NRUN )) # baris gcc-floor editrel
 have_scenario compdb && TOTAL=$(( TOTAL + ${#CDB_TOOLS[@]} * NRUN ))
 if [ -n "$ONLY" ] && have_scenario strace && [ "$HAVE_STRACE" = 1 ]; then TOTAL=$(( TOTAL + ${#TOOLS[@]} )); fi
 [ "$TOTAL" -gt 0 ] || TOTAL=1
@@ -111,6 +118,7 @@ s_cold
 s_noop
 s_touch
 s_edit
+s_editrel
 s_compdb
 s_strace
 
