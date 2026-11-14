@@ -89,7 +89,7 @@ Yang sudah dikerjakan DAN terukur: `.d` dibaca sekali (−2,8 s), `fs-save` reus
    - Skala: di sandbox ini total run 37 ms; angka 1,07 dtk di todo diukur di proot pada
      workspace yang lebih besar. Proporsi di sini (bin=0 ≈ 7 ms dari 37 ms) belum
      dikonfirmasi di proot.
-3. **[~] `collect+plan` + `decide` fase library — ANALISIS SELESAI (5/11/2026): klaim dua traversal TIDAK terbukti.**
+3. **[x] `collect+plan` + `decide` fase library — TERTUTUP (14/11/2026): analisis tuntas, tidak ada perubahan yang dibenarkan.**
    - Trace inkremental n=500 (satu sumber diubah): setiap sumber `.c` di-stat **tepat
      sekali** (502 stat; hanya sumber yang diubah 2×). Tidak ada traversal sumber ganda.
    - Objek `.o` di-stat 3× per run, dari tiga fase berbeda (sapuan berselang-seling
