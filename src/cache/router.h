@@ -14,6 +14,11 @@
    yang sama. NULL hanya bila file rusak/fopen gagal — gunakan optsStoreRepair.
    Jangan csClose handle ini; lepaskan lewat optsStoreReload. */
 CsStore *optsStoreShared(void);
+/* Commit mutasi opts.cache yang menumpuk di store bersama (item 6): dipanggil
+   di batas fase — anak fork sebelum _exit, induk akhir batch (sebelum
+   optsStoreReload), dan sebelum spawn child background. atexit di
+   optsStoreShared menjadi backstop untuk exit() mana pun. */
+bool optsStoreFlush(void);
 /* Buang handle in-memory lalu buka ulang dari disk — WAJIB di induk setelah
    anak-anak fork selesai (anak menulis opts.cache di memorinya sendiri dan
    meng-commit ke disk; salinan induk basi terhadapnya). */

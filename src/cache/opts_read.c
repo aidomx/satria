@@ -64,12 +64,32 @@ static bool optsRouterNamesValid(const OptNameCtx *names);
    dibuka sekali; pembaca (rt-scan, wsRouterValidate) dan penulis
    (optsRouterRecord, wsRouterRecord, optsProjMetaStamp, wsOptsMetaSave)
    memakai objek yang sama — tidak ada open+parse berulang per validasi.
-   Penulis tetap csCommit langsung; penulisan file TIDAK berubah. */
+   Penulis DEFER commit (item 6): mutasi menumpuk in-memory, di-flush di
+   titik fase (anak sebelum _exit, induk akhir batch, sebelum child
+   background) dan backstop atexit. optsSourcesRouteSync tetap commit
+   langsung: kontraknya sengaja membiarkan route basi pada run gagal. */
 static CsStore *g_optsStore = NULL;
+bool optsStoreFlush(void); /* didefinisikan di bawah; dipakai atexit backstop */
+static void optsStoreFlushAtExit(void) {
+  optsStoreFlush();
+}
 
 CsStore *optsStoreShared(void) {
-  if (!g_optsStore) g_optsStore = csOpen(OPTS_CACHE_FILE);
+  if (!g_optsStore) {
+    g_optsStore = csOpen(OPTS_CACHE_FILE);
+    static bool atexitDone = false;
+    if (!atexitDone && g_optsStore) {
+      atexit(optsStoreFlushAtExit); /* backstop: exit() apa pun tetap flush */
+      atexitDone = true;
+    }
+  }
   return g_optsStore;
+}
+
+bool optsStoreFlush(void) {
+  if (!g_optsStore || !csIsDirty(g_optsStore)) return true;
+  profMark("opts-flush"); /* profil: commit opts.cache yang ditunda (item 6) */
+  return csCommit(g_optsStore);
 }
 
 void optsStoreReload(void) {

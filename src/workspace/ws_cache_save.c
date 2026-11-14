@@ -477,7 +477,7 @@ static void wsOptsMetaSave(const WsProjStamp *st, int n) {
   if (!o) return;
   for (int i = 0; i < n; i++)
     csProjMetaSet(o, st[i].proj, st[i].content, st[i].time, st[i].size);
-  csCommit(o);
+  /* commit di-flush per fase/batas proses (item 6) */
 }
 
 /* ==== Utilitas merge per proyek (mode selektif, O1) ==== */

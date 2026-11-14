@@ -67,6 +67,8 @@ bool optsRouterRecord(const Config *c, bool libOnly) {
     CsEntry src = {proj, csHash(WS_SOURCE_ROUTE), 0, srcM, srcS, WS_SOURCE_ROUTE};
     if (!csPut(st, &src)) return false;
   }
-  return csCommit(st);
+  /* Commit di-flush per fase/batas proses (item 6): mutasi tinggal di store
+     bersama — pembaca in-memory langsung melihatnya, tulis disk ditunda. */
+  return true;
 }
 

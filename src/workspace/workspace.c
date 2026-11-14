@@ -636,6 +636,9 @@ static int wsRunCore(const char *cmd, int jobs, const char *only, const char *re
     if (!touched) printf("> Nothing to clean (see Buildfile: clean)\n");
     wsCleanTouched = false;
   }
+  optsStoreFlush(); /* item 6: commit opts.cache SEBELUM spawn child background
+                               dan sebelum exit (watcher tidak boleh menulis
+                               bareng induk) */
 
   /* Tutup laporan: render tail (# Execution summary + # Release + # Summary),
      lalu tutup tangkapan blob. Sukses -> report.blob; gagal -> tahan lama.

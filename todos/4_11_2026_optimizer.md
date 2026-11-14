@@ -80,9 +80,12 @@ Yang sudah dikerjakan DAN terukur: `.d` dibaca sekali (−2,8 s), `fs-save` reus
      target binary inilah yang membuat no-op berikutnya mengenali binary sebagai
      up-to-date. Melewatinya merusak no-op.
    - Yang tersisa realistis: `rt-groups` dihitung dua kali per run (1,9 ms di pass
-     library, 2,6 ms di pass binary) — terkait item 5 (memo lintas-panggilan). Dan
-     pengurangan jumlah save fast-state per run terkait item 4 (konsolidasi tulis per
-     fase), yang harus didesain agar entri `O` target tetap tercatat.
+      library, 2,6 ms di pass binary) — TERSEMAT item 5 langkah 1 + item 10
+      (14/11): handle bersama menghapus open+parse per validasi, memo presence
+      berindeks isi menghapus parse ulang; sisa per panggilan = iterasi
+      in-memory 0,3–0,7 ms. Pengurangan jumlah save fast-state per run terkait
+      item 4 (konsolidasi tulis per fase), yang harus didesain agar entri `O`
+      target tetap tercatat.
    - Skala: di sandbox ini total run 37 ms; angka 1,07 dtk di todo diukur di proot pada
      workspace yang lebih besar. Proporsi di sini (bin=0 ≈ 7 ms dari 37 ms) belum
      dikonfirmasi di proot.
@@ -168,15 +171,43 @@ Yang sudah dikerjakan DAN terukur: `.d` dibaca sekali (−2,8 s), `fs-save` reus
    - Urutan yang disarankan: (1) inventaris dan migrasi 12 titik tulis ke funnel,
      tanpa mengubah perilaku, diuji dengan suite penuh; (2) baru memo di funnel;
      (3) ukur di proot.
-6. **[~] Tulis cache store: buka-tulis-ulang per fungsi — ANALISIS SELESAI (5/11/2026); sisi BACA tercakup handle bersama (14/11), sisi TULIS (batching) BELUM.**
-   - Catatan 14/11: sisi baca per-fungsi untuk opts.cache sudah hilang lewat
-     handle bersama (item 5 langkah 1) — pembaca tidak lagi membuka file per
-     panggilan. Sisa item 6 murni latensi TULIS: tiap penulis tetap `csCommit`
-     (tmp + rename) pada waktunya sendiri; `fs-lib-router` 7,7 ms dan
-     `fs-router-rec`/`tail-router` pada run inkremental tests/complexws adalah
-     biaya rename itu. Batching tetap butuh overlay + flush di SEMUA jalur
-     keluar (lihat bawah) dan kini juga harus sadar `optsStoreReload` di batas
-     fork.
+6. **[~] Tulis cache store: buka-tulis-ulang per fungsi — sisi BACA tuntas (14/11) + DEFERRAL opts.cache TERAPAN (14/11 sore); berkas lain BELUM.**
+   - Sisi baca per-fungsi untuk opts.cache hilang lewat handle bersama (item 5
+     langkah 1): pembaca tidak membuka file per panggilan.
+   - DEFERRAL commit opts.cache terapkan sore 14/11: penulis tidak lagi
+     `csCommit` sendiri (`optsRouterRecord`, `wsRouterRecord`, `wsRouterDrop`,
+     `optsProjMetaStamp`, `wsOptsMetaSave`) — mutasi menumpuk di store bersama
+     dan di-flush di batas fase: (a) anak fork sebelum `_exit` (atexit tidak
+     jalan di `_exit` — flush eksplisit wajib), (b) induk akhir batch
+     (`optsStoreFlush()` lalu `optsStoreReload()` — urutan wajib), (c) sebelum
+     spawn child background (workspace.c — watcher tidak boleh menulis bareng
+     induk), (d) backstop `atexit` di `optsStoreShared` untuk exit() mana pun.
+     `optsSourcesRouteSync` SENGAJA tetap commit langsung: kontraknya
+     membiarkan route basi pada run gagal — deferral akan meng-commit route
+     segar pada run gagal lewat backstop. Marker profil `opts-flush`.
+   - Terukur: strace rename `opts.cache` pada run inkremental tests/complexws
+     = **1** per run (dulu 4+ commit). `fs-lib-router` 18,7 → 7,8 ms (sisa =
+     parse cache grup pada memo miss, bukan tulis). Negatif terverifikasi:
+     opts.cache korup (repair), hilang (gerbang menolak → self-heal),
+     deps.cache dihapus (run penuh); no-op HIT jalur penuh/serial/selektif;
+     single-project build/no-op/inkremental/clean/rebuild; kit dsl 14/14,
+     parser 12/12.
+   - Perbaikan ikutan: nama tmp `csCommit` kini unik per pid
+     (`<file>.tmp<pid>`) — dulu nama tetap: dua proses yang commit file sama
+     hampir bersamaan (anak-anak fork) bisa saling menimpa tmp. Race
+     pre-existing, sekarang hilang.
+   - Instrumen awal (5/11) pada inkremental n=500: `opts.cache` **commit 4×**
+     (n = 6, 5, 5, 5 entri). Selain itu: `deps.cache` 1×, `lib.cache` 1×,
+     `fingerprint.cache` 1×, `state.cache` 1×.
+   - Pemicu commit opts.cache yang LAMA (kini didefer): `optsProjMetaStamp`
+     (`cmds_fast.c` 549, 585), `optsSourcesRouteSync` (`state.c` 343,
+     `ws_cache_noop.c` 366/633, `workspace.c` 630), `wsRouterRecord`
+     (`ws_cache_save.c` 884). `WS_ROUTER_FILE` = `OPTS_CACHE_FILE`.
+   - Sisa item 6: batching untuk BERKAS LAIN (deps/lib/fingerprint — masing-
+     masing sudah 1×/run, jadi gain kecil) dan satu jalur tulis untuk semua
+     berkas (prasyarat memo luas item 5). Batching dua penulisan opts.cache
+     (lib dan binary) kini TIDAK DIPERLUKAN lagi untuk opts.cache: deferral
+     sudah menggabungkannya.
    - Instrumen sementara di `csCommit` (dihapus lagi, diverifikasi identik) pada
      inkremental n=500: `opts.cache` **commit 4×** (n = 6, 5, 5, 5 entri), dan masing-masing
      benar-benar menulis (`csPut` melewati nilai identik; `csCommit` keluar bila tak

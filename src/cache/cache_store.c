@@ -7,6 +7,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/types.h> /* getpid: nama tmp commit unik per proses */
+#include <unistd.h>   /* getpid */
 #include <time.h> /* csNowNs: clock_gettime */
 
 /* Penggantian atomik: POSIX rename; Windows MoveFileEx REPLACE_EXISTING |
@@ -438,8 +440,11 @@ bool csCommit(CsStore *st) {
     for (CsNode *n = st->buckets[i]; n; n = n->next) arr[k++] = n;
   qsort(arr, k, sizeof(CsNode *), cmpNode);
 
-  char tmp[sizeof(st->path) + 8];
-  snprintf(tmp, sizeof(tmp), "%s.tmp", st->path);
+  char tmp[sizeof(st->path) + 24];
+  /* Nama tmp unik per proses: dua proses bisa meng-commit file yang sama
+     hampir bersamaan (anak-anak fork pada akhir batch) — nama tetap membuat
+     rename saling menimpa isi setengah jalan. */
+  snprintf(tmp, sizeof(tmp), "%s.tmp%ld", st->path, (long)getpid());
   FILE *fp = fopen(tmp, "w");
   if (!fp) {
     free(arr);

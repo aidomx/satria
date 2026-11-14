@@ -255,6 +255,10 @@ int runnerParallel(const WsModel *m, const WsWork *work, int n, int jobs,
           stateBlobExport(s->stage);
           buildReportExport(s->rep);
           wsVerdictChildExport(work[i].name, s->verdict); /* kedua fase: byte compiled */
+          /* Commit mutasi opts.cache anak SEBELUM _exit (atexit tidak jalan
+             di _exit): record router/metadata proyek anak wajib sampai ke
+             disk sebelum induk optsStoreReload. */
+          optsStoreFlush();
           _exit(crc); /* bukan exit(): hindari atexit ganda setelah fork */
         }
         if (pid < 0) { /* fork gagal: slot ini -> serial setelah drain */
@@ -318,13 +322,13 @@ int runnerParallel(const WsModel *m, const WsWork *work, int n, int jobs,
       profMark(post);
     }
   }
-  /* Sinkron store opts.cache: anak-anak fork menulis opts.cache di memori
-     mereka sendiri lalu meng-commit ke disk; salinan in-memory induk basi
-     terhadapnya. Buka ulang dari disk sebelum penulis induk berikutnya
-     (wsOptsMetaSave / wsRouterRecord / optsSourcesRouteSync) — kalau tidak,
-     commit induk menimpa entri anak (kelas bug audit 31/10 §10). Serial
-     fallback di atas (wsRunProject in-process) menulis lewat handle yang
-     sama: buka ulang tetap konsisten (memori == disk). */
+  /* Flush mutasi opts.cache induk (serial fallback / gate refresh yang
+     belum ter-commit), lalu sinkron dengan tulisan anak: buka ulang store
+     dari disk. Urutan wajib: flush dulu — commit induk TIDAK boleh menyusul
+     reload (menimpa entri anak, kelas bug audit 31/10 §10). Serial fallback
+     di atas (wsRunProject in-process) menulis lewat handle yang sama:
+     flush + reload tetap konsisten (memori == disk). */
+  optsStoreFlush();
   optsStoreReload();
   free(slot);
   profMark(post);

@@ -29,7 +29,7 @@ bool wsRouterRecord(void) {
   } else {
     csDelete(st, csHash(WS_ROUTER_KEY), csHash(WS_SOURCE_ROUTE));
   }
-  ok = ok && csCommit(st);
+  /* Commit di-flush per fase/batas proses (item 6). */
   return ok;
 }
 
@@ -89,7 +89,7 @@ bool optsProjMetaStamp(uint64_t proj, uint64_t content) {
   if (!st) st = optsStoreRepair();
   if (!st) return false;
   csProjMetaSet(st, proj, content, optsNowNs(), (long long)csCountProj(st, proj));
-  return csCommit(st);
+  return true; /* commit di-flush per fase/batas proses (item 6) */
 }
 
 bool optsSourcesRouteSync(void) {

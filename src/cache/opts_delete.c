@@ -13,5 +13,5 @@ void wsRouterDrop(void) {
   if (!st) return;
   csDelete(st, csHash(WS_ROUTER_KEY), csHash(WS_ROUTER_NAME));
   csDelete(st, csHash(WS_ROUTER_KEY), csHash(WS_SOURCE_ROUTE));
-  csCommit(st);
+  /* commit di-flush per fase / atexit (item 6) */
 }
