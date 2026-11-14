@@ -118,38 +118,48 @@ Yang sudah dikerjakan DAN terukur: `.d` dibaca sekali (−2,8 s), `fs-save` reus
      binary membaca hasil pass library. Prasyarat sama dengan item 5 dan 6.
    - Sisa yang perlu diukur di proot: loop entri (stat fresh untuk `O`) dan latency
      tulis ws.state.
-5. **[~] Memo `csOpen` lintas-panggilan — langkah 0 TERAPAN (14/11/2026): memo scan router berindeks isi; funnel BELUM.**
-   - Langkah aman tanpa funnel diterapkan: `optsRouterValidate` dipanggil per
-     proyek per fase (6+ kali per run) — bagian scan (csOpen + csForEach
-     opts.cache, penanda `rt-scan`) kini di-memo per proses
-     (`src/cache/opts_read.c`), kunci = (hash FNV-1a isi opts.cache, ukuran,
-     proj) — pola berindeks isi item 10: hasil murni fungsi byte file, tulis
-     mengubah isi → hash berubah → memo basi alami, tanpa invalidasi manual.
-     Helper hash diekspor dari router.c (`optsCacheFileHash`). Anti-poisoning:
-     slot hanya diisi bila hash pra- dan pasca-parse identik (isi stabil selama
-     parse). Ekor validasi (stamp sources.cache + presence grup) tetap jalan per
-     panggilan — memakai file LAIN yang tidak masuk kunci, jadi penghapusan
-     cache dirutekan tetap menolak (terverifikasi: hapus deps.cache + sentuh
-     sumber → run penuh; no-op level workspace tidak menyentuh cek grup —
-     perilaku pre-existing, bukan dari memo ini).
-   - Terukur (tests/complexws, run inkremental): `rt-scan-hit` muncul pada
-     validasi dengan isi opts.cache stabil antar fase (mis. bade lib→bin),
-     0,9–1,9 ms per hit. Efektivitas DIBATASI churn opts.cache: 4 commit per run
-     (item 6) mengubah isi → sebagian besar validasi tetap miss. Ini konfirmasi
-     ukur bahwa memo tanpa funnel hanya menggarap sebagian kecil; sisa biaya
-     ada di churn tulis, bukan pembacaan. Kit dsl 14/14, parser 12/12.
+5. **[~] Memo `csOpen` lintas-panggilan — langkah 0 + 1 TERAPAN (14/11/2026); funnel penuh BELUM.**
+   - Langkah 0 (siang): memo scan router berindeks isi — hash FNV-1a isi
+     opts.cache, anti-poisoning pra/pasca parse, terukur 0,9–1,9 ms per hit.
+   - Langkah 1 (sore, menggantikan langkah 0 yang redundan): handle store
+     `opts.cache` bersama per proses — dibuka SEKALI (`optsStoreShared`,
+     `src/cache/opts_read.c`, deklarasi + kontrak di `router.h`); SEMUA pembaca
+     (`optsRouterValidate`, `wsRouterValidate`) dan penulis
+     (`optsRouterRecord`, `wsRouterRecord`, `wsRouterDrop`, `optsProjMetaStamp`,
+     `optsSourcesRouteSync`, `wsOptsMetaSave`) memakai objek yang sama — tidak
+     ada open+parse berulang per validasi. Penulis tetap `csCommit` langsung:
+     latensi tulis per commit tidak berubah (itu domain item 6), tetapi sisi
+     baca hilang; perubahan in-memory terlihat pembaca lain di proses yang sama.
+   - Batas fork: anak menulis `opts.cache` di memorinya sendiri (salinan COW)
+     lalu meng-commit ke disk; induk WAJIB `optsStoreReload()` sebelum penulis
+     induk berikutnya — dipasang di akhir `runnerParallel` (parallel.c), satu
+     kali per fase batch. Tanpa itu commit induk menimpa entri anak (kelas bug
+     audit 31/10 §10). Serial fallback in-process aman (handle sama).
+   - Semantik kegagalan penulis berubah sedikit: mutasi yang tidak di-commit
+     (jalur gagal) TETAP tinggal di store bersama dan bisa ter-flush commit
+     berikutnya — dulu di-discard oleh csClose. Semua mutasi itu update valid
+     sebenarnya; kontrak didokumen di router.h.
+   - Terukur (tests/complexws, run inkremental): `rt-scan` 1,7–4,5 ms →
+     0,4–0,7 ms per validasi (iterasi in-memory); `fs-lib-router` 18,7 → 7,7 ms
+     (sisa = latensi tulis tmp+rename per commit — domain item 6). Negatif
+     terverifikasi: opts.cache korup → repair + rebuild; opts.cache hilang →
+     gerbang ws menolak → jalur penuh 0-kompilasi meregenerasi (self-healing);
+     hapus deps.cache + sentuh sumber → run penuh. No-op HIT pada semua jalur
+     (penuh, serial, selektif-merge). Kit dsl 14/14, parser 12/12.
    - Hasil pengukuran analisis awal (5/11, trace inkremental n=500): `opts.cache`
      dibuka 8×, `deps.cache` 7×, `lib.cache` 6×, `fingerprint.cache` 6×,
      `sources.cache` 4×. `rt-groups` (`opts_read.c` baris 96) 1,9 ms + 2,6 ms
      per run (~12 % dari 37 ms di sandbox ini). Angka 35–50 ms di todo berasal
      dari proot.
-   - Kenapa memo luas tidak bisa diterapkan lokal: berkas cache ditulis di ~12 titik di
-     luar `csCommit` (`cache_store.c`): `opts_create.c:37`, `opts_update.c:17`,
-     `state_blob.c:193/233/249`, `artifact.c:92/101`, `cmds_libcache.c:102`,
-     `embed.c:326`, `ws_cache_noop.c:54/57/198/229/230/424/464/468`,
-     `ws_cache_save.c:578/581` (fingerprint.cache, temp + rename sendiri), `compdb.c:112`,
-     `state.c:309`. Memo yang tidak diinvalidasi di SEMUA titik = no-op yang salah
-     (bug kelas audit 31/10 §10).
+   - Kenapa handle/memo luas belum bisa untuk BERKAS LAIN: berkas cache ditulis
+     di ~12 titik di luar `csCommit` (`cache_store.c`): `opts_create.c:37`,
+     `opts_update.c:17`, `state_blob.c:193/233/249`, `artifact.c:92/101`,
+     `cmds_libcache.c:102`, `embed.c:326`, `ws_cache_noop.c:54/57/198/229/230/
+     424/464/468`, `ws_cache_save.c:578/581` (fingerprint.cache, temp + rename
+     sendiri), `compdb.c:112`, `state.c:309`. Memo yang tidak diinvalidasi di
+     SEMUA titik = no-op yang salah (bug kelas audit 31/10 §10). Fork anak
+     memperumit: anak menulis cache di memorinya sendiri; memo induk harus
+     tahu batas fork (stage/import) — persis pola `optsStoreReload` di atas.
    - Pembacaan yang tampak berulang di `cmds_fast.c` (`fastSnapGet/Put/Delete`) adalah
      pasangan baca–tulis berselang, bukan duplikasi; memo harus memutus di setiap tulis.
    - Prasyarat (dipakai bersama item 6): SATU jalur tulis untuk semua berkas cache —
@@ -158,7 +168,15 @@ Yang sudah dikerjakan DAN terukur: `.d` dibaca sekali (−2,8 s), `fs-save` reus
    - Urutan yang disarankan: (1) inventaris dan migrasi 12 titik tulis ke funnel,
      tanpa mengubah perilaku, diuji dengan suite penuh; (2) baru memo di funnel;
      (3) ukur di proot.
-6. **[~] Tulis cache store: buka-tulis-ulang per fungsi — ANALISIS SELESAI (5/11/2026); batching BELUM diterapkan.**
+6. **[~] Tulis cache store: buka-tulis-ulang per fungsi — ANALISIS SELESAI (5/11/2026); sisi BACA tercakup handle bersama (14/11), sisi TULIS (batching) BELUM.**
+   - Catatan 14/11: sisi baca per-fungsi untuk opts.cache sudah hilang lewat
+     handle bersama (item 5 langkah 1) — pembaca tidak lagi membuka file per
+     panggilan. Sisa item 6 murni latensi TULIS: tiap penulis tetap `csCommit`
+     (tmp + rename) pada waktunya sendiri; `fs-lib-router` 7,7 ms dan
+     `fs-router-rec`/`tail-router` pada run inkremental tests/complexws adalah
+     biaya rename itu. Batching tetap butuh overlay + flush di SEMUA jalur
+     keluar (lihat bawah) dan kini juga harus sadar `optsStoreReload` di batas
+     fork.
    - Instrumen sementara di `csCommit` (dihapus lagi, diverifikasi identik) pada
      inkremental n=500: `opts.cache` **commit 4×** (n = 6, 5, 5, 5 entri), dan masing-masing
      benar-benar menulis (`csPut` melewati nilai identik; `csCommit` keluar bila tak

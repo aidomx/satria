@@ -60,62 +60,42 @@ static bool optsDbg(void) {
    kontrak opts <-> sources + presence grup cache dirutekan. */
 static bool optsRouterNamesValid(const OptNameCtx *names);
 
-bool optsRouterValidate(void) {
-  /* Memo hasil scan router per proses (audit 4/11 item 5, lanjutan item 10):
-     fungsi ini dijalankan per proyek per fase — rt-scan (csOpen + csForEach
-     opts.cache) berulang untuk isi file yang sama. Kunci = (hash FNV-1a isi
-     opts.cache, ukuran, proj): hasil murni fungsi byte file — penulisan
-     mengubah isi -> hash berubah -> memo basi alami; tidak ada invalidasi
-     manual yang bisa terlewat (kelas bug audit 31/10 §10). Ekor validasi
-     (stamp sources + presence grup) tetap jalan per panggilan: membaca file
-     LAIN yang tidak masuk kunci. */
-#define OPT_RN_MEMO 16
-  typedef struct {
-    unsigned long long h;
-    long long size;
-    uint64_t proj;
-    OptNameCtx names;
-  } OptRnMemo;
-  static OptRnMemo memo[OPT_RN_MEMO];
-  static int memoN = 0, memoNext = 0;
+/* Handle store opts.cache bersama per proses (audit 4/11 item 5/6):
+   dibuka sekali; pembaca (rt-scan, wsRouterValidate) dan penulis
+   (optsRouterRecord, wsRouterRecord, optsProjMetaStamp, wsOptsMetaSave)
+   memakai objek yang sama — tidak ada open+parse berulang per validasi.
+   Penulis tetap csCommit langsung; penulisan file TIDAK berubah. */
+static CsStore *g_optsStore = NULL;
 
-  uint64_t proj = cmdsCacheProjAddr();
-  unsigned long long h;
-  long long fsize;
-  if (optsCacheFileHash(OPTS_CACHE_FILE, &h, &fsize)) {
-    for (int i = 0; i < memoN; i++) {
-      if (memo[i].h == h && memo[i].size == fsize && memo[i].proj == proj) {
-        profMark("rt-scan-hit"); /* profil: memo scan router (item 5) */
-        return optsRouterNamesValid(&memo[i].names);
-      }
-    }
+CsStore *optsStoreShared(void) {
+  if (!g_optsStore) g_optsStore = csOpen(OPTS_CACHE_FILE);
+  return g_optsStore;
+}
+
+void optsStoreReload(void) {
+  if (g_optsStore) {
+    csClose(g_optsStore);
+    g_optsStore = NULL;
   }
-  CsStore *st = csOpen(OPTS_CACHE_FILE);
-  if (!st) return true;
+  optsStoreShared();
+}
+
+CsStore *optsStoreRepair(void) {
+  remove(OPTS_CACHE_FILE); /* rusak: tulis ulang bersih (self-healing) */
+  optsStoreReload();
+  return g_optsStore;
+}
+
+bool optsRouterValidate(void) {
+  CsStore *st = optsStoreShared();
+  if (!st) return true; /* rusak: serahkan ke jalur normal (repair oleh penulis) */
+  uint64_t proj = cmdsCacheProjAddr();
   OptNameCtx names;
   memset(&names, 0, sizeof(names));
   names.proj = proj;
   bool scanned = csForEach(st, optNameVisit, &names);
-  csClose(st);
-  profMark("rt-scan"); /* profil: csOpen+scrap opts.cache */
+  profMark("rt-scan"); /* profil: iterasi store opts.cache in-memory */
   if (!scanned) return true; /* rusak: serahkan ke jalur normal */
-  /* Anti-poisoning: simpan hanya bila isi stabil selama parse — bila berubah
-     di antara hash dan parse, pasangan (hash, names) tidak konsisten. */
-  unsigned long long h2;
-  long long fsize2;
-  if (optsCacheFileHash(OPTS_CACHE_FILE, &h2, &fsize2) && h2 == h && fsize2 == fsize) {
-    OptRnMemo *slot;
-    if (memoN < OPT_RN_MEMO) {
-      slot = &memo[memoN++];
-    } else {
-      slot = &memo[memoNext];
-      memoNext = (memoNext + 1) % OPT_RN_MEMO;
-    }
-    slot->h = h;
-    slot->size = fsize;
-    slot->proj = proj;
-    slot->names = names;
-  }
   return optsRouterNamesValid(&names);
 }
 
@@ -159,7 +139,7 @@ static bool optsRouterNamesValid(const OptNameCtx *names) {
    optsRouterValidate: indeks ada -> route wajib + cocok; indeks hilang -> route
    tak boleh ada. */
 bool wsRouterValidate(void) {
-  CsStore *st = csOpen(WS_ROUTER_FILE);
+  CsStore *st = optsStoreShared();
   if (!st) return false;
   CsEntry e;
   bool ok = csGet(st, csHash(WS_ROUTER_KEY), csHash(WS_ROUTER_NAME), &e) && e.payload &&
@@ -173,6 +153,5 @@ bool wsRouterValidate(void) {
     if (idxOk) ok = hasRoute && src.time == mt && src.size == sz;
     else ok = !hasRoute;
   }
-  csClose(st);
   return ok;
 }

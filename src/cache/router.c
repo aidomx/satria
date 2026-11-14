@@ -39,7 +39,10 @@ typedef struct {
 static OptHgMemo g_hgMemo[OPT_HG_MEMO];
 static int g_hgMemoN = 0, g_hgMemoNext = 0;
 
-bool optsCacheFileHash(const char *path, unsigned long long *h, long long *sz) {
+/* Hash FNV-1a isi file cache + ukurannya (item 10): kunci memo presence
+   berindeks isi — hasil murni fungsi byte file, penulisan mengubah isi ->
+   hash berubah -> memo basi alami tanpa invalidasi manual. */
+static bool optsCacheFileHash(const char *path, unsigned long long *h, long long *sz) {
   FILE *f = fopen(path, "rb");
   if (!f) return false;
   unsigned long long x = 1469598103934665603ULL;

@@ -9,10 +9,9 @@
 #include <sys/stat.h>
 
 void wsRouterDrop(void) {
-  CsStore *st = csOpen(WS_ROUTER_FILE);
+  CsStore *st = optsStoreShared();
   if (!st) return;
   csDelete(st, csHash(WS_ROUTER_KEY), csHash(WS_ROUTER_NAME));
   csDelete(st, csHash(WS_ROUTER_KEY), csHash(WS_SOURCE_ROUTE));
   csCommit(st);
-  csClose(st);
 }

@@ -32,11 +32,8 @@ static bool optKeyVisit(const CsEntry *e, CsOp op, void *ctxp) {
    grup diverifikasi per nama — router tidak pernah menunjuk cache kosong. */
 bool optsRouterRecord(const Config *c, bool libOnly) {
   mkdirs(".satria");
-  CsStore *st = csOpen(OPTS_CACHE_FILE);
-  if (!st) {
-    remove(OPTS_CACHE_FILE); /* rusak: tulis ulang bersih (self-healing) */
-    st = csOpen(OPTS_CACHE_FILE);
-  }
+  CsStore *st = optsStoreShared();
+  if (!st) st = optsStoreRepair();
   if (!st) return false;
   uint64_t proj = cmdsCacheProjAddr();
 
@@ -45,10 +42,7 @@ bool optsRouterRecord(const Config *c, bool libOnly) {
   if (collected)
     for (size_t i = 0; i < keys.n; i++) csDelete(st, proj, keys.keys[i]);
   free(keys.keys);
-  if (!collected) {
-    csClose(st);
-    return false;
-  }
+  if (!collected) return false; /* store tetap terbuka (bersama) */
 
   const char *names[5];
   int n = 0;
@@ -71,10 +65,8 @@ bool optsRouterRecord(const Config *c, bool libOnly) {
   }
   if (haveSources) {
     CsEntry src = {proj, csHash(WS_SOURCE_ROUTE), 0, srcM, srcS, WS_SOURCE_ROUTE};
-    if (!csPut(st, &src)) { csClose(st); return false; }
+    if (!csPut(st, &src)) return false;
   }
-  bool ok = csCommit(st);
-  csClose(st);
-  return ok;
+  return csCommit(st);
 }
 

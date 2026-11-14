@@ -12,11 +12,6 @@
 /* Helpers shared across CRUD units. */
 bool optsCacheHasGroup(const char *path, uint64_t proj);
 
-/* Hash FNV-1a isi file cache + ukurannya (audit 4/11 item 5, lanjutan item 10):
-   kunci memo berindeks isi — hasil murni fungsi byte file, penulisan mengubah
-   isi -> hash berubah -> memo basi alami tanpa invalidasi manual. */
-bool optsCacheFileHash(const char *path, unsigned long long *h, long long *sz);
-
 /* Stamp sources.cache (mtime nanodetik + ukuran) untuk route di opts.cache.
    Resolusi ns wajib: perubahan isi dalam detik yang sama dengan ukuran sama
    tetap harus terdeteksi (kontrak opts <-> sources, design/startup.md §4).

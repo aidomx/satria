@@ -472,12 +472,12 @@ static long long wsNowNs(void) {
    router ikut terverifikasi tanpa membuka cache lain (§4). Gagal -> biarkan
    (format lama tetap sah; simpan berikutnya menulis ulang). */
 static void wsOptsMetaSave(const WsProjStamp *st, int n) {
-  CsStore *o = csOpen(WS_ROUTER_FILE);
+  CsStore *o = optsStoreShared();
+  if (!o) o = optsStoreRepair();
   if (!o) return;
   for (int i = 0; i < n; i++)
     csProjMetaSet(o, st[i].proj, st[i].content, st[i].time, st[i].size);
   csCommit(o);
-  csClose(o);
 }
 
 /* ==== Utilitas merge per proyek (mode selektif, O1) ==== */

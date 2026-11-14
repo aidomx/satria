@@ -12,11 +12,8 @@
 /* Upsert workspace route metadata, commit once per recording. */
 bool wsRouterRecord(void) {
   mkdirs(".satria");
-  CsStore *st = csOpen(WS_ROUTER_FILE);
-  if (!st) {
-    remove(WS_ROUTER_FILE); /* rusak: tulis ulang bersih (self-healing) */
-    st = csOpen(WS_ROUTER_FILE);
-  }
+  CsStore *st = optsStoreShared();
+  if (!st) st = optsStoreRepair();
   if (!st) return false;
   CsEntry e = {csHash(WS_ROUTER_KEY), csHash(WS_ROUTER_NAME), 0, 0, 0, WS_ROUTER_NAME};
   bool ok = csPut(st, &e);
@@ -33,7 +30,6 @@ bool wsRouterRecord(void) {
     csDelete(st, csHash(WS_ROUTER_KEY), csHash(WS_SOURCE_ROUTE));
   }
   ok = ok && csCommit(st);
-  csClose(st);
   return ok;
 }
 
@@ -89,23 +85,21 @@ static long long optsNowNs(void) {
    size = jumlah entri grup. Validasi no-op single tetap FAST5; stamp ini
    menyamakan format store + observabilitas. */
 bool optsProjMetaStamp(uint64_t proj, uint64_t content) {
-  CsStore *st = csOpen(OPTS_CACHE_FILE);
+  CsStore *st = optsStoreShared();
+  if (!st) st = optsStoreRepair();
   if (!st) return false;
   csProjMetaSet(st, proj, content, optsNowNs(), (long long)csCountProj(st, proj));
-  bool ok = csCommit(st);
-  csClose(st);
-  return ok;
+  return csCommit(st);
 }
 
 bool optsSourcesRouteSync(void) {
   long long mt = 0, sz = 0;
   if (!optsSourcesStamp(&mt, &sz)) return true;
-  CsStore *st = csOpen(OPTS_CACHE_FILE);
+  CsStore *st = optsStoreShared();
   if (!st) return true; /* belum ada / rusak: serahkan ke jalur normal */
   OptSyncCtx c = {mt, sz, csHash(WS_SOURCE_ROUTE), st, false, false};
   bool scanned = csForEach(st, optSyncVisit, &c);
   bool ok = scanned && !c.failed;
   if (ok && c.dirty) ok = csCommit(st);
-  csClose(st);
   return ok;
 }

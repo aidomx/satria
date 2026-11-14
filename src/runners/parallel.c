@@ -46,6 +46,7 @@
 
 #include "runners.h"
 #include "../log/build_report.h" /* fragment record artefak antar fork */
+#include "../cache/router.h" /* optsStoreReload: sinkron store opts.cache pasca fork */
 
 #ifndef _WIN32
 #include <errno.h>
@@ -317,6 +318,14 @@ int runnerParallel(const WsModel *m, const WsWork *work, int n, int jobs,
       profMark(post);
     }
   }
+  /* Sinkron store opts.cache: anak-anak fork menulis opts.cache di memori
+     mereka sendiri lalu meng-commit ke disk; salinan in-memory induk basi
+     terhadapnya. Buka ulang dari disk sebelum penulis induk berikutnya
+     (wsOptsMetaSave / wsRouterRecord / optsSourcesRouteSync) — kalau tidak,
+     commit induk menimpa entri anak (kelas bug audit 31/10 §10). Serial
+     fallback di atas (wsRunProject in-process) menulis lewat handle yang
+     sama: buka ulang tetap konsisten (memori == disk). */
+  optsStoreReload();
   free(slot);
   profMark(post);
   return rc;
