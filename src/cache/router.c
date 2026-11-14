@@ -39,7 +39,7 @@ typedef struct {
 static OptHgMemo g_hgMemo[OPT_HG_MEMO];
 static int g_hgMemoN = 0, g_hgMemoNext = 0;
 
-static bool optsHashFile(const char *path, unsigned long long *h, long long *sz) {
+bool optsCacheFileHash(const char *path, unsigned long long *h, long long *sz) {
   FILE *f = fopen(path, "rb");
   if (!f) return false;
   unsigned long long x = 1469598103934665603ULL;
@@ -72,7 +72,7 @@ static bool optsCacheHasGroupParse(const char *path, uint64_t proj) {
 bool optsCacheHasGroup(const char *path, uint64_t proj) {
   unsigned long long h = 0;
   long long sz = 0;
-  bool hashed = optsHashFile(path, &h, &sz);
+  bool hashed = optsCacheFileHash(path, &h, &sz);
   if (hashed) {
     for (int i = 0; i < g_hgMemoN; i++)
       if (g_hgMemo[i].h == h && g_hgMemo[i].size == sz && g_hgMemo[i].proj == proj)

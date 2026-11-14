@@ -56,10 +56,42 @@ static bool optsDbg(void) {
   return on == 1;
 }
 
+/* Ekor optsRouterValidate di atas OptNameCtx hasil scan (atau memo-nya):
+   kontrak opts <-> sources + presence grup cache dirutekan. */
+static bool optsRouterNamesValid(const OptNameCtx *names);
+
 bool optsRouterValidate(void) {
+  /* Memo hasil scan router per proses (audit 4/11 item 5, lanjutan item 10):
+     fungsi ini dijalankan per proyek per fase — rt-scan (csOpen + csForEach
+     opts.cache) berulang untuk isi file yang sama. Kunci = (hash FNV-1a isi
+     opts.cache, ukuran, proj): hasil murni fungsi byte file — penulisan
+     mengubah isi -> hash berubah -> memo basi alami; tidak ada invalidasi
+     manual yang bisa terlewat (kelas bug audit 31/10 §10). Ekor validasi
+     (stamp sources + presence grup) tetap jalan per panggilan: membaca file
+     LAIN yang tidak masuk kunci. */
+#define OPT_RN_MEMO 16
+  typedef struct {
+    unsigned long long h;
+    long long size;
+    uint64_t proj;
+    OptNameCtx names;
+  } OptRnMemo;
+  static OptRnMemo memo[OPT_RN_MEMO];
+  static int memoN = 0, memoNext = 0;
+
+  uint64_t proj = cmdsCacheProjAddr();
+  unsigned long long h;
+  long long fsize;
+  if (optsCacheFileHash(OPTS_CACHE_FILE, &h, &fsize)) {
+    for (int i = 0; i < memoN; i++) {
+      if (memo[i].h == h && memo[i].size == fsize && memo[i].proj == proj) {
+        profMark("rt-scan-hit"); /* profil: memo scan router (item 5) */
+        return optsRouterNamesValid(&memo[i].names);
+      }
+    }
+  }
   CsStore *st = csOpen(OPTS_CACHE_FILE);
   if (!st) return true;
-  uint64_t proj = cmdsCacheProjAddr();
   OptNameCtx names;
   memset(&names, 0, sizeof(names));
   names.proj = proj;
@@ -67,29 +99,53 @@ bool optsRouterValidate(void) {
   csClose(st);
   profMark("rt-scan"); /* profil: csOpen+scrap opts.cache */
   if (!scanned) return true; /* rusak: serahkan ke jalur normal */
-  if (!names.n && !names.hasSource) return true; /* proyek belum dirutekan */
+  /* Anti-poisoning: simpan hanya bila isi stabil selama parse — bila berubah
+     di antara hash dan parse, pasangan (hash, names) tidak konsisten. */
+  unsigned long long h2;
+  long long fsize2;
+  if (optsCacheFileHash(OPTS_CACHE_FILE, &h2, &fsize2) && h2 == h && fsize2 == fsize) {
+    OptRnMemo *slot;
+    if (memoN < OPT_RN_MEMO) {
+      slot = &memo[memoN++];
+    } else {
+      slot = &memo[memoNext];
+      memoNext = (memoNext + 1) % OPT_RN_MEMO;
+    }
+    slot->h = h;
+    slot->size = fsize;
+    slot->proj = proj;
+    slot->names = names;
+  }
+  return optsRouterNamesValid(&names);
+}
+
+/* Ekor optsRouterValidate di atas OptNameCtx hasil scan (atau memo-nya):
+   kontrak opts <-> sources + presence grup cache dirutekan. */
+static bool optsRouterNamesValid(const OptNameCtx *names) {
+  if (!names->n && !names->hasSource) return true; /* proyek belum dirutekan */
   long long mt = 0, sz = 0;
   bool idxOk = optsSourcesStamp(&mt, &sz);
   if (idxOk) {
-    if (!names.hasSource || names.sourceTime != mt || names.sourceSize != sz) {
+    if (!names->hasSource || names->sourceTime != mt || names->sourceSize != sz) {
       if (optsDbg())
         fprintf(stderr,
                 "satria: gate: route sources basi (route ada=%d %lld/%lld, indeks %lld/%lld)\n",
-                (int)names.hasSource, names.sourceTime, names.sourceSize, mt, sz);
+                (int)names->hasSource, names->sourceTime, names->sourceSize, mt, sz);
       return false; /* indeks ada tapi route hilang / stempel basi */
     }
-  } else if (names.hasSource) {
+  } else if (names->hasSource) {
     if (optsDbg())
-      fprintf(stderr, "satria: gate: route sources ada tetapi indeks %s hilang\n",
+      fprintf(stderr,
+              "satria: gate: route sources ada tetapi indeks %s hilang\n",
               WS_SOURCE_FILE);
     return false; /* route menunjuk indeks yang hilang */
   }
-  for (int i = 0; i < names.n; i++) {
+  for (int i = 0; i < names->n; i++) {
     char path[128];
-    snprintf(path, sizeof(path), ".satria/caches/%s.cache", names.names[i]);
-    if (!optsCacheHasGroup(path, proj)) {
+    snprintf(path, sizeof(path), ".satria/caches/%s.cache", names->names[i]);
+    if (!optsCacheHasGroup(path, names->proj)) {
       if (optsDbg())
-        fprintf(stderr, "satria: gate: grup '%s' tidak ada di %s\n", names.names[i], path);
+        fprintf(stderr, "satria: gate: grup '%s' tidak ada di %s\n", names->names[i], path);
       return false;
     }
   }
