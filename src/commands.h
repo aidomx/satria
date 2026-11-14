@@ -70,6 +70,13 @@ int cmdClean(const char *buildfilePath);
 bool cmdsWsPhaseVerdictGet(const char *project, bool *changed);
 void cmdsWsPhaseVerdictSet(const char *project, bool changed);
 
+/* "Ada kompilasi" per proyek (audit todos/4_11_2026_optimizer.md item 1):
+   save-walk memakainya untuk memutuskan memo stat gerbang no-op masih valid
+   untuk .o/.d (proyek tanpa kompilasi) atau harus di-stat segar. Semantik
+   OR antar fase (set false tidak menurunkan true); absent = tak tercatat. */
+bool cmdsWsPhaseCompiledGet(const char *project, bool *compiled);
+void cmdsWsPhaseCompiledSet(const char *project, bool compiled);
+
 /*
  * cmdCompdbGenerate — `satria -g compdb`: hasilkan/
  * refresh compile_commands.json TANPA membangun apa pun. Jalur query-only:

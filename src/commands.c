@@ -45,6 +45,8 @@ typedef struct {
   char project[WS_PHASE_PROJECT_LEN];
   bool used;
   bool changed;
+  bool compiled; /* ada kompilasi run ini (audit 4/11 item 1): .d/.o bisa
+                    ditulis ulang anak — memo stat induk tidak boleh dipakai */
 } WsPhaseObjectChange;
 static WsPhaseObjectChange wsPhaseObjectChanges[WS_PHASE_OBJECT_MAX];
 
@@ -80,6 +82,49 @@ bool cmdsWsPhaseVerdictGet(const char *project, bool *changed) {
   return false;
 }
 
+/* "Ada kompilasi" (audit todos/4_11_2026_optimizer.md item 1): dipakai
+   save-walk untuk tahu apakah memo stat gerbang no-op masih valid untuk
+   .o/.d proyek. Semantik OR: fase binary melaporkan 0 (biasanya tak
+   mengompilasi) dan tidak boleh menurunkan fase library. */
+void cmdsWsPhaseCompiledSet(const char *project, bool compiled) {
+  if (!wsModeActive() || !project || !*project) return;
+  for (int i = 0; i < WS_PHASE_OBJECT_MAX; i++) {
+    if (wsPhaseObjectChanges[i].used && strcmp(wsPhaseObjectChanges[i].project, project) == 0) {
+      if (compiled) wsPhaseObjectChanges[i].compiled = true;
+      return;
+    }
+  }
+  int freeSlot = -1;
+  for (int i = 0; i < WS_PHASE_OBJECT_MAX; i++) {
+    if (!wsPhaseObjectChanges[i].used) {
+      freeSlot = i;
+      break;
+    }
+  }
+  if (freeSlot >= 0) {
+    snprintf(wsPhaseObjectChanges[freeSlot].project,
+             sizeof(wsPhaseObjectChanges[freeSlot].project), "%s", project);
+    wsPhaseObjectChanges[freeSlot].used = true;
+    wsPhaseObjectChanges[freeSlot].changed = false;
+    wsPhaseObjectChanges[freeSlot].compiled = compiled;
+  }
+}
+
+bool cmdsWsPhaseCompiledGet(const char *project, bool *compiled) {
+  /* TANPA guard wsModeActive: save-walk membacanya SETELAH wsModeSet(false)
+     (workspace.c menyimpan cache di akhir run). Penulisnya (Set) tetap
+     dijaga ws mode, dan tiap build adalah proses baru — tidak ada data basi
+     lintas run di satu proses. */
+  if (!project || !*project) return false;
+  for (int i = 0; i < WS_PHASE_OBJECT_MAX; i++) {
+    if (wsPhaseObjectChanges[i].used && strcmp(wsPhaseObjectChanges[i].project, project) == 0) {
+      if (compiled) *compiled = wsPhaseObjectChanges[i].compiled;
+      return true;
+    }
+  }
+  return false;
+}
+
 /* Jejak basi gerbang no-op (audit 30/10, kandidat 3+5 — lihat cmds_internal.h).
    Tabel kecil di memori induk: terisi saat gerbang menemukan hash isi berbeda,
    diwarisi anak fase build lewat fork, lalu dipakai validator fast-state untuk
@@ -109,6 +154,10 @@ void wsPhaseObjectChangeSet(bool changed) {
 
 bool wsPhaseObjectChangeGet(bool *changed) {
   return cmdsWsPhaseVerdictGet(cmdsStateWsProject(), changed);
+}
+
+void wsPhaseCompiledSet(bool compiled) {
+  cmdsWsPhaseCompiledSet(cmdsStateWsProject(), compiled);
 }
 
 /* ==================== help (dari src/cmd.txt — sumber tunggal) ==================== */

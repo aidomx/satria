@@ -105,6 +105,10 @@ int wsRunProject(const WsModel *m, const char *name, const char *cmd, int jobs,
         buildReportAddBinary(target, REP_CACHED, fsFileSize(target));
       }
     }
+    /* Fast-state valid = pasti tanpa kompilasi (audit 4/11 item 1): tabel
+       compiled perlu entri eksplisit false — proyek ini tidak melalui
+       pass finish yang menjadi penulis normal tabel. */
+    wsPhaseCompiledSet(false);
     cmdsStateSetWsProject("");
     return 0;
   }
@@ -124,6 +128,8 @@ int wsRunProject(const WsModel *m, const char *name, const char *cmd, int jobs,
      tidak ada target build — lewati, jangan gagalkan seluruh run. */
   if (!c.binary && c.embCount == 0) {
     printf("%s Skipped : tanpa target build (pack.* diabaikan)\n", repPrefix());
+    /* Tanpa target = tanpa kompilasi (audit 4/11 item 1). */
+    wsPhaseCompiledSet(false);
     cmdsStateSetWsProject("");
     return 0;
   }

@@ -8,21 +8,30 @@
 #include "../cache/router.h"
 #include "../cache/state_blob.h"
 #include "../prof/prof.h" /* profMark: sub-fase ws-cachesave (audit overhead) */
+#include "../commands.h" /* cmdsWsPhaseCompiledGet: audit 4/11 item 1 */
 #include <errno.h> /* wsCacheAddDepFile: ENOENT membedakan .d hilang dari gagal baca */
 #include <time.h> /* wsNowNs: clock_gettime */
 
 static bool wsCacheAdd(FILE *pf, CsStore *st, uint64_t proj, const char *path, char type);
+static bool wsCacheAddSt(FILE *pf, CsStore *st, uint64_t proj, const char *path, char type,
+                         struct stat *known);
+static bool wsCacheAddEntry(FILE *pf, CsStore *st, uint64_t proj, const char *path, char type,
+                            long long mtimeNs, long long fsize);
 static void wsCacheDirOf(const char *path, char *out, size_t n);
 /* 1 = ok; 0 = file .d tak ada (ENOENT); -1 = gagal baca/parse. Satu fopen
    menggantikan fsFileExists+fopen (dua syscall path-walk per object). */
 static int wsCacheAddDepFile(FILE *pf, CsStore *st, uint64_t proj, const char *dfile);
-static bool wsCacheAddProjectDeps(FILE *pf, CsStore *st, uint64_t proj, const char *name);
+static bool wsCacheAddProjectDeps(FILE *pf, CsStore *st, uint64_t proj, const char *name,
+                                  bool compiled);
 
 /* Hash isi dari fingerprint.cache sebelumnya (PERF-01). Dipakai ulang hanya
    bila (time, size) cocok DAN entri tidak racy: time < mtime file cache lama
    (startup.md, pengaman racy timestamp). Selain itu isi di-hash ulang. */
 static CsStore *g_prevFp = NULL;
 static long long g_prevFpMtime = 0;
+/* Audit 4/11 item 1: .o/.d yang direkam dari memo stat gerbang no-op
+   (proyek tanpa kompilasi) — untuk profil save-walk. */
+static int g_aDSMemo = 0, g_aOMemo = 0;
 static void wsCacheSaveBody(const WsModel *m, const char *wsName);
 /* Mode selektif (merge per proyek — design/build_report.md O1): indeks proyek
    yang dibangun run ini. NULL/0 = simpanan penuh (perilaku lama). */
@@ -143,23 +152,49 @@ static bool wsCacheInputStamp(const char *path, long long *mtimeNs, long long *s
 }
 
 static bool wsCacheAdd(FILE *pf, CsStore *st, uint64_t proj, const char *path, char type) {
+  return wsCacheAddSt(pf, st, proj, path, type, NULL);
+}
+
+/* known != NULL: stat untuk output 'O' sudah diambil pemanggil pada saat yang sama
+   (tanpa penulisan di antaranya) — dipakai ulang, tidak di-stat lagi. */
+static bool wsCacheAddSt(FILE *pf, CsStore *st, uint64_t proj, const char *path, char type,
+                         struct stat *known) {
   /* Outputs belong to the workspace as a whole: project-specific discovery
      and the final bin/lib scan may encounter the same physical output.
      Store each output path once, while retaining all alias-only outputs. */
   if (type == 'O') proj = csHash("workspace");
-  struct stat sb;
   long long mtimeNs = 0, fsize = 0;
   if (type == 'O') {
-    double t0 = portMonoMs();
-    bool okO = stat(path, &sb) == 0;
-    g_aOutMs += portMonoMs() - t0;
-    g_aOut++;
+    struct stat sb;
+    bool okO;
+    if (known) {
+      sb = *known;
+      okO = true;
+    } else {
+      double t0 = portMonoMs();
+      okO = stat(path, &sb) == 0;
+      g_aOutMs += portMonoMs() - t0;
+      g_aOut++;
+    }
     if (!okO) return false; /* output: stat segar, jangan memo */
     mtimeNs = wsCacheStampNs(path, &sb);
     fsize = (long long)sb.st_size;
   } else if (!wsCacheInputStamp(path, &mtimeNs, &fsize)) {
     return false;
   }
+  return wsCacheAddEntry(pf, st, proj, path, type, mtimeNs, fsize);
+}
+
+/* Entri 'O' dari memo stat gerbang no-op (audit 4/11 item 1): proyek tanpa
+   kompilasi run ini — .o/.d pasti tak ditulis, stamp gate masih valid.
+   Pemanggil wajib menjamin file tak tersentuh sejak gate (flag compiled). */
+static bool wsCacheAddOMemo(FILE *pf, CsStore *st, const char *path,
+                            long long mtimeNs, long long fsize) {
+  return wsCacheAddEntry(pf, st, csHash("workspace"), path, 'O', mtimeNs, fsize);
+}
+
+static bool wsCacheAddEntry(FILE *pf, CsStore *st, uint64_t proj, const char *path, char type,
+                            long long mtimeNs, long long fsize) {
   CsEntry e = {0}; /* wajib: payload harus NULL — csPut menyalinnya (strdup) */
   e.proj = proj;
   e.file = csHash(path);
@@ -277,10 +312,15 @@ static int wsCacheAddDepFile(FILE *pf, CsStore *st, uint64_t proj, const char *d
   return ok ? 1 : -1;
 }
 /* Recursively inspect actual compiler objects. Generated embed objects have no
-   compiler depfile; track their output and the generated embedded header. */
+   compiler depfile; track their output and the generated embedded header.
+   compiled=false (proyek tanpa kompilasi run ini — audit 4/11 item 1):
+   .o/.d pasti tak ditulis, jadi stamp memo gerbang no-op (P-fast) masih
+   valid — .d-cek tanpa stat segar, dan isi tak perlu di-hash ulang bila
+   entri lama cocok. compiled=true: memo bisa basi (anak fork menulis di
+   memorinya sendiri) — stat segar seperti semula. */
 static bool wsCacheAddObjectTree(FILE *pf, CsStore *st, uint64_t proj,
                                  const char *dir, const char *root, unsigned depth,
-                                 int *objects) {
+                                 int *objects, bool compiled) {
   if (depth > 64) return false;
   List dirs = {0}, files = {0};
   fsListDir(dir, &dirs, &files);
@@ -297,28 +337,61 @@ static bool wsCacheAddObjectTree(FILE *pf, CsStore *st, uint64_t proj,
        30/10 — 10k fopen+read per save murni I/O ulang). Hanya .d yang
        digenerate ulang run ini yang dibaca. Stat LANGSUNG (bukan memo):
        .d ditulis oleh compiler di tengah run sehingga memo bisa basi —
-       keputusan lewat/baca ini wajib memakai stamp segar. */
-    int dr;
-    struct stat dst;
-    double td0 = portMonoMs();
-    bool dstat = stat(dfile, &dst) == 0;
-    g_aDSCheckMs += portMonoMs() - td0;
-    g_aDSCheck++;
-    /* Object dan .d-nya sendiri dicatat sebagai output ('O'). Noop memvalidasi
-       stat-nya: object/.d yang hilang (build/ dihapus sebagian) membuat catatan
-       tidak valid -> jalur penuh memulihkannya. Tanpa ini noop melaporkan
-       'Nothing to build' padahal build/ tidak lengkap. */
-    if (!wsCacheAdd(pf, st, proj, o, 'O')) {
+       keputusan lewat/baca ini wajib memakai stamp segar. Pengecualian:
+       proyek tanpa kompilasi (compiled=false) — dijamin tidak ada yang
+       menulis .o/.d run ini, jadi stamp memo gate dipakai (item 1). */
+    int64_t mO = -1;
+    long long sO = -1;
+    bool okO;
+    if (!compiled && cmdsStatCached(o, &mO, &sO)) {
+      /* stamp memo gate valid (file tak tersentuh run ini): tanpa stat.
+         cmdsStatCached false = ia baru men-stat dan file hilang. */
+      g_aOMemo++;
+      okO = wsCacheAddOMemo(pf, st, o, (long long)mO, sO);
+    } else if (compiled) {
+      okO = wsCacheAdd(pf, st, proj, o, 'O'); /* memo basi: stat segar */
+    } else {
+      okO = false; /* file hilang (memo baru men-stat) */
+    }
+    if (!okO) {
       ok = false;
       break;
     }
-    if (dstat && !wsCacheAdd(pf, st, proj, dfile, 'O')) {
-      ok = false;
-      break;
+    int64_t mD = -1;
+    long long sD = -1;
+    int dr;
+    struct stat dst;
+    bool dstat;
+    long long dstamp = 0;
+    if (!compiled && cmdsStatCached(dfile, &mD, &sD)) {
+      dstat = true;
+      dstamp = (long long)mD;
+      g_aDSMemo++;
+      if (!wsCacheAddOMemo(pf, st, dfile, dstamp, sD)) {
+        ok = false;
+        break;
+      }
+    } else if (compiled) {
+      double td0 = portMonoMs();
+      dstat = stat(dfile, &dst) == 0;
+      g_aDSCheckMs += portMonoMs() - td0;
+      g_aDSCheck++;
+      /* Object dan .d-nya sendiri dicatat sebagai output ('O'). Noop memvalidasi
+         stat-nya: object/.d yang hilang (build/ dihapus sebagian) membuat catatan
+         tidak valid -> jalur penuh memulihkannya. Tanpa ini noop melaporkan
+         'Nothing to build' padahal build/ tidak lengkap. */
+      if (dstat) {
+        if (!wsCacheAddSt(pf, st, proj, dfile, 'O', &dst)) {
+          ok = false;
+          break;
+        }
+      }
+    } else {
+      dstat = false; /* .d hilang (memo baru men-stat) */
     }
     if (!dstat) {
       dr = 0;
-    } else if (wsCacheStampNs(dfile, &dst) < g_prevFpMtime) {
+    } else if (dstamp < g_prevFpMtime) {
       g_aDSkip++;
       dr = 1;
     } else {
@@ -339,18 +412,19 @@ static bool wsCacheAddObjectTree(FILE *pf, CsStore *st, uint64_t proj,
     }
   }
   for (int i = 0; ok && i < dirs.count; i++)
-    ok = wsCacheAddObjectTree(pf, st, proj, dirs.items[i], root, depth + 1, objects);
+    ok = wsCacheAddObjectTree(pf, st, proj, dirs.items[i], root, depth + 1, objects, compiled);
   listFree(&dirs);
   listFree(&files);
   return ok;
 }
-static bool wsCacheAddProjectDeps(FILE *pf, CsStore *st, uint64_t proj, const char *name) {
+static bool wsCacheAddProjectDeps(FILE *pf, CsStore *st, uint64_t proj, const char *name,
+                                  bool compiled) {
   char dir[WS_PATH_LEN];
   snprintf(dir, sizeof(dir), "build/%s", name);
   int objects = 0;
   /* Proyek tanpa objek C (mis. archive-only) tidak punya dependensi header
      yang perlu dilacak; output-nya tetap dicek lewat entri O. */
-  return wsCacheAddObjectTree(pf, st, proj, dir, dir, 0, &objects);
+  return wsCacheAddObjectTree(pf, st, proj, dir, dir, 0, &objects, compiled);
 }
 /* Archive-only projects have no C object/.d files. Track the real archive
    inputs recursively, plus the archive output, rather than requiring .o.
@@ -530,6 +604,7 @@ void wsCacheSaveSel(const WsModel *m, const char *wsName, const int *onlyIdx,
   g_prevFpMtime = 0;
   g_aDRead = g_aHStat = g_aHHash = 0;
   g_aD = g_aH = g_aHHashed = g_aDSkip = 0;
+  g_aDSMemo = g_aOMemo = 0;
   g_aInMs = g_aDSCheckMs = g_aOutMs = 0;
   g_aIn = g_aDSCheck = g_aOut = 0;
   wsPrevHFree();
@@ -662,6 +737,10 @@ static void wsCacheSaveBody(const WsModel *m, const char *wsName) {
     if (sel && !clo[i]) continue; /* luar closure: entri lama dipertahankan */
     const char *name = m->projects[i].name;
     uint64_t proj = csHash(name);
+    /* "Ada kompilasi" (audit 4/11 item 1): default konservatif = true (stat
+       segar, perilaku lama) bila proyek tak tercatat di tabel pass finish. */
+    bool comp = true, cv;
+    if (cmdsWsPhaseCompiledGet(name, &cv)) comp = cv;
     List srcs = {0};
     bool archiveOnly = wsProjectArchiveOnly(&m->projects[i]);
     if (archiveOnly) {
@@ -695,7 +774,7 @@ static void wsCacheSaveBody(const WsModel *m, const char *wsName) {
       if (ok && !csGet(st, proj, csHash(dirPath), &probe)) ok = wsCacheAdd(pf, st, proj, dirPath, 'D');
     }
     listFree(&srcs);
-    if (ok) ok = wsCacheAddProjectDeps(pf, st, proj, name);
+    if (ok) ok = wsCacheAddProjectDeps(pf, st, proj, name, comp);
     char out[WS_PATH_LEN];
     snprintf(out, sizeof(out), "bin/%s", name);
     if (ok && fsFileExists(out)) ok = wsCacheAdd(pf, st, proj, out, 'O');
@@ -721,9 +800,9 @@ static void wsCacheSaveBody(const WsModel *m, const char *wsName) {
     fprintf(stderr,
             "[save-walk] .d: baca %d file %.1f ms (lewati %d) | header: %d stat %.1f ms, "
             "%d hash ulang %.1f ms | input: %d stat %.1f ms | .d-cek: %d stat %.1f ms | "
-            "output: %d stat %.1f ms\n",
+            "output: %d stat %.1f ms | memo gate: %d .d, %d O (item 1)\n",
             g_aD, g_aDRead, g_aDSkip, g_aH, g_aHStat, g_aHHashed, g_aHHash, g_aIn,
-            g_aInMs, g_aDSCheck, g_aDSCheckMs, g_aOut, g_aOutMs);
+            g_aInMs, g_aDSCheck, g_aDSCheckMs, g_aOut, g_aOutMs, g_aDSMemo, g_aOMemo);
   /* Metadata grup P (§4): stamp per proyek + grup workspace (content = hash
      Buildfile.ws dari entri W). Disimpan SEBELUM commit agar baris P di
      fingerprint.cache memuat <content> <time> <size>. */

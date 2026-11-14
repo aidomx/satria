@@ -57,22 +57,34 @@
 
 #ifndef _WIN32
 /* ---------- verdict byte-object: staging antar anak fork ---------- */
+/* Format ws-verdict-*: dua byte.
+   b1 = objectsChanged (byte-object fase library — perilaku lama),
+   b2 = "ada kompilasi" (audit 4/11 item 1): save-walk induk memakainya
+        untuk memutuskan memo stat gerbang no-op masih valid untuk .o/.d.
+   Diekspor anak fase library MAUPUN binary: pass binary bisa saja
+   mengompilasi (recovery state) — OR di induk. */
 static void wsVerdictChildExport(const char *project, const char *path) {
-  bool changed = false;
-  if (!cmdsWsPhaseVerdictGet(project, &changed)) return;
+  bool changed = false, compiled = false;
+  bool haveV = cmdsWsPhaseVerdictGet(project, &changed);
+  bool haveC = cmdsWsPhaseCompiledGet(project, &compiled);
+  if (!haveV && !haveC) return;
   FILE *f = fopen(path, "w");
   if (!f) return;
-  fputc(changed ? '1' : '0', f);
+  fputc(haveV && changed ? '1' : '0', f);
+  fputc(haveC && compiled ? '1' : '0', f);
   fclose(f);
 }
 
-static void wsVerdictParentImport(const char *project, const char *path) {
+static void wsVerdictParentImport(const char *project, const char *path, bool libOnly) {
   FILE *f = fopen(path, "r");
   if (!f) return;
-  int c = fgetc(f);
+  int c1 = fgetc(f), c2 = fgetc(f);
   fclose(f);
   remove(path);
-  if (c == '0' || c == '1') cmdsWsPhaseVerdictSet(project, c == '1');
+  /* Verdict byte-object hanya milik fase library (dipakai pass binary lewat
+     snapshot fork); byte fase binary tidak menimpanya. */
+  if (libOnly && (c1 == '0' || c1 == '1')) cmdsWsPhaseVerdictSet(project, c1 == '1');
+  if (c2 == '1') cmdsWsPhaseCompiledSet(project, true);
 }
 
 /* ---------- penjadwal siap-dep (fork) ---------- */
@@ -241,7 +253,7 @@ int runnerParallel(const WsModel *m, const WsWork *work, int n, int jobs,
           fflush(NULL);
           stateBlobExport(s->stage);
           buildReportExport(s->rep);
-          if (libOnly) wsVerdictChildExport(work[i].name, s->verdict);
+          wsVerdictChildExport(work[i].name, s->verdict); /* kedua fase: byte compiled */
           _exit(crc); /* bukan exit(): hindari atexit ganda setelah fork */
         }
         if (pid < 0) { /* fork gagal: slot ini -> serial setelah drain */
@@ -283,7 +295,7 @@ int runnerParallel(const WsModel *m, const WsWork *work, int n, int jobs,
     int crc = WIFEXITED(st) ? WEXITSTATUS(st) : 1;
     if (crc != 0 && rc == 0) rc = crc;
     stateBlobImport(s->stage);
-    wsVerdictParentImport(work[si].name, s->verdict);
+    wsVerdictParentImport(work[si].name, s->verdict, libOnly);
     wsFlushPrefix(m, work, slot, n, libOnly);
     if (rc != 0) failed = true; /* berhenti meluncurkan; kerikan sisa anak */
   }

@@ -364,6 +364,11 @@ bool envOff(const char *name);
 void wsPhaseObjectChangeSet(bool changed);
 bool wsPhaseObjectChangeGet(bool *changed);
 
+/* "Ada kompilasi" pass ini (commands.c): dicatat di awal pass finish kedua
+   jalur (library & link); diwarisi anak fork + distaging ke induk lewat
+   ws-verdict-* (runners/parallel.c). */
+void wsPhaseCompiledSet(bool compiled);
+
 /* Jejak basi gerbang no-op (audit 30/10, kandidat 3+5): path yang hash isi-nya
    sudah berbeda saat gerbang menilai. Dicatat di ws_cache_noop.c (induk,
    sebelum fork fase build) dan dibaca validator fast-state (cmds_wsstate.c)

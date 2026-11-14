@@ -44,8 +44,9 @@ WsCoverage wsCacheCoverage(void) {
   FILE *f = fopen(WS_FP_COVER, "r");
   if (!f) return WS_COV_PARTIAL;
   char tag[8] = {0};
-  (void)fread(tag, 1, sizeof(tag) - 1, f);
+  size_t got = fread(tag, 1, sizeof(tag) - 1, f);
   fclose(f);
+  if (got == 0) return WS_COV_PARTIAL; /* baca kosong/gagal: konservatif */
   return strncmp(tag, "full", 4) == 0 ? WS_COV_FULL : WS_COV_PARTIAL;
 }
 void wsCacheCoverWrite(bool full) {
@@ -306,10 +307,18 @@ static int wsCachePFast(WsCacheMap *m, long long srcMtime) {
     long long size = (long long)sb.st_size;
 #if !defined(_WIN32)
     /* Isi memo stat (audit 30/10 — kandidat save-walk): path input ini distat
-       ulang oleh induk saat menulis fingerprint.cache. Direktori ('D') dan
-       output ('O') sengaja TIDAK dicatat — save memakai stamp segar untuk
-       keduanya. Epoch memo == wsCacheStampNs di non-Windows (fsStampNsSize). */
-    if (r->type != 'D' && r->type != 'O') cmdsStatMemoPut(r->path, now, size);
+       ulang oleh induk saat menulis fingerprint.cache. Epoch memo ==
+       wsCacheStampNs di non-Windows (fsStampNsSize).
+       Direktori ('D') TIDAK dicatat: mtime berubah saat build menulis file
+       ke dalamnya, dan anak yang menulis melupakannya di memorinya sendiri
+       (salinan fork) — memo induk tetap basi.
+       Output 'O' di bawah build/ TETAP dicatat (audit 4/11 item 1): dipakai
+       save-walk HANYA untuk proyek tanpa kompilasi run ini (.o/.d pasti tak
+       tersentuh); proyek yang kompilasi memakai stamp segar. Output di luar
+       build/ (bin/lib) tidak dicatat: konsultan memo lain (deps/wsstate)
+       bisa membaca jalur itu setelah fase penulisnya selesai di anak lain. */
+    if (r->type != 'D' && !(r->type == 'O' && strncmp(r->path, "build/", 6) == 0))
+      cmdsStatMemoPut(r->path, now, size);
 #endif
     /* Direktori tidak memiliki hash konten. Jika mtime berubah, validasi
        daftar entri langsung; jika tetap identik, hanya metadata waktunya yang

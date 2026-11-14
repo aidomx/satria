@@ -59,6 +59,10 @@ static void resolveLinkTarget(char *target, size_t cap) {
 }
 
 int cmdsBuildPassFinish(CmdsPassTail *t) {
+  /* "Ada kompilasi" (audit 4/11 item 1): dicatat di kedua jalur (library
+     dan link) — diwarisi anak fork lalu distaging ke induk lewat
+     ws-verdict-* (runners/parallel.c); save-walk memakainya. */
+  wsPhaseCompiledSet(t->compiled > 0);
   /* Buka konteks serah dari cmds_pass.c — nama lokal dipertahankan agar
      badan di bawah bisa dipindah verbatim. */
   Config c = t->c;

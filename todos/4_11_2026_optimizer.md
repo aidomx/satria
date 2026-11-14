@@ -23,28 +23,139 @@ Konteks mesin: aarch64 + proot, job efektif **j1–j2**, `stat()` 257–461 µs,
 
 Yang sudah dikerjakan DAN terukur: `.d` dibaca sekali (−2,8 s), `fs-save` reuse-hash (−1,5 s), vonis miss pasti + entri basi diutamakan (−1,1 s), memo stat induk (−50 %), memo object/`.d` (−37 %), pemulihan `O`/`.d` hilang.
 
-1. **[ ] `.d-cek` di `save-walk` — 1 stat per `.d` per build (n=500: 1.001 stat ≈ 286 ms).**
-   Keputusan "`.d` ditulis ulang run ini?" butuh pengetahuan milik anak (fork).
-   Dua jalur: (a) staging `objectsChanged` diperluas ke "ada kompilasi" sehingga
-   proyek verdict-nol-compile `save-walk`-nya dilewati; (b) staging penuh daftar
-   `.d` kotor serupa `ws-verdict-*`. (a) risiko lebih kecil.
-2. **[ ] Ekor pass binary yang kosong — residu ~1,07 dtk.** `fastTail` sudah
-   memangkas decide, sisa `cmdsBuildPassFinish` + verifikasi library masih
-   dibayar penuh walau `bin=0`. Sama polanya dengan kandidat "pass binary
-   kosong" (1,8 s → sisa terus menyusut; bukti terukur di §11).
-3. **[ ] `collect+plan` + `decide` fase library n=500 ≈ 590 ms** — dua
-   traversal source/object per pass. Menggabungkan plan libpass → reuse oleh
-   binary-pass hanya bila verdict tak berubah.
-4. **[ ] `fs-save` residu 332 ms** — stamp entri tak tersentuh kini reuse;
-   sisa = stat entri baru/berubah + tulis file. Opsi: tulis store satu kali
-   per fase, satu arah dengan batch tulis di item (6).
-5. **[ ] Memo `csOpen` lintas-panggilan (`rt-groups` ~35–50 ms/run)** — masih
-   terbuka dari audit 30/10 §5.6; kecil tapi lintas semua jalur (single + ws).
-6. **[ ] Tulis cache store: buka-tulis-ulang per fungsi.** Pengukuran hari ini
-   memperlihatkan `opts.cache` dibuka 11× dengan 5× rewrite `.tmp` dalam
-   SATU run inkremental (sync route per fase/proyek). Konsolidasi: batch sync
-   route di akhir fase (satu rewrite) — setara semantik karena PATCH additive.
-   Kertas kaji: `src/cache/opts_update.c` (4 `csOpen`), `opts_read.c`.
+1. **[x] `.d-cek` di `save-walk` — SELESAI (14/11/2026).**
+   - Koreksi temuan 4/11: setiap `.d` di-stat **dua kali** per save, bukan satu
+     (`.d-cek` di `dstat` + `wsCacheAdd(dfile,'O')` yang men-stat ulang path yang
+     sama dalam iterasi yang sama). Stat kedua dihapus: `wsCacheAddSt` memakai stat
+     yang sudah ada (`src/workspace/ws_cache_save.c`).
+   - Terukur dengan `satria trace` (cold miniws, n=6 objek, binary asli vs baru):
+     stat pada `.d` 24 → 18 (−n), total stat seluruh proses 1514 → 1508 (−n). Counter
+     `output` SATRIA_PROFILE 23 → 17 sebagai pelengkap. Kunci cache (hash, tipe, path) identik antara sebelum dan
+     sesudah; no-op tetap `Nothing to build`; suite miniws 348 PASS / 0 FAIL / 0 PRE.
+   - Terukur di n=500 (workspace 500 objek, cold build, sandbox 1-core):
+     stat pada `.d` 2000 → 1500 (−500), total stat 37768 → 37268 (−500), profil
+     `output` 1003 → 503 stat. Biaya 500 stat hanya ~0,4 ms di sandbox ini, jadi
+     wall time tidak berubah yang terukur: `bench_real_project.sh -r 5` serial
+     median asli 5,92 s vs baru 5,98 s (rentang tumpang tindih, noise).
+   - Estimasi 0,13–0,23 s per save untuk n=500 (−n × 257–461 µs, stat cost audit
+     27/10 di proot aarch64) TIDAK terbukti di sandbox ini. Perlu diukur di target
+     proot sebelum dianggap hasil.
+   - Langkah (a) SELESAI (14/11/2026) — memo stat gerbang no-op, tanpa merge/preserve:
+     proyek **nol-kompilasi** run ini (.o/.d pasti tak tersentuh) memakai stamp memo
+     stat P-fast yang sudah dibayar di awal run; proyek yang kompilasi tetap stat
+     segar (memo bisa basi — anak fork menulis di memorinya sendiri). Implementasi:
+     (1) tabel "ada kompilasi" per proyek `cmdsWsPhaseCompiledSet/Get` (commands.c,
+     semantik OR antar fase); ditulis di `cmdsBuildPassFinish` kedua jalur, jalur
+     fast-state valid & skip tanpa target `wsRunProject` (ws_exec.c), dan distaging
+     anak→induk lewat `ws-verdict-*` byte-2 (runners/parallel.c, diekspor kedua
+     fase, diimpor OR; verdict byte-object tetap hanya fase library).
+     (2) Gate P-fast memo-kan entri `O` HANYA di bawah `build/` (ws_cache_noop.c) —
+     output di luar build/ (bin/lib) tidak dicatat karena konsultan memo lain
+     (deps/wsstate) bisa membacanya setelah fase penulisnya selesai di anak lain;
+     `D` tetap tak dicatat. (3) `wsCacheAddObjectTree` memo-first untuk .o/.d
+     proyek `compiled==0` (`cmdsStatCached`; false = file hilang yang baru
+     di-stat memo — tidak perlu stat ulang), refactor `wsCacheAddEntry`/
+     `wsCacheAddOMemo`. (4) Get TANPA guard `wsModeActive()` — save jalan
+     setelah `wsModeSet(false)`; default konservatif `true` (stat segar).
+   - Terukur (tests/complexws, 9 objek / 3 proyek, SATRIA_PROFILE): ubah 1 sumber
+     core → `.d-cek` 9 → 4 stat, `output` 20 → 15, counter `memo gate` 5 .d + 5 O;
+     identik jalur serial (SATRIA_WS_PAR=0) dan forked. Ubah sumber bade → 4 .d +
+     4 O dari memo (seleksi mengikuti proyek yang kompilasi). Konvergensi: no-op
+     HIT setelah save ber-memo (penuh, selektif-merge, dan sebagian). Build penuh
+     (rm build/): memo 0 (semua stat segar) + no-op HIT. Kit dsl 14/14, parser
+     12/12.
+   - Sisa risiko diterima (self-healing lewat gate metadata-refresh): embed object
+     ditulis ulang dengan compiled==0 → boros 1 full-run, jarang; touch mtime
+     .o/.d tanpa isi berubah → gate konvergen via hash-content match.
+2. **[~] Ekor pass binary yang kosong — ANALISIS SELESAI (5/11/2026), usulan naif DITOLAK.**
+   - Pengukuran (cold → 1 sumber diubah dengan komentar, `.o` identik, workspace n=500,
+     `SATRIA_PROFILE`): total 36,8 ms, 0 binary di-link. Pass binary: `decide` 0,0 ms,
+     `compile` 0,0 ms, `rt-groups` 2,6 ms, `fs-stamps` 0,4 ms, `fs-save` 3,8 ms.
+     Ekor workspace (`save-headers` 2,0, `save-walk` 1,8, `save-commit` 1,2,
+     `save-merge` 0,5, `tail-stamp` 2,7, `ws-routesync` 0,3, `ws-report` 0,3,
+     `ws-blobflush` 0,2) ≈ 9 ms.
+   - DITOLAK: melewati `fs-save` kedua di pass binary bin=0. Save itu dipanggil dengan
+     `target` binary (`libOnly = false`), sedangkan save library memakai `target = "-"`
+     (`cmds_wsstate.c` baris 254). Isi fast-state berbeda by design: entri `O` untuk
+     target binary inilah yang membuat no-op berikutnya mengenali binary sebagai
+     up-to-date. Melewatinya merusak no-op.
+   - Yang tersisa realistis: `rt-groups` dihitung dua kali per run (1,9 ms di pass
+     library, 2,6 ms di pass binary) — terkait item 5 (memo lintas-panggilan). Dan
+     pengurangan jumlah save fast-state per run terkait item 4 (konsolidasi tulis per
+     fase), yang harus didesain agar entri `O` target tetap tercatat.
+   - Skala: di sandbox ini total run 37 ms; angka 1,07 dtk di todo diukur di proot pada
+     workspace yang lebih besar. Proporsi di sini (bin=0 ≈ 7 ms dari 37 ms) belum
+     dikonfirmasi di proot.
+3. **[~] `collect+plan` + `decide` fase library — ANALISIS SELESAI (5/11/2026): klaim dua traversal TIDAK terbukti.**
+   - Trace inkremental n=500 (satu sumber diubah): setiap sumber `.c` di-stat **tepat
+     sekali** (502 stat; hanya sumber yang diubah 2×). Tidak ada traversal sumber ganda.
+   - Objek `.o` di-stat 3× per run, dari tiga fase berbeda (sapuan berselang-seling
+     decide, sapuan berurut-nama `fsListDir` di save-walk, sapuan acak-hash di validasi
+     fast-state). Sapuan save-walk dan validasi bukan milik item 3 (lihat item 1 dan 4).
+   - Kontrol: `SATRIA_DECIDE_FROM_PLAN=0` menghasilkan jumlah stat objek dan sumber yang
+     IDENTIK (1466 `.o`, 502 sumber; total 3599 vs 3600). Jadi jalur plan tidak menambah
+     stat dan decide tidak membaca ulang traversal.
+   - Profil lokal: `collect+plan` 1,9 ms + `decide` 1,4 ms di pass library (≈ 9 % dari
+     run 37 ms). Angka 590 ms di todo berasal dari proot dan tidak tercermin dalam
+     jumlah stat di sini.
+   - Verdict: tidak ada perubahan kode yang dibenarkan dari item ini. Peluang yang
+     tersisa ada di sapuan objek save-walk dan validasi (terkait item 1 dan 4).
+
+4. **[~] `fs-save` — ANALISIS TERUKUR (5/11/2026); penanda profil dipasang, konsolidasi BELUM.**
+   - Penanda profil baru di `wsFastStateSave` (`cmds_wsstate.c`): `fs-prev`, `fs-entries`,
+     `fs-blob`, `fs-router-rec` (cabang binary), dan `fs-lib-entries`, `fs-lib-router`
+     (cabang library). Hanya mencatat waktu saat `SATRIA_PROFILE`; suite miniws tetap
+     348 PASS / 0 FAIL.
+   - Inkremental n=500, satu sumber diubah (compile 16,4 ms), total 42 ms:
+     - Pass library: `fs-lib-entries` 6,0 ms (loop stat/hash + lib.cache),
+       **`fs-lib-router` 4,5 ms** (tulis opts.cache).
+     - Pass binary: `fs-prev` 1,0 ms, `fs-entries` 0,7 ms, **`fs-router-rec` 2,2 ms**
+       (tulis opts.cache), `fs-blob` 0,0 ms.
+   - Kesimpulan: penulisan opts.cache lewat `optsRouterRecord` = 6,7 ms (≈ 16 %), lebih
+     besar daripada loop entri. Itu inti item 6 dan bukan item 4. Loop entri di sandbox
+     ini murah (µs per entri); estimasi 332 ms di todo (proot) tidak diverifikasi di sini.
+   - Batching dua penulisan opts.cache (lib dan binary) tidak aman tanpa overlay: pass
+     binary membaca hasil pass library. Prasyarat sama dengan item 5 dan 6.
+   - Sisa yang perlu diukur di proot: loop entri (stat fresh untuk `O`) dan latency
+     tulis ws.state.
+5. **[~] Memo `csOpen` lintas-panggilan — ANALISIS SELESAI (5/11/2026); memo BELUM diterapkan.**
+   - Terukur (trace inkremental n=500, satu sumber diubah): `opts.cache` dibuka 8×,
+     `deps.cache` 7×, `lib.cache` 6×, `fingerprint.cache` 6×, `sources.cache` 4×.
+     `rt-groups` (`opts_read.c` baris 96) 1,9 ms + 2,6 ms per run (~12 % dari 37 ms
+     di sandbox ini). Angka 35–50 ms di todo berasal dari proot.
+   - Kenapa memo tidak bisa diterapkan lokal: berkas cache ditulis di ~12 titik di
+     luar `csCommit` (`cache_store.c`): `opts_create.c:37`, `opts_update.c:17`,
+     `state_blob.c:193/233/249`, `artifact.c:92/101`, `cmds_libcache.c:102`,
+     `embed.c:326`, `ws_cache_noop.c:54/57/198/229/230/424/464/468`,
+     `ws_cache_save.c:578/581` (fingerprint.cache, temp + rename sendiri), `compdb.c:112`,
+     `state.c:309`. Memo yang tidak diinvalidasi di SEMUA titik = no-op yang salah
+     (bug kelas audit 31/10 §10).
+   - Pembacaan yang tampak berulang di `cmds_fast.c` (`fastSnapGet/Put/Delete`) adalah
+     pasangan baca–tulis berselang, bukan duplikasi; memo harus memutus di setiap tulis.
+   - Prasyarat (dipakai bersama item 6): SATU jalur tulis untuk semua berkas cache —
+     `csCommit` menjadi satu-satunya penulis, dengan invalidasi memo per path dan
+     batching tulis per fase. Ini refactor lintas modul; belum dikerjakan.
+   - Urutan yang disarankan: (1) inventaris dan migrasi 12 titik tulis ke funnel,
+     tanpa mengubah perilaku, diuji dengan suite penuh; (2) baru memo di funnel;
+     (3) ukur di proot.
+6. **[~] Tulis cache store: buka-tulis-ulang per fungsi — ANALISIS SELESAI (5/11/2026); batching BELUM diterapkan.**
+   - Instrumen sementara di `csCommit` (dihapus lagi, diverifikasi identik) pada
+     inkremental n=500: `opts.cache` **commit 4×** (n = 6, 5, 5, 5 entri), dan masing-masing
+     benar-benar menulis (`csPut` melewati nilai identik; `csCommit` keluar bila tak
+     `dirty`). Selain itu: `deps.cache` 1×, `lib.cache` 1×, `fingerprint.cache` 1×,
+     `state.cache` 1×.
+   - Pemicu `opts.cache`: `optsProjMetaStamp` (`cmds_fast.c` 549, 585), `optsSourcesRouteSync`
+     (`state.c` 343, `ws_cache_noop.c` 366/633, `workspace.c` 630), `wsRouterRecord`
+     (`ws_cache_save.c` 884). `WS_ROUTER_FILE` = `OPTS_CACHE_FILE` = `.satria/opts.cache`.
+   - Biaya lokal kecil: `ws-routesync` 0,3 ms + `tail-router` 0,2 ms per run (≈ 1 %).
+     Yang mahal per rewrite adalah latency open/rename, bukan ukuran data (entri 5–6).
+   - Batching TIDAK aman sebagai "tunda commit": tiap penulis membaca lalu menulis
+     (read-modify-write) file yang sama; penulis kedua akan membaca isi lama dan
+     kehilangan update penulis pertama. Butuh overlay memori per proses untuk
+     `opts.cache` (sama dengan prasyarat item 5: satu jalur tulis).
+   - Urutan yang disarankan: (1) funnel tulis (item 5 langkah 1) untuk opts.cache;
+     (2) overlay + flush di akhir fase, dengan flush di SEMUA jalur keluar (termasuk
+     error) agar tidak ada update hilang; (3) ukur latency di proot.
 7. **[x] Opsi level kompresi release — TERSELESAIKAN sebagai
    `release.optimize` / `pack.optimize` (default `false`)** — pengukuran:
    tar 5 ms, gzip -6 174 ms, gzip -1 56 ms (+18 % ukuran). Keputusan produk:
@@ -71,9 +182,42 @@ Yang sudah dikerjakan DAN terukur: `.d` dibaca sekali (−2,8 s), `fs-save` reus
   path ABSOLUT — runner men-cd ke salinan tmp sebelum mengeksekusi test,
   sehingga target relatif membuat fixture arg `$2` test gagal di-abspath
   (ditemukan 05/11/2026). Log + PID otomatis; jangan loop manual.
-- [ ] Setelah item 1–3 dieksekusi: re-basel benchmark harian via
-      `scripts/bench_check.sh` (9 skenario) + satu run `bench_real_project.sh`
-      (complexws) sebagai titik pembanding audit ini.
+- [x] Re-basel benchmark (5/11/2026): `scripts/bench_check.sh -N` untuk 12 skenario
+      (cold, noop, leaf, bade, mod, touch, hedit, sel, dep, libtouch, libhdr, rel) — semua
+      `in accordance`. Angka per skenario dari `view.csv` (aktual vs harapan): cold 2908 ms
+      (203 kompilasi), noop 3 ms (0), touch 5 ms (0), leaf 75 ms (1), mod 143 ms (1),
+      hedit 243 ms (6), libhdr 188 ms (2), rel 33 ms (0). Skenario strace tidak dijalankan.
+      Catatan: sandbox tidak punya cmake/ninja, sehingga hanya sisi satria yang diukur.
+      Baris `compile=203 binary-links=4` yang dicetak di tiap log berasal dari
+      Actual Work Audit (build cold yang di-prime sekali per proses), BUKAN dari skenario;
+      verdict per skenario tetap berbasis `view.csv`. Baris itu menyesatkan dan perlu label.
+- [x] `bench_real_project.sh -r 1 -j 2 tests/complexws` (titik pembanding): serial 0,25 s,
+      paralel 0,26 s, rasio 0,96× (nproc = 1; log berisi 4 + 5 unit terkompilasi, status Success).
+      Workspace ini kecil, jadi angkanya referensi, bukan pengukuran skala.
+
+
+10. **[x] Pemeriksaan presence grup `optsCacheHasGroup` — memo berindeks isi (5/11/2026).**
+   - Koreksi asumsi: `opts.cache` hanya 509 byte (7 baris: `P` + `PUT`/`PATCH`). Biayanya
+     bukan ukuran data. Empat commit `opts.cache` per run total 0,76 ms; split menjadi tiga
+     file menambah commit tanpa mengurangi byte. Usulan split dan `opts.blob` tidak
+     terbukti menghemat.
+   - Hotspot sebenarnya: `optsCacheHasGroup` dipanggil 10× per run inkremental (router
+     record ×2 × {deps, fingerprint, lib} + rt-groups). Total terukur 11,2 ms (≈ 28 % run
+     40 ms). Setiap panggilan mem-parse seluruh file ~95–118 KB (`csOpen` → `loadFile`),
+     padahal jawabannya ya/tidak. Jawaban semua panggilan: "ada".
+   - Pengukuran isi: dari 10 panggilan hanya 4 pasang (file, isi) unik.
+   - Perubahan: memo per proses di `router.c`, kunci = (hash FNV-1a isi file, ukuran, proj),
+     maks 16 entri. Hasil = fungsi murni dari byte file, sehingga tidak ada invalidasi manual
+     yang bisa terlewat; isi berubah karena penulisan -> hash berubah -> miss. Jalur baca
+     gagal kembali ke implementasi asli.
+   - Terukur: miss 0,85–1,44 ms (4 panggilan), hit 0,14–0,20 ms (6 panggilan), total
+     sekitar 4,3 ms per run (dari 11,2 ms). Total run median ~41 → ~38 ms (noise ±5 ms).
+   - Verifikasi: suite miniws 348 PASS / 0 FAIL / 0 PRE; `bench_check.sh -N` 12 skenario
+     semua `in accordance`, `cc == ecc` dan `miss = 0` di setiap skenario.
+   - Batasan: kunci memakai FNV-1a 64-bit (konsisten dengan stamp isi di codebase).
+     Tabrakan hash pada file yang sama dengan ukuran sama dapat menghasilkan presence
+     yang salah; peluangnya kecil tetapi bukan nol. Sisa biaya: 4 parse miss (~3,3 ms)
+     dan hashing byte-wise (dapat dipercepat dengan pembacaan word).
 
 ## Kontrak hasil audit ini
 
