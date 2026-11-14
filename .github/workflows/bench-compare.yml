@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       tools:
-        description: 'Comma-separated tools (ninja,make,bear,satria,cmake,meson,xmake,tup)'
+        description: 'Comma-separated tools (ninja,make,bear,satria,cmake,meson,xmake). tup belum didukung.'
         type: string
         required: true
         default: 'ninja,cmake,satria'
@@ -35,6 +35,10 @@ on:
         description: 'Keep and upload logs/CSV'
         type: boolean
         default: true
+      strace:
+        description: 'Add no-op syscall profiling (strace -c -f); installs strace'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -50,12 +54,60 @@ jobs:
       BENCH_REPEATS: ${{ inputs.repeats }}
       BENCH_AUDIT: ${{ inputs.audit }}
       BENCH_ARTIFACTS: ${{ inputs.artifacts }}
+      BENCH_STRACE: ${{ inputs.strace }}
     steps:
       - uses: actions/checkout@v4
       - name: Install benchmark dependencies
+        shell: bash
         run: |
+          set -euo pipefail
+          # Dasar selalu dipasang: ninja, make, gcc (wajib di bench/compare.sh).
+          pkgs=(build-essential ninja-build make time)
+          want_xmake=0
+          IFS=',' read -r -a requested <<< "$BENCH_TOOLS"
+          for raw in "${requested[@]}"; do
+            t="${raw//[[:space:]]/}"
+            case "$t" in
+              ""|ninja|make|satria) ;;
+              cmake)  pkgs+=(cmake) ;;
+              meson)  pkgs+=(meson) ;;
+              bear)   pkgs+=(bear) ;;
+              xmake)  want_xmake=1 ;;
+              tup)
+                echo "::error::tool 'tup' belum didukung oleh workflow ini; hapus dari input tools" >&2
+                exit 1 ;;
+              *)
+                echo "::error::tool tidak dikenal: $t" >&2
+                exit 1 ;;
+            esac
+          done
+          if [[ "$BENCH_STRACE" == true ]]; then
+            pkgs+=(strace)
+          fi
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends build-essential cmake ninja-build make time
+          sudo apt-get install -y --no-install-recommends "${pkgs[@]}"
+          if [[ "$want_xmake" == 1 ]]; then
+            curl -fsSL https://xmake.io/shget.text | bash
+            echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+            export PATH="$HOME/.local/bin:$PATH"
+          fi
+          # Verifikasi: setiap tool yang diminta harus benar-benar bisa dieksekusi.
+          missing=0
+          for raw in "${requested[@]}"; do
+            t="${raw//[[:space:]]/}"
+            case "$t" in
+              ""|satria) continue ;;
+            esac
+            if ! command -v "$t" >/dev/null 2>&1; then
+              echo "::error::tool '$t' tidak ditemukan setelah instalasi" >&2
+              missing=1
+            fi
+          done
+          if [[ "$BENCH_STRACE" == true ]] && ! command -v strace >/dev/null 2>&1; then
+            echo "::error::strace tidak ditemukan setelah instalasi" >&2
+            missing=1
+          fi
+          exit "$missing"
       - name: Bootstrap Satria
         run: |
           ./install.sh --dev
@@ -74,6 +126,11 @@ jobs:
           set -euo pipefail
           args=(-b "$PWD/bin/satria" -t "$BENCH_TOOLS" -n "$BENCH_SOURCES" -H "$BENCH_HEADERS" -r "$BENCH_REPEATS")
           if [[ "$BENCH_AUDIT" != true ]]; then args+=(-A); fi
+          # -s membatasi skenario. strace hanya berjalan bila diminta lewat -s,
+          # jadi daftar default ditulis lengkap ditambah strace.
+          if [[ "$BENCH_STRACE" == true ]]; then
+            args+=(-s cold,noop,touch,edit,editrel,compdb,strace)
+          fi
           if [[ "$BENCH_ARTIFACTS" == true ]]; then
             mkdir -p benchmark-results
             args+=(-k -o "$PWD/benchmark-results/compare")
