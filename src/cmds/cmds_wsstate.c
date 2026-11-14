@@ -396,7 +396,9 @@ void wsFastStateSave(struct DepCache *dc, const Config *c, const List *srcs, con
     libCacheMetaFree(&m);
     listFree(&items);
     listFree(&libs);
+    profMark("fs-lib-entries"); /* profil: cabang library, selesai loop entri + tulis lib.cache */
     optsRouterRecord(c, libOnly); /* router: deps + lib (fase library) */
+    profMark("fs-lib-router");  /* profil: tulis opts.cache (cabang library) */
     return;
   }
 
@@ -408,6 +410,7 @@ void wsFastStateSave(struct DepCache *dc, const Config *c, const List *srcs, con
   }
   FsPrevTable prev = {0};
   fsPrevLoadWsState(&prev, proj); /* stamp lama ws.state: hindari hash ulang */
+  profMark("fs-prev");  /* profil: baca ws.state lama (stamp & hash) */
   char *ob = NULL;
   size_t ou = 0, oc = 0;
   stAppendf(&ob, &ou, &oc, "%s %s\n", WS_STATE_MAGIC, cwd);
@@ -445,7 +448,11 @@ void wsFastStateSave(struct DepCache *dc, const Config *c, const List *srcs, con
                 (unsigned long long)content, p);
     }
   }
-  if (stateBlobPut(proj, "ws.state", ob ? ob : "", ou)) optsRouterRecord(c, libOnly); /* router: deps (+lib/+embed) */
+  bool okBlob = stateBlobPut(proj, "ws.state", ob ? ob : "", ou);
+  profMark("fs-entries"); /* profil: loop stat/hash entri (sejak fs-prev) */
+  profMark("fs-blob");     /* profil: tulis ws.state */
+  if (okBlob) optsRouterRecord(c, libOnly); /* router: deps (+lib/+embed) */
+  profMark("fs-router-rec"); /* profil: tulis opts.cache (router) */
   free(ob);
   fsPrevFree(&prev);
   listFree(&items);

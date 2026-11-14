@@ -36,6 +36,7 @@ int cmdTest(const char *const *args, int nargs, const char *argv0) {
 
 /* Direktori binary ini (tanpa nama file) — pola cmdExeDir (src/cmdhelp.c). */
 static bool selfExeDir(const char *argv0, char *out, size_t cap) {
+  (void)argv0; /* hanya dipakai cabang non-Linux di bawah */
 #if defined(__linux__)
   ssize_t n = readlink("/proc/self/exe", out, cap - 1);
   if (n > 0) {
@@ -47,7 +48,6 @@ static bool selfExeDir(const char *argv0, char *out, size_t cap) {
   uint32_t size = (uint32_t)cap;
   if (_NSGetExecutablePath(out, &size) != 0) return false;
 #else
-  (void)argv0;
   (void)cap;
   return false;
 #endif
