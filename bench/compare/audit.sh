@@ -33,7 +33,7 @@ SHIM
       ninja|make|bear|satria|cmake|meson) ;;
       *) echo "$label,cold,UNSUPPORTED,0,0,0,compiler interception not verified" >>"$AUDITCSV"; continue ;;
     esac
-    for scen in cold noop edit; do
+    for scen in cold noop edit editrel; do
       reset_all
       cp "$PROJ/src/t1.c.baseline" "$PROJ/src/t1.c"
       log="$OUTDIR/.audit-$k-$scen.argv"
@@ -44,7 +44,7 @@ SHIM
           echo "$label,$scen,PRIME_FAILED,0,0,0,initial build failed" >>"$AUDITCSV"; continue;
         }
         : >"$log"
-        if [ "$scen" = edit ]; then
+        if [ "$scen" = edit ] || [ "$scen" = editrel ]; then
           # A semantic source change, not a comment-only edit.
           sed -i -E 's/(return v[0-9]+ \+ )[0-9]+;/\199999;/' "$PROJ/src/t1.c"
         fi
@@ -100,12 +100,12 @@ for cmd in cmds:
         # (cmTC_*, CMakeFiles/CMakeScratch) are configure work, not app links.
         links.append(cmd)
 
-expected = nsrc + 1 if scenario == 'cold' else (1 if scenario == 'edit' else 0)
+expected = nsrc + 1 if scenario == 'cold' else (1 if scenario in ('edit', 'editrel') else 0)
 expected_links = 0 if scenario == 'noop' else 1
 srcset = {os.path.basename(x) for x in compiles}
 if scenario == 'cold':
     expected_sources = {'main.c'} | {f't{i}.c' for i in range(1, nsrc + 1)}
-elif scenario == 'edit':
+elif scenario in ('edit', 'editrel'):
     expected_sources = {'t1.c'}
 else:
     expected_sources = set()

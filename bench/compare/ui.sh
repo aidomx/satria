@@ -46,6 +46,8 @@ rules_header() {
   echo '  noop  : build tanpa perubahan'
   echo '  touch : header di-touch tanpa mengubah konten'
   echo '  edit  : satu source diubah; gcc-floor diukur terpisah'
+  echo '  editrel: edit mengubah codegen (fungsi baru) — relink wajib semua'
+  echo '          tool; lantai gcc dibandingkan (pembanding link jujur)'
   echo '  compdb: compile_commands.json harus dihasilkan'
   echo '  Audit : compile/link diuji terpisah tanpa memengaruhi timed runs'
 }
