@@ -23,7 +23,7 @@
    13: background (design/background.md)
    12: embedded.key + embedded.type (design/embedded.md)
    11: ... 10: defines + suffix flags/library/headers/std */
-#define CONFIG_CACHE_VERSION 14u
+#define CONFIG_CACHE_VERSION 15u /* +langDeclared (use project c|cpp) */
 #define CONFIG_CACHE_DIR ".satria"
 #define CONFIG_CACHE_FILE "startup.state"
 
@@ -169,6 +169,7 @@ static bool cacheWriteConfig(FILE *fp, const Config *c) {
       !cacheWriteString(fp, c->pack.debInstallPrefix) ||
       !cacheWriteString(fp, c->pack.debArchitecture) ||
       !cacheWriteU8(fp, c->pack.requested ? 1 : 0) || !cacheWriteU8(fp, c->langCpp ? 1 : 0) ||
+      !cacheWriteU8(fp, c->langDeclared ? 1 : 0) ||
       !cacheWriteSfx(fp, c) || !cacheWriteU32(fp, (uint32_t)c->embCount))
     return false;
 
@@ -182,6 +183,7 @@ static bool cacheReadConfig(FILE *fp, Config *c) {
   uint8_t binary = 1, logEnabled = 0, background = 0;
   uint8_t packOptimize = 0;
   uint8_t libRequested = 0, libStatic = 0, libShared = 0, packRequested = 0, langCpp = 0;
+  uint8_t langDeclared = 0;
   uint32_t embCount = 0;
 
   if (!cacheReadString(fp, c->root, sizeof(c->root)) || !cacheReadList(fp, &c->sources) ||
@@ -215,12 +217,14 @@ static bool cacheReadConfig(FILE *fp, Config *c) {
       !cacheReadString(fp, c->pack.debDescription, sizeof(c->pack.debDescription)) ||
       !cacheReadString(fp, c->pack.debInstallPrefix, sizeof(c->pack.debInstallPrefix)) ||
       !cacheReadString(fp, c->pack.debArchitecture, sizeof(c->pack.debArchitecture)) ||
-      !cacheReadU8(fp, &packRequested) || !cacheReadU8(fp, &langCpp) || !cacheReadSfx(fp, c) ||
+      !cacheReadU8(fp, &packRequested) || !cacheReadU8(fp, &langCpp) ||
+      !cacheReadU8(fp, &langDeclared) || !cacheReadSfx(fp, c) ||
       !cacheReadU32(fp, &embCount) || embCount > MAX_EMBEDDED)
     return false;
   c->pack.requested = packRequested != 0;
   c->pack.optimize = packOptimize != 0;
   c->langCpp = langCpp != 0;
+  c->langDeclared = langDeclared != 0;
 
   c->cleanBuildDir = cleanBuild != 0;
   c->cleanCompileCommands = cleanCompdb != 0;

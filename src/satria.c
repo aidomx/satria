@@ -248,7 +248,8 @@ int satriaRun(int argc, const char *argv[]) {
 
   case CMD_RELEASE: /* tanpa -w ditolak di bawah */
     fprintf(stderr,
-            "satria: release memerlukan mode workspace (pakai 'satria -w release -- name=rupa')\n");
+            "satria: release memerlukan mode workspace (pakai 'satria -w release' atau "
+            "'satria -w release -- version=1.0')\n");
     rc = 2;
     break;
 

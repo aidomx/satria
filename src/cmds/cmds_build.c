@@ -69,8 +69,7 @@ int cmdCompdbGenerate(const char *buildfilePath) {
       listAdd(&srcs, entry);
       continue;
     }
-    walkDir(entry, ".c", &srcs);
-    walkDir(entry, ".cpp", &srcs);
+    configWalkSources(&c, entry, &srcs, false); /* filter bahasa proyek */
   }
   listSort(&srcs); /* urutan entri json = urutan link (reprodusible) */
 
@@ -402,8 +401,8 @@ void cmdsCollectSources(const Config *c, List *out) {
       }
       continue;
     }
-    stateWalkDirCached(entry, ".c", out);
-    stateWalkDirCached(entry, ".cpp", out);
+    /* Filter bahasa proyek: `use project c` mengabaikan .cpp di tree. */
+    configWalkSources(c, entry, out, true);
     if (trace) {
       double tc1 = portMonoMs();
       fprintf(stderr, "[collect] t=%.0f dir=%s %.2f ms\n", tc1, entry, tc1 - tc0);

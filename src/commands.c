@@ -526,7 +526,10 @@ int cmdInteractiveInit(void) {
      `use project` (sisanya konvensi); main.c siap build & jalan. */
   char body[2048], tmp[640];
   body[0] = '\0';
-  strcat(body, "use project\n");
+  /* Scaffold mendeklarasikan bahasa yang dipilih user, jadi `use project cpp`
+     tetap jalur C++ walau tree belum berisi .cpp; `use project` telanjang
+     (C) berarti walk mengabaikan .cpp nyasar. */
+  strcat(body, langCpp ? "use project cpp\n" : "use project\n");
   if (stdv[0]) {
     snprintf(tmp, sizeof(tmp), "\nstd = %s\n", stdv);
     strcat(body, tmp);

@@ -175,6 +175,15 @@ typedef struct {
    */
   bool langCpp;
 
+  /*
+   * true bila bahasa proyek DIDEKLARASIKAN lewat `use project c|cpp|c++`.
+   * Deklarasi menang atas deteksi: proyek C yang dideklarasikan tidak
+   * memungut .cpp saat walk sumber (file C++ nyasar di tree bukan bagian
+   * proyek), dan proyek C++ tetap memakai jalur C++ meski belum ada .cpp.
+   * Tanpa deklarasi, langCpp diturunkan dari isi sources seperti semula.
+   */
+  bool langDeclared;
+
   bool progressBar;
   bool progressErrorAlways;
 
@@ -275,6 +284,16 @@ void configApplyLine(Config *c, const char *key, const char *value);
  * MURNI derivasi in-memory — tidak menulis file apa pun.
  */
 void configFinalize(Config *c);
+
+/*
+ * configWalkSources — kumpulkan sumber di direktori `dir` ke `out` sesuai
+ * bahasa proyek. Proyek yang dideklarasikan C (`use project c`) hanya
+ * memungut .c; selain itu .c + .cpp (deteksi otomatis lama, termasuk
+ * proyek campuran). `cached` = true memakai walk cache .satria/sources.cache
+ * (mode workspace), false = walkDir langsung. Satu titik aturan supaya
+ * koleksi build, compdb, dan profile memakai filter yang sama.
+ */
+void configWalkSources(const Config *c, const char *dir, List *out, bool cached);
 
 /*
  * configMergeUnique — append src ke dst tanpa duplikat (perbandingan

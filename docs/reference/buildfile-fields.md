@@ -1,6 +1,6 @@
 # Buildfile Field Reference
 
-Reference for the Buildfile keys that satria v0.2.4 (alpha) actually accepts.
+Reference for the Buildfile keys that satria v0.5.0 actually accepts.
 Keys are written as `section.subkey = value`. A few keys have per-platform
 variants (`library.<platform>`, `flags.<platform>`) and workspace-only forms
 (`<project>.<key>`); those are noted in place.
@@ -13,8 +13,17 @@ the [workspace guide](../guide/workspace.md).
 | Key | Purpose |
 |---|---|
 | `use project` | Single-project mode. |
+| `use project c`, `cpp`, `c++` | Language for the project (see below). Without an argument the language is detected from the sources. |
 | `use workspace` | Workspace mode (requires a `Buildfile.ws` at the workspace root). |
+| `use workspace c`, `cpp`, `c++`, `hybrid` | Default language for every member project. `hybrid` (the default, and the behaviour of a bare `use workspace`) detects each project separately. |
+| `<project>.lang` | Workspace only. Overrides the workspace language for one project (`c`, `cpp`, `c++`, `hybrid`). |
 | `name as alias` | Declares an alias. `clean as c`, then `c.build = false`. |
+
+An unknown language value is reported with a warning and falls back to the
+workspace default (or to detection in single-project mode); it is never
+ignored silently. Switching a project between `c` and `cpp` invalidates the
+cached build state, so the sources are recompiled with the new standard and
+driver.
 
 ## Sources and headers
 
@@ -23,8 +32,8 @@ the [workspace guide](../guide/workspace.md).
 | `sources` | Source directories, relative to the project root. Several roots may be listed. |
 | `exclude` | Sources left out of the library (see below). |
 | `headers` | Public include directories, passed as `-I`. |
-| `headers.internal` | Directories tracked as build inputs but **not** passed as `-I`. Use for shared internal headers included by relative path. |
-| `headers.each` | Workspace only. Applies a `headers` value to every project, or to the projects named in it (see below). |
+| `headers.internal` | Directories tracked as build inputs but **not** passed as `-I`. Use for shared internal headers included by relative path. Workspace: the path is relative to the workspace root. |
+| `headers.each` | Workspace only. Applies a `headers` value to every project, or to the projects named in it (see below). Always a public (`-I`) path, unlike `headers.internal`. |
 | `defines` | Preprocessor definitions. |
 | `flags` | Compiler flags. `flags.<platform>` applies on that platform only. |
 | `std` | Language standard, for example `gnu11` or `c++17`. |
@@ -194,6 +203,12 @@ warning. Use `release.*` at the workspace level instead.
 | `projects = a, b` | Declares the member projects. |
 | `projects.<name> as <alias>` | Declares a member project with an alias. |
 | `<project>.root` | The project folder, relative to the workspace root. |
+| `<project>.lang` | Language for that project (`c`, `cpp`, `c++`, `hybrid`). |
+| `<project>.cdeps` | Other projects whose library and public headers this project uses. |
+| `headers.each` | Applies a `headers` value to every project, or to the named ones. |
+| `headers.internal` | Shared header folders tracked without `-I`, relative to the workspace root. |
+| `background` | `true` runs the build in a detached child (`satria watch` follows it). |
+| `release.*` | One workspace-level release (same keys as `pack.*`). |
 | `log` | Build log setting. |
 
 Workspace-level `root` is ignored with a warning. Set `root` per project.

@@ -98,6 +98,7 @@ static void wsApplyLine(const WsModel *m, const WsProject *p, Config *c, const c
     return;
   }
   if (strcmp(key, "cdeps") == 0) return; /* dikonsumsi wsApplyCdeps */
+  if (strcmp(key, "lang") == 0) return;   /* dikonsumsi wsProjectLang (bahasa) */
   /* headers.each = X: X diterapkan ke SETIAP proyek, diresolve relatif root
      tiap proyek (I. = <proyek>/include). Setara dengan menulis <proyek>.headers = X
      untuk setiap proyek, tanpa mengulang penulisan. */
@@ -308,6 +309,15 @@ bool wsBuildConfig(const WsModel *m, int idx, Config *c) {
     if (fsDirExists(incDir)) listAdd(&c->headerPublic, incDir);
   }
   int hpBefore = c->headerPublic.count;
+
+  /* Bahasa: `use workspace c|cpp` atau `<proyek>.lang` (wsProjectLang).
+     Dideklarasikan -> walk sumber & driver mengikuti deklarasi; HYBRID
+     (default) -> configFinalize mendeteksi otomatis seperti perilaku lama. */
+  WsLang lang = wsProjectLang(m, idx);
+  if (lang == WS_LANG_C || lang == WS_LANG_CPP) {
+    c->langDeclared = true;
+    c->langCpp = lang == WS_LANG_CPP;
+  }
 
   configFinalize(c);
 

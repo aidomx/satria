@@ -125,8 +125,7 @@ static int buildSandboxed(ProfCtx *p, const char *passKind) {
       listAdd(&srcs, entry);
       continue;
     }
-    walkDir(entry, ".c", &srcs);
-    walkDir(entry, ".cpp", &srcs);
+    configWalkSources(&c, entry, &srcs, false); /* filter bahasa proyek */
   }
   listSort(&srcs);
   profPhaseEnd(0, 0);

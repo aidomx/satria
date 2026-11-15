@@ -29,7 +29,7 @@ gen_ninja_graph() {
     printf 'build bin/app: link'
     printf ' %s' "${objects[@]}"
     printf '\n\ndefault bin/app\n'
-  } >"$PROJ/build.ninja"
+  } > "$PROJ/build.ninja"
 }
 
 gen_project() {
@@ -43,7 +43,7 @@ gen_project() {
       echo "#pragma once"
       [ "$h" -gt 1 ] && echo "#include \"h$((h - 1)).h\""
       echo "static const int v$h = $h;"
-    } >"$PROJ/include/h$h.h"
+    } > "$PROJ/include/h$h.h"
   done
 
   # Source files
@@ -52,7 +52,7 @@ gen_project() {
     {
       echo "#include \"h$((i % NHEAD + 1)).h\""
       echo "int t$i(void) { return v$((i % NHEAD + 1)) + $i; }"
-    } >"$PROJ/src/t$i.c"
+    } > "$PROJ/src/t$i.c"
   done
 
   # main.c
@@ -60,7 +60,7 @@ gen_project() {
     echo "#include \"h1.h\""
     echo "int t1(void);"
     echo "int main(void) { return t1() - 1; }"
-  } >"$PROJ/src/main.c"
+  } > "$PROJ/src/main.c"
   cp "$PROJ/src/t1.c" "$PROJ/src/t1.c.baseline"
 
   gen_ninja_graph
@@ -81,11 +81,11 @@ gen_project() {
     echo -e "\t\$(CC) \$(CFLAGS) -MMD -MP -c \$< -o \$@"
     echo
     echo "-include \$(OBJS:.o=.d)"
-  } >"$PROJ/Makefile"
+  } > "$PROJ/Makefile"
 
   # ---- Buildfile (satria) ----
   {
-    echo "use alias"
+    echo "use project c"
     echo
     echo "clean as c"
     echo "output as o"
@@ -104,8 +104,8 @@ gen_project() {
     echo "o.binaryDir = bin"
     echo "o.buildDir = build"
     echo "o.compileCommands = false"
-  } >"$PROJ/Buildfile"
-  ( cd "$PROJ" && "$SATRIA" init >/dev/null 2>&1 )
+  } > "$PROJ/Buildfile"
+  (cd "$PROJ" && "$SATRIA" init > /dev/null 2>&1)
 
   # ---- CMakeLists.txt (untuk CMake + Ninja) ----
   {
@@ -123,7 +123,7 @@ gen_project() {
     echo "add_executable(app \${SOURCES})"
     echo "target_include_directories(app PRIVATE include)"
     echo "target_compile_options(app PRIVATE -O2 -MMD -MP)"
-  } >"$PROJ/CMakeLists.txt"
+  } > "$PROJ/CMakeLists.txt"
 
   # ---- meson.build (untuk Meson + Ninja) ----
   {
@@ -144,7 +144,7 @@ gen_project() {
     echo "executable('app', src,"
     echo "           include_directories : inc,"
     echo "           install : false)"
-  } >"$PROJ/meson.build"
+  } > "$PROJ/meson.build"
 
   # ---- xmake.lua (untuk XMake) ----
   {
@@ -160,7 +160,7 @@ gen_project() {
     echo "target(\"app\")"
     echo "    set_kind(\"binary\")"
     echo "    add_files(\"src/*.c\")"
-  } >"$PROJ/xmake.lua"
+  } > "$PROJ/xmake.lua"
 
   # ---- Tupfile (untuk Tup) ----
   {
@@ -173,9 +173,9 @@ gen_project() {
     echo
     echo -n ": foreach build/*.o |> gcc %f -o %o |> bin/app"
     echo
-  } >"$PROJ/Tupfile"
+  } > "$PROJ/Tupfile"
   # Tup butuh inisialisasi database
   if [ "$HAVE_TUP" = 1 ]; then
-    ( cd "$PROJ" && tup init >/dev/null 2>&1 || true )
+    (cd "$PROJ" && tup init > /dev/null 2>&1 || true)
   fi
 }

@@ -5,7 +5,7 @@
 # ─── MODE & ALIAS ─────────────────────────────────────────────────────────────
 # Menandai file ini sebagai konfigurasi proyek tunggal (bukan workspace).
 # Satria akan menerapkan konvensi default (src/, include/, bin/, build/).
-use project
+use project c
 
 # Alias singkat untuk meningkatkan keterbacaan dan mengurangi pengetikan berulang.
 clean as c

@@ -20,7 +20,7 @@ satria test <args>          Run unit tests via scripts/unit.sh (see: help test)
 satria -w                Build all projects in workspace (Buildfile.ws)
 satria -w <name>         Build <name> and its dependencies
 satria -w <name> --with-cdeps  ...plus its cdeps providers (see: help workspace)
-satria -w release -- name=<p>[,key=value]  Package one release
+satria -w release [-- key=value]  Build + package the workspace release
 satria watch [--full]   Monitor a background build (see: help watch)
 satria -w watch [--full]  Same for a workspace background build
 satria help              Show this help
@@ -43,6 +43,8 @@ satria -g compdb         Generate compile_commands.json only (no build)
 
 Conventions for a standard project (src/ + optional include/):
   a one-line Buildfile is enough: `use project`
+  declare the language to pin it: `use project c | cpp | c++`
+  (without a language, .cpp anywhere under sources selects C++ auto)
 
 Buildfile fields that override conventions:
   sources, headers, flags, defines, std, compiler, exclude,
@@ -169,8 +171,11 @@ satria -w <name> --with-cdeps
                        off by default — plain -w <name> never builds
                        cdeps providers, it only reuses them if present
 satria -w clean          Clean the entire workspace
-satria -w release -- name=<p>[,key=value]
-                       Package one release to dist/release/<name>/
+satria -w release        Same as `satria -w`: build, then package the
+                       workspace release to dist/ (when release.* exists)
+satria -w release -- key=value[,key=value]
+                       Package with per-run overrides (name, version,
+                       format/target, or any pack.* key)
 satria -w watch [--full] Monitor a background build (requires
                        `background = true`; see: help watch)
 satria init -w           Create a workspace Buildfile (Buildfile.ws)
@@ -178,6 +183,13 @@ satria init -w           Create a workspace Buildfile (Buildfile.ws)
 A minimal workspace Buildfile.ws:
   use workspace
   projects = app, tool
+
+Optional language rule (default `hybrid` = unchanged behavior):
+  use workspace hybrid | c | cpp | c++
+  <name>.lang = c | cpp | c++ | hybrid     per-project override
+hybrid detects the language per project (.cpp present => C++), so a
+workspace mixing C and C++ projects keeps working; `c` builds only
+.c sources, `cpp`/`c++` builds C++ (both .c and .cpp).
 
 Members follow the standard convention (a <name>/ folder with
 src/); per-project settings like <name>.sources or
@@ -221,21 +233,29 @@ check with `satria watch` (see: help watch).
 ---release
 Release commands (workspace)
 
-satria -w release -- name=<project>[,key=value...]
-                       Package one project release from the CLI.
-                       name= is required; target=deb|tar overrides the
-                       packaging format for this run. Artifacts go to
-                       dist/release/<name>/ (or dist/release/ for a
-                       full `satria -w` run).
+satria -w                     Build, then package the workspace
+                              release (when release.* exists).
+satria -w release             Same as `satria -w`; bare `release` is
+                              a readable alias, no selector needed.
+satria -w release -- version=0.2.3
+                       Override release settings for this run:
+                       comma-separated key=value pairs (name,
+                       version, format, target= as an alias of
+                       format, plus any pack.* key).
 
-Releases can also be declared in Buildfile.ws:
-  releases = rupa, ruka
-  releases.rupa as rrupa
-  rrupa.name = rupa
-  rrupa.target = deb
+Releases are declared in one `release.*` section of
+Buildfile.ws (same keys as pack.*):
+  release.name = rupa
+  release.version = 0.2.2
+  release.files = bin/rupa, ../bade/bin/bade
+  release.output = dist/{name}-v{version}.tar.gz
+  release.format = deb
 
-Packages need pack.files (source:path mapping); checksum
-sha256 is written next to the artifact when enabled.
+Without release.files the package contains the build artifacts of
+every project. Output goes to dist/ at the workspace root. The old
+`releases = a, b` syntax is removed and rejected with a migration
+warning. Checksum sha256 is written next to the artifact when
+enabled.
 ---endrelease
 
 ---compdb

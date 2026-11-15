@@ -81,6 +81,14 @@ workspace/
 ```text
 use workspace
 
+# Bahasa (opsional). Default hybrid = perilaku lama: tiap proyek dideteksi
+# dari sumbernya sendiri (.cpp ada => C++), jadi workspace campuran C + C++
+# jalan tanpa deklarasi. `c` memaksa walk hanya .c; `cpp`/`c++` memaksa
+# mode C++ (walk .c + .cpp); override per proyek lewat <nama>.lang.
+use workspace hybrid | c | cpp | c++
+base.lang = c
+core.lang = cpp
+
 # Alias singkat (opsional, untuk mengurangi pengetikan)
 projects.rupamod as mod
 projects.core as core

@@ -97,6 +97,20 @@ static void wsRecordLine(WsModel *m, const char *key, const char *value) {
 
   WsProject *p = wsEnsureProject(m, name);
   if (!p) return;
+  /* <proyek>.lang = c|cpp|c++|hybrid: override bahasa per proyek. Nilai salah
+     ditolak dengan pesan — bukan diabaikan diam-diam (proyek lalu jatuh ke
+     default `use workspace`). */
+  if (strcmp(setting, "lang") == 0) {
+    WsLang l;
+    if (!wsParseLang(value, &l)) {
+      if (!wsGuardQuiet)
+        fprintf(stderr,
+                "satria: workspace: '%s.lang = %s' tidak dikenal (pakai: c | cpp | c++ | hybrid) "
+                "— diabaikan, memakai default workspace\n",
+                name, value);
+      return;
+    }
+  }
   /* <n>.root: dieksekusi oleh wsExecOne (chdir dari root workspace) dan
      TIDAK ditulis ke Buildfile sintesis — file sintesis selalu root = "."
      terhadap cwd proyek, jadi root di situ diterapkan dua kali. */
@@ -133,6 +147,26 @@ bool wsParse(WsModel *m, const char *path) {
     char *slash2 = strstr(text, "//");
     if (slash2) *slash2 = '\0';
     if (!*trim(text)) continue;
+
+    /* `use workspace [c|cpp|c++|hybrid]` — bahasa default workspace. Tanpa
+       argumen = hybrid (deteksi otomatis per proyek, perilaku lama). Bahasa
+       tak dikenal dilaporkan, bukan dibuang diam-diam. */
+    if (strncmp(text, "use workspace", 13) == 0 &&
+        (text[13] == '\0' || text[13] == ' ' || text[13] == '\t')) {
+      const char *arg = text + 13;
+      while (*arg == ' ' || *arg == '\t') arg++;
+      if (*arg) {
+        WsLang l;
+        if (wsParseLang(arg, &l))
+          m->lang = l;
+        else if (!wsGuardQuiet)
+          fprintf(stderr,
+                  "satria: %s:%d: bahasa '%s' pada 'use workspace' tidak dikenal "
+                  "(pakai: c | cpp | c++ | hybrid) — dipakai hybrid\n",
+                  path, lineno, arg);
+      }
+      continue;
+    }
 
     char *eq = strchr(text, '=');
     if (!eq) {

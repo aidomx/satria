@@ -167,7 +167,8 @@ does not add the folder to the compiler's include path.
 
 ## Releases
 
-A workspace can also declare distribution units — see
-[Releases](releases.md). In short: `releases = ...` names the projects whose
-artifacts get packaged into the workspace-level `dist/release/`, and
-`satria -w release -- name=<project>` packages a release straight from the CLI.
+A workspace can also declare one distribution unit — see
+[Releases](releases.md). In short: a single `release.*` section (same keys as
+`pack.*`) describes the package, `satria -w` builds and packages it into the
+workspace-level `dist/`, and `satria -w release -- key=value` overrides
+settings for one run. The old per-project `releases = a, b` syntax is removed.

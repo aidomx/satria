@@ -79,8 +79,13 @@ int wsRunProject(const WsModel *m, const char *name, const char *cmd, int jobs,
   /* Fast no-op per fase — padanan bagian atas cmdBuildEx. Label META
      stabil per proyek (file sintesis sudah tidak ada; label lama berupa
      path .Buildfile gagal validasi -> rebuild penuh sekali saat migrasi). */
-  char bfLabel[WS_NAME_LEN + 32];
-  snprintf(bfLabel, sizeof(bfLabel), "Buildfile.ws:%s", name);
+  /* Label META memuat bahasa efektif: `use workspace c` <-> `cpp` bukan
+     perubahan file sumber atau output, jadi tanpa tag ini fast-state tetap
+     "valid" dan kompilasi C/C++ tidak pernah diulang (std & driver berubah). */
+  WsLang langEff = wsProjectLang(m, idx);
+  const char *langTag = langEff == WS_LANG_C ? "c" : langEff == WS_LANG_CPP ? "cpp" : "hybrid";
+  char bfLabel[WS_NAME_LEN + 48];
+  snprintf(bfLabel, sizeof(bfLabel), "Buildfile.ws:%s:%s", name, langTag);
   if (wsFastStateValid(bfLabel, libOnly)) {
     wsLogFastOk[idx] = true;
     /* Artefak cached proyek fast-hit: catat ke # Execution summary (design §2)

@@ -39,6 +39,12 @@ uint64_t wsLogCfgHash(const WsModel *m, int idx) {
   uint64_t h = 1469598103934665603ULL;
   for (int i = 0; i < m->commonLines.count; i++)
     h = wsFnv1aStr(h, m->commonLines.items[i]);
+  /* Bahasa default `use workspace` bukan baris proyek: ikut di-hash supaya
+     mengubah c <-> cpp membatalkan fast-state/cache proyek (std/driver bisa
+     berubah walau daftar sumber sama). */
+  h = wsFnv1aStr(h, m->lang == WS_LANG_C ? "lang:c"
+                     : m->lang == WS_LANG_CPP ? "lang:cpp"
+                                              : "lang:hybrid");
   h = wsFnv1aStr(h, m->projects[idx].root);
   for (int i = 0; i < m->projects[idx].lines.count; i++)
     h = wsFnv1aStr(h, m->projects[idx].lines.items[i]);

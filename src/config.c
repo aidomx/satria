@@ -38,6 +38,25 @@ static bool sourcesHaveCpp(const Config *c) {
 }
 
 /*
+ * configWalkSources — satu titik aturan ekstensi sumber: proyek yang
+ * bahasanya dideklarasikan C (`use project c`) tidak memungut .cpp, jadi
+ * file C++ yang nyasar di tree sumber tidak ikut dikompilasi/di-compdb.
+ * Proyek C++ dan proyek tanpa deklarasi tetap memungut .c + .cpp
+ * (perilaku lama; proyek campuran ikut jalur C++).
+ */
+void configWalkSources(const Config *c, const char *dir, List *out, bool cached) {
+  if (!dir || !out) return;
+  bool wantCpp = !c || !c->langDeclared || c->langCpp;
+  if (cached) {
+    stateWalkDirCached(dir, ".c", out);
+    if (wantCpp) stateWalkDirCached(dir, ".cpp", out);
+  } else {
+    walkDir(dir, ".c", out);
+    if (wantCpp) walkDir(dir, ".cpp", out);
+  }
+}
+
+/*
  * ==================== Alias (format "use alias") ====================
  *
  * Mesin alias `X as Y` dipindah ke uses/alias.c agar dipakai bersama oleh
@@ -252,10 +271,12 @@ void configFinalize(Config *c) {
     if (!present) listAdd(&c->headerPublic, c->outBuildDir);
   }
 
-  /* Deteksi bahasa C++ dari sources final (termasuk default "src" yang baru
-     diisi — proyek standar tanpa deklarasi pun terdeteksi). Proyek campuran
-     C/C++ ikut jalur C++ (runtime libstdc++ diselesaikan linker C++). */
-  c->langCpp = sourcesHaveCpp(c);
+  /* Bahasa C++: deklarasi `use project cpp|c++` menang (tidak bergantung isi
+     tree, jadi proyek C++ tanpa .cpp pun tetap jalur C++). Tanpa deklarasi,
+     deteksi dari sources final (termasuk default "src" yang baru diisi —
+     proyek standar tanpa deklarasi pun terdeteksi). Proyek campuran C/C++
+     ikut jalur C++ (runtime libstdc++ diselesaikan linker C++). */
+  if (!c->langDeclared) c->langCpp = sourcesHaveCpp(c);
 
   /* Konvensi bahasa C++: sources memuat .cpp -> std c++17 + toolchain C++
      (g++/clang++), tanpa perlu menulis std/compiler di Buildfile.

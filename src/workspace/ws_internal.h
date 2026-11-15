@@ -63,9 +63,17 @@ typedef struct {
   List lines;   /* baris "release.<key> = <value>" apa adanya */
 } WsReleaseCfg;
 
+/* Bahasa default workspace (`use workspace c|cpp|c++|hybrid`, ws_core.c).
+   HYBRID = perilaku lama: bahasa diturunkan otomatis per proyek dari sumber
+   (.cpp ada -> C++), sehingga workspace campuran C + C++ tetap jalan tanpa
+   deklarasi apa pun. C/CPP = paksaan untuk proyek yang tidak punya override
+   <proyek>.lang sendiri. */
+typedef enum { WS_LANG_HYBRID = 0, WS_LANG_C, WS_LANG_CPP } WsLang;
+
 typedef struct {
   WsProject projects[WS_MAX_PROJECTS];
   int projectCount;
+  WsLang lang; /* default `use workspace`; override: baris <proyek>.lang */
   WsReleaseCfg release;
   List commonLines; /* key selain projects/projects.<nama> — default bersama */
   List order;       /* urutan build hasil topo sort (nama) */
@@ -133,6 +141,12 @@ const char *workspaceFileName(void);
 int workspaceRun(const char *cmd, int jobs, const char *only, const char *releaseSel,
                  bool withCdeps);
 void wsAddCommon(WsModel *m, const char *key, const char *value);
+/* Terjemahkan "c" | "cpp" | "c++" | "hybrid" (case-insensitive). false bila
+   nilai tak dikenal — pemanggil mencetak peringatan, BUKAN mengabaikannya. */
+bool wsParseLang(const char *value, WsLang *out);
+/* Bahasa efektif proyek `idx`: baris `<proyek>.lang` (bila ada) menang atas
+   `use workspace`; HYBRID = deteksi otomatis seperti perilaku lama. */
+WsLang wsProjectLang(const WsModel *m, int idx);
 void wsApplyCdeps(const WsModel *m, const WsProject *p, Config *c);
 /* Kumpulkan nama provider cdeps proyek `idx` ke `out` (caller listFree). */
 void wsCdepsProviders(const WsModel *m, int idx, List *out);

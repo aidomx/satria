@@ -504,7 +504,42 @@ bool loadConfigEx(Config *c, const char *path, bool cacheWrite) {
     if (indent == 0) {
       if (useLineMode(text) == USE_PROJECT) {
         useAlias = true;
+        /* `use project <lang>`: bahasa dideklarasikan — menang atas deteksi
+           isi tree (proyek C tidak memungut .cpp; lihat configWalkSources). */
+        const char *lang = useLineLang(text);
+        if (lang[0]) {
+          c->langDeclared = true;
+          c->langCpp = strcmp(lang, "cpp") == 0;
+        }
         continue;
+      }
+      /* `use project <arg>` dengan bahasa di luar c|cpp|c++: JANGAN dibuang
+         diam-diam — pengguna mengira bahasanya terkunci padahal walk tetap
+         memakai deteksi otomatis. Barisnya tetap tidak dipakai (perilaku lama),
+         tapi sekarang dilaporkan. */
+      if (useLineLangArg(text)) {
+        const char *arg = useLineLangArg(text);
+        char bad[32];
+        size_t bl = 0;
+        while (arg[bl] && arg[bl] != ' ' && arg[bl] != '\t' && bl + 1 < sizeof(bad)) {
+          bad[bl] = arg[bl];
+          bl++;
+        }
+        bad[bl] = '\0';
+        if (bl > 0) {
+          /* Buildfile bisa di-parse lebih dari sekali per run (config utama +
+             fingerprint): peringatkan sekali saja untuk isi yang sama. */
+          static char warned[128];
+          char msg[128];
+          snprintf(msg, sizeof(msg), "%s|%s", path, bad);
+          if (strcmp(msg, warned) != 0) {
+            copyStr(warned, sizeof(warned), msg);
+            fprintf(stderr,
+                    "satria: %s: bahasa '%s' pada baris use project tidak dikenal "
+                    "(pakai: c | cpp | c++) — baris diabaikan, bahasa dideteksi otomatis\n",
+                    path, bad);
+          }
+        }
       }
       /* `use workspace` / `use` tak dikenal: baris `use` BUKAN setting —
          jangan biarkan jatuh ke parse lama sebagai section. */
