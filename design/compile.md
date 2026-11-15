@@ -48,6 +48,33 @@ satria -f Buildfile.dev
 | `satria -f Buildfile.ws` | ✅ **SUCCESS** | Full build. Baca `Buildfile.ws`, jalankan fase sesuai isi file. |
 | `satria` | ✅ **SUCCESS** | Default behavior. Mencari `Buildfile` default di root. |
 
+### 3.1 Keputusan implementasi (klarifikasi 15/11/2026, sematan §2)
+1. **`-b` tanpa `-o` = ERROR.** Objek harus berbunyi jelas; contoh pesan:
+   `satria: -b memerlukan -o (path objek eksplisit)`.
+2. **`-F` = compile + link binary.** Objek → `o.buildDir/<basename>.o`,
+   binary → `o.binaryDir/o.binaryName` (`o.binaryName` di quick.conf §4
+   bukan atribut mati).
+3. **Multi-sumber cermin gcc.** `-o` saat SATU sumber = path `.o` penuh;
+   saat MULTI sumber = direktori objek (`<dir>/<basename>.o` per sumber),
+   lalu semua di-link ke `-b`. Niat campur `-F` dengan `-o/-b` = ERROR.
+4. **Nol efek samping.** Mode ad-hoc tidak menulis `.satria` apa pun
+   (tidak ada state/cache/fingerprint); tidak bisa no-op. Kegagalan
+   compiler diteruskan apa adanya (wrapper gcc-floor, perilaku identik).
+5. **Flag CLI ad-hoc tidak ada.** Flag compiler (`-O2`, `-I`, dll.) hanya
+   lewat konfigurasi `-F` (`flags`, `headers`, `defines`, `std`) — sesuai
+   prinsip "didukung oleh konfigurasi", bukan pengetikan panjang di CLI.
+6. **Alias bawaan `use project`/`use alias`.** `output as o`, `clean as c`,
+   `library as lib` aktif otomatis — quick.conf §4 bekerja tanpa baris
+   alias. Definisi alias user lain tetap bekerja normal (alias pertama
+   menang; tiga bawaan tidak dapat ditimpa).
+7. **`-jN` paralel di ad-hoc.** Opsi global `-j` berlaku juga: kompilasi
+   memakai pola `cmdsRunParallelJobs` (`procStartCapture` per job — output
+   compiler dicetak utuh per job selesai, anti-interleaving; kompaksi slot
+   + `procStopAll` saat interupsi). Link selalu berjalan sekali di akhir.
+   Default serial (tanpa `-j` atau `-j1`). Ukur self-host 94 sumber di
+   proot: serial 175,9 s → `-j4` 50,9 s (3,46×) → `-j6` 37,5 s (4,69×);
+   `-j8` datar (38,9 s) — plafon efektif proot ~5× gcc mentah.
+
 ---
 
 ## 4. Format File Konfigurasi

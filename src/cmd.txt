@@ -5,6 +5,11 @@ Satria - A simple builder for you
 
 (no command)           Build project from Buildfile
 -f <file>              Use <file> as Buildfile (default: Buildfile)
+-o <path>              Ad-hoc compile: object path (one source) or object
+                       dir (multi-source); -b <path> links a binary
+                       (requires -o) — no config, no .satria state
+-F <file>              Ad-hoc via lightweight config: takes flags, headers
+                       and o.* paths from <file>; compiles + links
 -xf <build.ninja|make>  Convert build.ninja or Makefile -> Buildfile.xf.tmp
 -xcf <build.ninja|make> Convert and write to Buildfile (confirm if exists)
 -j[N]                  Parallel build with N jobs (default: CPU core count)
@@ -29,7 +34,7 @@ satria version           Show version (alias: satria --version)
 satria self-upgrade      Upgrade satria itself
 satria self-uninstall    Remove satria and global state (requires confirmation)
 
-Topics: build, profile, workspace, init, clean, release, compdb, ninja, install, watch, trace
+Topics: build, profile, workspace, init, clean, release, compdb, ninja, install, watch, trace, adhoc
 ---endhelp
 
 ---build
@@ -359,3 +364,33 @@ The repo root is found from the running binary (bin/../), so `satria test`
 works from any directory inside the repo. The exit code of unit.sh is the
 exit code of satria. Not available on Windows.
 ---endtest
+
+---adhoc
+Ad-hoc compile (design/compile.md) — no Buildfile lifecycle, no .satria
+state, behaves like the gcc command you would have typed yourself.
+
+satria src/x.c -o build/x.o
+                       Compile one source to an object
+satria src/x.c -o build/x.o -b bin/app
+                       ...and link it to a binary (-b requires -o)
+satria src/a.c src/b.c -o build -b bin/app
+                       Multi-source: -o is the object directory, one
+                       <basename>.o per source (mirrors gcc), then link
+satria src/x.c -F Buildfile
+                       Compile + link using a lightweight config: flags,
+                       headers and output.* (o.buildDir, o.binaryDir,
+                       o.binaryName) come from <file>; release/cdeps/
+                       multi-project logic is skipped. Relative paths in
+                       <file> resolve against the directory of <file>.
+
+-j[N]                  Compile sources in parallel, N jobs (same global -j
+                       as builds; without it or with -j1: serial). The
+                       link step always runs once at the end.
+
+Rules (strict by default):
+  satria src/x.c                    ERROR — no output destination
+  satria src/x.c -b bin/app         ERROR — -b requires -o
+  sources together with -f or -w    ERROR — pick one mode
+Compiler is auto-detected: cc, gcc, clang, tcc, cl (first on PATH wins);
+a `compiler =` key in the -F config overrides it.
+---endadhoc

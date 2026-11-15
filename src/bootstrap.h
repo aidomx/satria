@@ -27,7 +27,8 @@ typedef enum {
   CMD_LOG,
   CMD_WATCH, /* pantau build background (design/background.md §3) */
   CMD_INTERACTIVE_INIT,
-  CMD_TEST
+  CMD_TEST,
+  CMD_ADHOC /* design/compile.md: compile/link ad-hoc (-o/-b/-F), tanpa state */
 } Command;
 
 typedef struct {
@@ -84,6 +85,13 @@ typedef struct {
   bool conv_make;       // true bila argumen "make" (cari Makefile/makefile/GNUmakefile)
   const char *conv_abs; // path absolut conv_file (buffer statis apply)
   bool conv_canceled;   // -xcf dabatalkan overwrite oleh pengguna
+
+  // Mode ad-hoc (design/compile.md): source di argv + tujuan output.
+  const char **sources;     // [malloc] token sumber (.c/.cpp/...), NULL-terminasi
+  int source_count;         // jumlah token sumber
+  const char *objOut;       // -o : path .o penuh (1 sumber) / direktori objek (multi)
+  const char *binOut;       // -b : path binary (wajib bersama -o)
+  const char *fconfig;      // -F : file konfigurasi ringan ad-hoc
 
   // Status Evaluasi (Diisi pada Fase Apply)
   BootstrapStatus status;

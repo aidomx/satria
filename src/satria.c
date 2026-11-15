@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "bootstrap.h"
+#include "adhoc.h" /* CMD_ADHOC: mode ad-hoc -o/-b/-F (design/compile.md) */
 #include "background.h"
 #include "log/build_log.h"
 #include "cmdhelp.h"
@@ -99,6 +100,14 @@ int satriaRun(int argc, const char *argv[]) {
 
   if (bs.cmd == CMD_LOG) {
     rc = buildLogShow();
+    bootstrapCleanup(&bs);
+    return rc;
+  }
+
+  /* design/compile.md: mode ad-hoc (-o/-b/-F) — sebelum bootstrapApply:
+     tanpa evaluasi state, tanpa chdir, tanpa sentuh .satria. */
+  if (bs.cmd == CMD_ADHOC) {
+    rc = adhocRun(&bs);
     bootstrapCleanup(&bs);
     return rc;
   }

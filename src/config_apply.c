@@ -504,6 +504,14 @@ bool loadConfigEx(Config *c, const char *path, bool cacheWrite) {
     if (indent == 0) {
       if (useLineMode(text) == USE_PROJECT) {
         useAlias = true;
+        /* Alias bawaan format `use alias`/`use project` (design/compile.md
+           §4: quick.conf memakai o.buildDir TANPA baris `output as o`).
+           Konvensi yang sama dengan Buildfile standar satria. Alias pertama
+           menang, jadi definisi user TIDAK menimpa tiga ini — dokumen
+           konfigurasi yang menambah alias lain tetap berlaku normal. */
+        aliasListAdd(&c->aliases, "output", "o");
+        aliasListAdd(&c->aliases, "clean", "c");
+        aliasListAdd(&c->aliases, "library", "lib");
         /* `use project <lang>`: bahasa dideklarasikan — menang atas deteksi
            isi tree (proyek C tidak memungut .cpp; lihat configWalkSources). */
         const char *lang = useLineLang(text);

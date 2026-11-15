@@ -75,6 +75,36 @@ static bool bootstrapIsCommandWord(const char *s) {
   return false;
 }
 
+/* Token sumber ad-hoc (design/compile.md §2): berakhiran ekstensi sumber
+   C/C++. MURNI sintaks argv — fase Parse tidak menyentuh filesystem
+   (aturan fase 1 design/bootstrap.md), jadi keberadaan file tidak dites
+   di sini; file hilang diteruskan ke compiler dan gagal di sana (cermin
+   perilaku gcc). */
+static bool bootstrapIsSourceToken(const char *s) {
+  size_t n = strlen(s);
+  static const char *const kExts[] = {".c", ".cpp", ".cc", ".cxx", ".c++"};
+  for (size_t k = 0; k < sizeof(kExts) / sizeof(kExts[0]); k++) {
+    size_t el = strlen(kExts[k]);
+    if (n > el && strcmp(s + n - el, kExts[k]) == 0) return true;
+  }
+  return false;
+}
+
+/* Kumpulkan token sumber (array pointer kecil, dibebaskan cleanup). */
+static bool bootstrapAddSource(Bootstrap *bs, const char *tok) {
+  int n = bs->source_count;
+  const char **grown = realloc(bs->sources, (size_t)(n + 2) * sizeof(*grown));
+  if (!grown) {
+    fprintf(stderr, "satria: out of memory\n");
+    return false;
+  }
+  bs->sources = grown;
+  bs->sources[n] = tok;
+  bs->sources[n + 1] = NULL;
+  bs->source_count = n + 1;
+  return true;
+}
+
 int bootstrapParse(int argc, const char *argv[], Bootstrap *bs) {
   memset(bs, 0, sizeof(*bs));
   bs->cmd = CMD_NONE;
@@ -85,6 +115,9 @@ int bootstrapParse(int argc, const char *argv[], Bootstrap *bs) {
 
   bool haveF = false;     /* true bila -f diberikan secara eksplisit */
   bool convSet = false;   /* terlihat -xf / -xcf */
+  bool haveO = false;     /* -o: path objek eksplisit */
+  bool haveB = false;     /* -b: path binary eksplisit */
+  bool haveFcfg = false;  /* -F: file konfigurasi ad-hoc */
   const char *cmd = NULL; /* token command asli, NULL bila tidak ada */
   bool brokeAtProfile = false;
 
@@ -153,6 +186,47 @@ int bootstrapParse(int argc, const char *argv[], Bootstrap *bs) {
     if (strncmp(a, "-f", 2) == 0 && a[2]) { /* -fBuildfile.aliased */
       bs->buildfile = a + 2;
       haveF = true;
+      continue;
+    }
+
+    /* design/compile.md — mode ad-hoc: -o (objek), -b (binary), -F
+       (konfigurasi ringan). Bentuk lepas juga diterima (-oout.o). */
+    if (strcmp(a, "-o") == 0 || strcmp(a, "-b") == 0 || strcmp(a, "-F") == 0) {
+      if (i + 1 >= argc || !argv[i + 1][0]) {
+        fprintf(stderr, "satria: %s requires an argument\n", a);
+        return 2;
+      }
+      const char *val = argv[++i];
+      if (a[1] == 'o') {
+        bs->objOut = val;
+        haveO = true;
+      } else if (a[1] == 'b') {
+        bs->binOut = val;
+        haveB = true;
+      } else {
+        bs->fconfig = val;
+        haveFcfg = true;
+      }
+      continue;
+    }
+    if (a[0] == '-' && a[1] && strchr("obF", a[1]) && a[2]) { /* -oout.o / -Fconf */
+      const char *val = a + 2;
+      if (a[1] == 'o') {
+        bs->objOut = val;
+        haveO = true;
+      } else if (a[1] == 'b') {
+        bs->binOut = val;
+        haveB = true;
+      } else {
+        bs->fconfig = val;
+        haveFcfg = true;
+      }
+      continue;
+    }
+
+    /* Token sumber ad-hoc: dikumpulkan, bukan command. */
+    if (bootstrapIsSourceToken(a)) {
+      if (!bootstrapAddSource(bs, a)) return 2;
       continue;
     }
 
@@ -288,6 +362,55 @@ int bootstrapParse(int argc, const char *argv[], Bootstrap *bs) {
       showHelp();
       return 1;
     }
+  }
+
+  /* design/compile.md — validasi niat (intent validation) mode ad-hoc.
+     Truth table: source TANPA -o/-b/-F = ERROR; -b TANPA -o = ERROR
+     (keputusan 15/11); ad-hoc tidak boleh bercampur -f/-w/-xf/command. */
+  if (bs->source_count > 0 || haveO || haveB || haveFcfg) {
+    if (haveF) {
+      fprintf(stderr,
+              "satria: source file tidak berlaku di mode -f (full build) — "
+              "pakai -o/-b atau -F untuk ad-hoc, atau buang source dari argv\n");
+      return 2;
+    }
+    if (bs->want_workspace) {
+      fprintf(stderr, "satria: mode ad-hoc (-o/-b/-F) tidak berlaku di mode workspace (-w)\n");
+      return 2;
+    }
+    if (convSet) {
+      fprintf(stderr, "satria: mode ad-hoc tidak berlaku bersama -xf/-xcf (konversi)\n");
+      return 2;
+    }
+    if (cmd && *cmd) {
+      fprintf(stderr, "satria: command '%s' tidak menerima source file — "
+                      "mode ad-hoc tanpa command (mis. satria src/x.c -o x.o)\n",
+              cmd);
+      return 2;
+    }
+    if ((haveO || haveB || haveFcfg) && bs->source_count == 0) {
+      fprintf(stderr, "satria: -o/-b/-F butuh source file di argv (mis. satria src/x.c -o x.o)\n");
+      return 2;
+    }
+    if (haveFcfg && (haveO || haveB)) {
+      fprintf(stderr,
+              "satria: -F menentukan sendiri path output — jangan dicampur -o/-b "
+              "(pakai salah satu mode ad-hoc)\n");
+      return 2;
+    }
+    if (haveB && !haveO) {
+      fprintf(stderr,
+              "satria: -b memerlukan -o (path objek eksplisit) — "
+              "contoh: satria src/x.c -o build/x.o -b bin/app\n");
+      return 2;
+    }
+    if (!haveO && !haveB && !haveFcfg) {
+      fprintf(stderr,
+              "satria: Error: Output destination not specified. "
+              "Use -o/-b for explicit paths, or -F to use a build configuration.\n");
+      return 2;
+    }
+    if (!brokeAtProfile) bs->cmd = CMD_ADHOC;
   }
 
   if (bs->ws_with_cdeps && !bs->want_workspace) {
@@ -466,4 +589,7 @@ char *bootstrapJoinSelector(const Bootstrap *bs) {
 void bootstrapCleanup(Bootstrap *bs) {
   free(bs->ws_sel_argv);
   bs->ws_sel_argv = NULL;
+  free(bs->sources); /* array pointer kecil dari bootstrapAddSource */
+  bs->sources = NULL;
+  bs->source_count = 0;
 }
