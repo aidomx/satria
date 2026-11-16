@@ -298,6 +298,16 @@ int bootstrapParse(int argc, const char *argv[], Bootstrap *bs) {
       continue;
     }
 
+    /* `--dev`: mode pengembangan — section release (Buildfile.ws) dan pack.*
+       (Buildfile) diabaikan run ini: build = compile + link saja, tanpa
+       tarball/deb/checksum. Berguna mengukur biaya compile+link tanpa
+       release (design/release.md §--dev). Penerapan & konfliknya dengan
+       command release / selektor `--` divalidasi di satriaRun. */
+    if (strcmp(a, "--dev") == 0) {
+      bs->dev = true;
+      continue;
+    }
+
     if (!cmd) {
       cmd = a;
       /* `profile` diagnostik berdiri sendiri (design/profile.md): SEMUA

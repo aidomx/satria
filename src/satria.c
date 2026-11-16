@@ -7,6 +7,7 @@
 #include "bootstrap.h"
 #include "adhoc.h" /* CMD_ADHOC: mode ad-hoc -o/-b/-F (design/compile.md) */
 #include "background.h"
+#include "config.h" /* cliDevSet: --dev (fase pack/release membaca flag ini) */
 #include "log/build_log.h"
 #include "cmdhelp.h"
 #include "commands.h"
@@ -76,6 +77,11 @@ int satriaRun(int argc, const char *argv[]) {
   Bootstrap bs;
   int rc = bootstrapParse(argc, argv, &bs);
   if (rc != 0) return bootstrapCleanup(&bs), rc;
+
+  /* `--dev`: nyalakan flag global sebelum command mana pun berjalan —
+     fase pack/release membacanya lewat cliDevActive() (config.h). Konflik
+     dengan release eksplisit divalidasi di bawah (mode workspace). */
+  cliDevSet(bs.dev);
 
   /* help <topic>: topic diambil dari argv setelah command help
      (satu kata; kata berikutnya diabaikan seperti command lain). */
@@ -187,6 +193,16 @@ int satriaRun(int argc, const char *argv[]) {
     /* `-- key=value` = override release run ini; `release` tanpa `--` =
        build + release (releaseOnly aktif hanya bila selektor ada —
        coretan lama "release memerlukan selektor" sudah tidak berlaku). */
+    if (bs.dev) {
+      /* --dev mengabaikan fase release; memintanya bersama release
+         eksplisit kontradiktif — ditolak agar maksud run tak samar. */
+      if (bs.cmd == CMD_RELEASE || bs.ws_sel_argv) {
+        fprintf(stderr,
+                "satria: --dev mengabaikan release, tidak berlaku bersama 'release' atau selektor '-- key=value'\n");
+        bootstrapCleanup(&bs);
+        return 2;
+      }
+    }
     char *sel = bootstrapJoinSelector(&bs);
     if (!sel && bs.ws_sel_argv) {
       bootstrapCleanup(&bs);

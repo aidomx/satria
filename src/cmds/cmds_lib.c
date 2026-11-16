@@ -37,7 +37,9 @@ bool cmdsBuildLibrary(const Config *c, const List *srcs) { return cmdsBuildLibra
  */
 bool cmdsPackAfterBinary(const Config *c, bool *fastStateSaved, const List *srcs,
                          const char *target, const char *buildfilePath) {
-  if (!c->pack.requested) {
+  /* --dev: pack.* diabaikan run ini (build = compile + link saja) —
+     perlakuan sama seperti proyek tanpa pack: state tersimpan normal. */
+  if (!c->pack.requested || cliDevActive()) {
     *fastStateSaved = false; /* pemanggil menyimpan state seperti biasa */
     return true;
   }
@@ -48,16 +50,21 @@ bool cmdsPackAfterBinary(const Config *c, bool *fastStateSaved, const List *srcs
 }
 
 /* Proyek kemasan murni (output.binary = false): embedded dulu (arsip
-   untuk proyek lain), lalu packaging, lalu summary ringkas. */
+   untuk proyek lain), lalu packaging, lalu summary ringkas. --dev:
+   packaging dilewati (pack.* diabaikan), arsip embedded TETAP dibangun —
+   proyek lain bergantung padanya (design/embedded.md). */
 int cmdsPackOnlyProject(const Config *c) {
   bool anyRebuilt = false;
   bool repActive = buildReportActive();
+  bool devSkipPack = cliDevActive();
   if (c->embCount > 0) {
     mkdirs(c->outBuildDir);
     if (!buildEmbeddedArchivesEx(c, &anyRebuilt)) return 1;
   }
-  if (!packRun(c)) return 1;
-  if (packLastRebuilt()) anyRebuilt = true;
+  if (c->pack.requested && !devSkipPack) {
+    if (!packRun(c)) return 1;
+    if (packLastRebuilt()) anyRebuilt = true;
+  }
   /* Format lama `Summary :` hanya saat Build Report TIDAK aktif. Saat aktif:
      arsip & paket tercatat pada # Archive / # Release (step 2 & 8). */
   if (!repActive) {

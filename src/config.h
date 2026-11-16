@@ -318,4 +318,17 @@ void addCommaList(List *dst, const char *value);
 /* Target suffix platform/compiler dari nama entri (`linux.gcc` -> ...). */
 int sfxTarget(const char *name);
 
+/* ---- --dev (mode pengembangan) ----
+ * `satria --dev` [dan `satria -w --dev`]: section release pada Buildfile.ws
+ * dan pack.* pada Buildfile DIABAIKAN untuk run ini — build hanya compile +
+ * link, tanpa tarball/deb/checksum. Dipakai mengukur biaya compile+link
+ * saat mengembangkan, tanpa biaya release yang stabil tapi mahal. Flag
+ * sifatnya per-run: tidak disentuh state .satria, tidak mengubah Buildfile.
+ * Disebar lewat global (bukan param Config) karena dibaca di tiga titik
+ * yang tidak menerima Config run ini: fase release workspace (wsRunCore),
+ * fase pack proyek binary (cmdsPackAfterBinary), dan proyek kemasan murni
+ * (cmdsPackOnlyProject) — pola sama dengan wsModeSet/wsModeActive. */
+void cliDevSet(bool on);
+bool cliDevActive(void);
+
 #endif /* SATRIA_V0_1_0_CONFIG_H */

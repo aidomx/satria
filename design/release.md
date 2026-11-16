@@ -121,6 +121,38 @@ setting release (name, version, target->format, ...).
 
 ---
 
+## 4a. `--dev` — mode pengembangan tanpa release
+
+```bash
+satria --dev                    # Buildfile: pack.* diabaikan run ini
+satria -w --dev                 # Buildfile.ws: fase release dilewati
+satria -w release --dev         # DITOLAK — kontradiktif (rc 2)
+satria -w --dev release -- v=1  # DITOLAK — sama, selektor = release
+                                # (token SETELAH `--` milik selektor,
+                                #  taruh --dev sebelum command)
+```
+
+Ketika mengembangkan (iterasi compile–link berulang), fase release
+(tarball/deb/checksum) adalah biaya stabil yang tidak memberi informasi
+baru dari satu iterasi ke iterasi berikutnya. `--dev` mengabaikannya
+untuk run tersebut:
+
+- **Buildfile (single project)**: `pack.*` diperlakukan seperti tidak
+  ada — proyek binary tetap compile + link (state fast/fast-state
+  tersimpan normal); proyek kemasan murni (`output.binary = false`)
+  tetap membangun arsip embedded-nya karena proyek lain bergantung
+  padanya, hanya packaging yang dilewati.
+- **Buildfile.ws**: FASE 3 release pass dilewati; report menandai
+  `* Release : skipped (--dev)`. State workspace cache &
+  artifact.cache tidak tersentuh, jadi run berikutnya tanpa `--dev`
+  kembali normal (release ikut no-op bila semua input sama).
+- **Tidak persisten**: flag per-run, tidak menulis Buildfile/state.
+  Parsing `--dev` terjadi di bootstrap (pola `--with-cdeps`), disebar
+  lewat global `cliDevActive()` (config.h) karena dibaca di tiga titik
+  yang tidak menerima Config run ini.
+
+---
+
 ## 5. Output
 
 ```

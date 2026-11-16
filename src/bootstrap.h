@@ -59,6 +59,7 @@ typedef struct {
   bool interactive;     // init -p
   bool generate_compdb; // -g compdb
   bool watch_full;      // `satria watch --full`: stream background.log
+  bool dev;             // `--dev`: abaikan release.* (Buildfile.ws) / pack.* (Buildfile)
 
   // Workspace specific
   const char *ws_only;      // -w <nama>

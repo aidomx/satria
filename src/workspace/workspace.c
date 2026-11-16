@@ -9,6 +9,7 @@
 #include "../log/build_report.h" /* Build Report workspace (design/build_report.md) */
 #include "../log/build_log.h"
 #include "../cache/state_blob.h" /* fallback no-op: baca ws.state per proyek */
+#include "../util.h"            /* repPrefix: prefix baris laporan "*" */
 #include <time.h>
 
 bool workspaceFileExists(void);
@@ -594,10 +595,19 @@ static int wsRunCore(const char *cmd, int jobs, const char *only, const char *re
   /* Build selektif (`-w <nama>`) tidak membuat paket: release hanya jalan untuk
      build penuh atau bila diminta eksplisit (`release`). */
   bool selectiveBuild = only && *only && !releaseOnly;
+  /* --dev: build pengembangan — fase release diabaikan run ini (compile +
+     link saja, design/release.md §--dev). Section release.* tetap ada di
+     model, jadi cukup lewati pass: state cache & artifact.cache tidak
+     tersentuh, run berikutnya tanpa --dev kembali normal. */
+  bool devSkipRelease = cliDevActive();
   if (rc == 0 && strcmp(cmd, "build") == 0 && m.release.present && !selectiveBuild) {
-    profMark("release-pre");
-    rc = wsRelease(&m, jobs, wsDir);
-    profMark("release-post");
+    if (devSkipRelease)
+      printf("%s Release    : skipped (--dev)\n", repPrefix());
+    else {
+      profMark("release-pre");
+      rc = wsRelease(&m, jobs, wsDir);
+      profMark("release-post");
+    }
   }
 
   if (profOn())

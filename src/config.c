@@ -17,6 +17,11 @@
 #include "portability.h"
 #include "util.h"
 
+/* ---- --dev (mode pengembangan) — lihat komentar API di config.h ---- */
+static bool cliDev = false;
+void cliDevSet(bool on) { cliDev = on; }
+bool cliDevActive(void) { return cliDev; }
+
 /* true bila salah satu entri sources memuat source .cpp — dipakai untuk
    default bahasa C++ (std, compiler, linker). Dipanggil SEBELUM
    configFinalize menambahkan default "src", jadi di sini belum ada

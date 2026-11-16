@@ -14,6 +14,9 @@ Satria - A simple builder for you
 -xcf <build.ninja|make> Convert and write to Buildfile (confirm if exists)
 -j[N]                  Parallel build with N jobs (default: CPU core count)
 -g compdb              Generate compile_commands.json without building
+--dev                  Dev build: abaikan release.* (Buildfile.ws) dan pack.*
+                       (Buildfile) untuk run ini — compile + link saja,
+                       tanpa tarball/deb/checksum
 
 satria init              Create a minimal Buildfile (use project)
 satria init -p           Interactive scaffold (name, language, workspace)
@@ -247,6 +250,12 @@ satria -w release -- version=0.2.3
                        comma-separated key=value pairs (name,
                        version, format, target= as an alias of
                        format, plus any pack.* key).
+
+satria --dev           Build development: skip the release pass
+                       entirely (release.* in Buildfile.ws, pack.*
+                       in Buildfile are ignored for this run) —
+                       compile + link only, no tarball/deb/checksum.
+                       Useful to measure build cost while iterating.
 
 Releases are declared in one `release.*` section of
 Buildfile.ws (same keys as pack.*):
