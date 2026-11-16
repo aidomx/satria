@@ -15,7 +15,7 @@ static char *wsStartupPayload(char *line);
  * pertama kali atau saat WsBuildfile berubah.
  *
  * Validasi cache (§4):
- *   - magic + versi SATRIA-STARTUP-1;
+ *   - magic + versi SATRIA-STARTUP-2;
  *   - FNV-1a 64 atas isi file workspace == hash tersimpan (perubahan satu
  *     byte pun pada WsBuildfile -> miss dan parse ulang);
  *   - nama file workspace ikut di header (WsBuildfile vs nama lama);

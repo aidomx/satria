@@ -122,6 +122,32 @@ static void wsRecordLine(WsModel *m, const char *key, const char *value) {
   snprintf(buf, sizeof(buf), "%s = %s", setting, value);
   listAdd(&p->lines, buf);
 }
+/* ---- daftar release.files multi-baris ----------------------------------
+   Format rapi yang lazim:
+
+       release.files =
+       \tbin/rupa,
+       \tbin/bade:bin/bade
+
+   atau nilai awal + lanjutan ber-indentasi. Setiap baris lanjutan (tanpa
+   '=') digabung dengan koma; koma/spasi/tab pemisah tidak pernah menjadi
+   bagian nama entri. Tanpa ini baris lanjutan dibuang diam-diam dan entri
+   yang hilang membuat daftar jatuh ke default (semua artefak proyek). */
+static void wsFilesAppend(char *buf, size_t n, size_t *len, const char *item) {
+  char tmp[WS_LINE_LEN];
+  copyStr(tmp, sizeof(tmp), item);
+  char *s = trim(tmp);
+  size_t l = strlen(s);
+  while (l > 0 && (s[l - 1] == ',' || s[l - 1] == ' ' || s[l - 1] == '\t')) s[--l] = '\0';
+  s = trim(s);
+  if (!*s) return;
+  int w = snprintf(buf + *len, *len < n ? n - *len : 0, "%s%s", *len ? ", " : "", s);
+  if (w > 0) {
+    size_t add = (size_t)w;
+    *len = (*len + add < n) ? *len + add : n - 1;
+  }
+}
+
 /* Parse file workspace di cwd. Alias di-resolve dengan mesin alias
    yang sama dengan use project (projects.rupamod as mod). */
 bool wsParse(WsModel *m, const char *path) {
@@ -136,10 +162,17 @@ bool wsParse(WsModel *m, const char *path) {
   List aliases = {0};
   char line[WS_LINE_LEN];
   int lineno = 0;
+  /* Penampung `release.files` yang nilainya berlanjut di baris berikutnya. */
+  bool filesOpen = false;
+  char filesVal[WS_LINE_LEN * 4] = "";
+  size_t filesLen = 0;
   while (fgets(line, sizeof(line), fp)) {
     lineno++;
     char *comment = strchr(line, '#');
     if (comment) *comment = '\0';
+    int indent = 0;
+    for (const char *q = line; *q == ' ' || *q == '\t'; q++)
+      indent += (*q == '\t') ? 2 : 1;
     char *text = trim(line);
     if (!*text) continue;
 
@@ -170,8 +203,25 @@ bool wsParse(WsModel *m, const char *path) {
 
     char *eq = strchr(text, '=');
     if (!eq) {
+      /* Baris lanjutan release.files: indentasi menandakan masih bagian
+         daftar. Baris alias tetap di level-0. */
+      if (filesOpen && indent > 0) {
+        wsFilesAppend(filesVal, sizeof(filesVal), &filesLen, text);
+        continue;
+      }
+      if (filesOpen) {
+        wsRecordLine(m, "release.files", filesVal);
+        filesOpen = false;
+        filesLen = 0;
+      }
       aliasLineAdd(&aliases, text); /* baris alias "X as Y" */
       continue;
+    }
+    /* Baris setting baru menutup daftar yang sedang berjalan. */
+    if (filesOpen) {
+      wsRecordLine(m, "release.files", filesVal);
+      filesOpen = false;
+      filesLen = 0;
     }
     *eq = '\0';
     char *k = trim(text);
@@ -207,6 +257,15 @@ bool wsParse(WsModel *m, const char *path) {
       continue;
     }
     aliasResolve(&aliases, key, sizeof(key));
+    /* release.files: kumpulkan dulu — mungkin berlanjut di baris berikutnya
+       (nilai kosong atau trailing comma untuk format rapi). */
+    if (strcmp(key, "release.files") == 0) {
+      filesOpen = true;
+      filesLen = 0;
+      filesVal[0] = '\0';
+      wsFilesAppend(filesVal, sizeof(filesVal), &filesLen, v);
+      continue;
+    }
     /* cdeps.<kunci> (mis. cdeps.preshared): kebijakan workspace yang belum
        didukung. Ditolak eksplisit, bukan diterima diam-diam sebagai proyek
        implisit bernama `cdeps` (lihat problems/05_11_2026_cdeps.md). */
@@ -220,6 +279,7 @@ bool wsParse(WsModel *m, const char *path) {
     }
     wsRecordLine(m, key, v);
   }
+  if (filesOpen) wsRecordLine(m, "release.files", filesVal);
   fclose(fp);
   listFree(&aliases);
   return wsExpandCdepsGroups(m, path);

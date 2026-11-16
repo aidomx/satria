@@ -23,7 +23,7 @@
    13: background (design/background.md)
    12: embedded.key + embedded.type (design/embedded.md)
    11: ... 10: defines + suffix flags/library/headers/std */
-#define CONFIG_CACHE_VERSION 15u /* +langDeclared (use project c|cpp) */
+#define CONFIG_CACHE_VERSION 16u /* +release.files/pack.files multi-baris */
 #define CONFIG_CACHE_DIR ".satria"
 #define CONFIG_CACHE_FILE "startup.state"
 

@@ -466,6 +466,30 @@ static void parseLine(Config *c, char *section, char *sub, char *subsub, int *su
     configApply(c, section, sub, NULL, key, value);
 }
 
+/* ---- release.files/pack.files multi-baris -------------------------------
+   Nilai daftar boleh ditulis berlanjut dengan indentasi (spasi/tab):
+
+       release.files = bin/satria:bin/satria,
+                       README.md:share/satria/README.md
+
+   Baris lanjutan digabung dengan koma; koma/spasi/tab pemisah tidak pernah
+   ikut menjadi nama entri. Tanpa ini baris lanjutan dibuang diam-diam dan
+   hanya entri pertama yang masuk paket. */
+static void filesContAppend(char *buf, size_t n, size_t *len, const char *item) {
+  char tmp[2048];
+  copyStr(tmp, sizeof(tmp), item);
+  char *s = trim(tmp);
+  size_t l = strlen(s);
+  while (l > 0 && (s[l - 1] == ',' || s[l - 1] == ' ' || s[l - 1] == '\t')) s[--l] = '\0';
+  s = trim(s);
+  if (!*s) return;
+  int w = snprintf(buf + *len, *len < n ? n - *len : 0, "%s%s", *len ? ", " : "", s);
+  if (w > 0) {
+    size_t add = (size_t)w;
+    *len = (*len + add < n) ? *len + add : n - 1;
+  }
+}
+
 bool loadConfigEx(Config *c, const char *path, bool cacheWrite) {
   char cachePath[SATRIA_MAX_PATH];
   cfgCachePathFor(path, cachePath, sizeof(cachePath));
@@ -491,6 +515,11 @@ bool loadConfigEx(Config *c, const char *path, bool cacheWrite) {
   /* Format baru: `use alias` (nama lama) atau `use project` (nama baru,
      sinonim persis) — tanpa baris itu, parse lama. */
   bool useAlias = false;
+  /* Penampung release.files/pack.files yang nilainya berlanjut. */
+  bool filesOpen = false;
+  char filesKey[64] = "";
+  char filesVal[4096] = "";
+  size_t filesLen = 0;
   while (fgets(line, sizeof(line), fp)) {
     char *comment = strchr(line, '#');
     if (comment) *comment = '\0';
@@ -501,6 +530,36 @@ bool loadConfigEx(Config *c, const char *path, bool cacheWrite) {
 
     char *text = trim(line);
     if (!*text) continue;
+
+    /* Baris lanjutan daftar file: indentasi menandakan masih bagian nilai.
+       Baris setting baru (ada '=') atau alias level-0 menutup daftar. */
+    char *eq = strchr(text, '=');
+    if (!eq) {
+      if (filesOpen && indent > 0) {
+        filesContAppend(filesVal, sizeof(filesVal), &filesLen, text);
+        continue;
+      }
+    }
+    if (filesOpen) {
+      configApplyLine(c, filesKey, filesVal);
+      filesOpen = false;
+      filesLen = 0;
+    }
+    /* Awal daftar: nilai kosong atau sudah berisi entri (trailing comma). */
+    if (eq) {
+      char kbuf[256];
+      copyStr(kbuf, sizeof(kbuf), text);
+      *strchr(kbuf, '=') = '\0';
+      char *k = trim(kbuf);
+      if (strcmp(k, "release.files") == 0 || strcmp(k, "pack.files") == 0) {
+        copyStr(filesKey, sizeof(filesKey), k);
+        filesOpen = true;
+        filesLen = 0;
+        filesVal[0] = '\0';
+        filesContAppend(filesVal, sizeof(filesVal), &filesLen, trim(eq + 1));
+        continue;
+      }
+    }
     if (indent == 0) {
       if (useLineMode(text) == USE_PROJECT) {
         useAlias = true;
@@ -555,6 +614,7 @@ bool loadConfigEx(Config *c, const char *path, bool cacheWrite) {
     }
     parseLine(c, section, sub, subsub, &subIndent, &subsubIndent, text, indent, useAlias);
   }
+  if (filesOpen) configApplyLine(c, filesKey, filesVal);
   fclose(fp);
   configFinalize(c);
   if (cacheWrite) cfgCacheSave(c, path, cachePath);
