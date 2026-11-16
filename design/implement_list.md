@@ -109,10 +109,10 @@ aktif (`src/`). Rujukan bukti berupa berkas source dan tes yang benar-benar ada.
 
 ## Catatan status pengujian tim
 
-- miniws (runner stabil, 30 tes): **PASS=359 FAIL=0 PRE=0** (ukur terakhir di
+- miniws (runner stabil, 31 tes): **PASS=371 FAIL=0 PRE=0** (ukur terakhir di
   host Linux, termasuk `report_artifact`, `p_meta_noop`, `cache_noop`, dan
   `wsbuildfile_legacy`).
-- complexws (runner stabil, 30 tes): **PASS=359 FAIL=0 PRE=0** (ukur terakhir
+- complexws (runner stabil, 31 tes): **PASS=371 FAIL=0 PRE=0** (ukur terakhir
   di host Linux, termasuk `wsbuildfile_legacy`).
 - rupaws: `background.sh` 39/39 pasca fix **fixture staged bersih** (`$FIX` di
   runner — akar: `tests/rupaws/.satria/startup.state` menyebabkan

@@ -10,7 +10,7 @@ Menulis unit test dengan bash/sh itu bukanlah perkara mudah, akar masalah:
 Dengan memperlakukan unit test sebagai bagian dari dsl, itu akan mempermudah penulisan, pembacaan, dan dapat didokumentasikan serta pengguna bisa mencoba menulis unit testnya sendiri terhadap satria tanpa perlu memahami cara kerja internal dari satria.
 
 Ukuran keberhasilan:
-- Seluruh `tests/unit/common` (30 tes) dapat dinyatakan **tanpa satu pun baris
+- Seluruh `tests/unit/common` (31 tes) dapat dinyatakan **tanpa satu pun baris
   bash/sh di sisi penulis tes** — dicapai bertahap lewat milestone parser.
 - Syntax baru yang harus dipelajari penulis tes kecil: **8 objek aksi +
   3 objek hasil + 14 direktif** — dan objek bisa dibuka untuk keperluan lain
@@ -412,6 +412,7 @@ run.cmd watch as w
 | faststate_external_header | snap | project | M0 | `file.write` blok authored |
 | legacy_sweep | snap | workspace | M0 | `file.absent` path lama + no-op |
 | opts_sources_sync | snap | workspace | M0 | mutasi berkas cache + sync route |
+| release_files_multiline | cold | workspace | — | `release.files` lanjutan enter+tab: hanya entri terdaftar di dist |
 | report_artifact | cold | workspace | M0 | `file.exists` + no-op display |
 | report_binaries_uptodate | snap | project | M0 | contoh §terjemahan |
 | router_noop | snap | workspace | M0 | `file.append` flags + "Cache valid" |
@@ -477,7 +478,7 @@ menjadi runner asli, tanpa bash sama sekali. Tes tetap berkas `.test`/`.t`
 | --- | --- | --- |
 | M4a parser | `scripts/lib/parser.sh` → `src/test/parser.c` | kit parser (positif + negatif) diport jadi uji unit C; jejak event TSV identik byte-per-byte dengan parser bash |
 | M4b evaluator+eksekutor | `tests/unit/lib/dsl.sh` → `src/test/eval.c` + `exec.c` (konvensi `EV`/`CUR`, tabel `obj.aksi` → fungsi C) | kit konforman `tests/unit/dsl/` 14/14 dijalankan runner C, hasil verdict identik |
-| M4c runner/discovery | `lib/unit_runner.sh`+`unit_watcher.sh` → `src/test/runner.c`: discovery `.test`>`.t`>`.sh` + dedupe, `classes.conf`, staging/snapshot, `-j`, log/timing | sweep miniws via runner C = 359 asersi / 30 tes, log & timing.tsv setara |
+| M4c runner/discovery | `lib/unit_runner.sh`+`unit_watcher.sh` → `src/test/runner.c`: discovery `.test`>`.t`>`.sh` + dedupe, `classes.conf`, staging/snapshot, `-j`, log/timing | sweep miniws via runner C = 371 asersi / 31 tes, log & timing.tsv setara |
 | M4d `satria test` native | delegasi `cmdTest` (src/test.c) diganti pemanggilan runner C langsung (in-process, tanpa exec) | semua tes lulus tanpa bash; arsip bash dipensiunkan |
 
 Catatan rancangan:
@@ -551,5 +552,5 @@ resmi untuk tes di `tests/unit/common`.
 - [x] `satria test` fase 1 (delegasi, tanpa porting): parsing standalone-break (pola `trace`) + `src/test.c` menemukan root repo dari exe (`/proc/self/exe`, fallback cwd bila `scripts/unit.sh` ada di cwd) lalu exec `bash scripts/unit.sh <args…>`; shorthand `satria test miniws` — binary satria sendiri disisipkan bila argumen pertama bukan opsi/kata mode/path binary, dan path binary relatif-repo dari subdirektori diabsolutkan (unit.sh me-resolve relatif cwd); rc unit.sh = rc satria; sweep miniws via `satria test miniws` 348/29, rc 0; `help test` tersedia
 - [ ] M4a: parser → C (`src/test/parser.c`) — uji unit C positif+negatif, jejak event identik
 - [ ] M4b: evaluator + eksekutor → C (`src/test/eval.c`, `src/test/exec.c`) — kit dsl 14/14 via runner C
-- [ ] M4c: runner/discovery/klasifikasi → C (`src/test/runner.c`) — sweep miniws 359/30 via runner C
+- [ ] M4c: runner/discovery/klasifikasi → C (`src/test/runner.c`) — sweep miniws 371/31 via runner C
 - [ ] M4d: `satria test` native in-process; pensiunkan `unit.sh`/`unit_dev.sh`/`lib/unit_*.sh` (arsip) — verifikasi "tanpa bash" via `satria trace`

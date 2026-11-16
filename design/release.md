@@ -63,6 +63,9 @@ tunggal) — key-nya sama dengan pack.*:
 release.name = rupa                    # nama produk (default: folder cwd)
 release.version = 0.2.2                # default 0.0.0
 release.files = bin/rupa, bade/bin/bade, share/rupa/cmd.txt
+# daftar juga boleh berlanjut di baris ber-indentasi (koma opsional):
+# release.files = bin/rupa:bin/rupa,
+#                 README.md:share/rupa/README.md
 release.exclude = build, .git, dist    # diabaikan saat walk folder
 release.output = dist/rupa-v{version}-{os}-{arch}.tar.gz
 release.format = deb                   # tar (default) atau deb

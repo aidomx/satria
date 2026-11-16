@@ -132,7 +132,7 @@ satria --log
 **Header & Version**
 
 ```text
-Magic          : SATRIA-STARTUP-1
+Magic          : SATRIA-STARTUP-2
 Buildfile Hash : 64-bit FNV-1a
 Buildfile Path : WsBuildfile
 Timestamp      : ...

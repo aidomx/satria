@@ -43,7 +43,15 @@ release.deb.install_prefix = /usr/local
 - `release.files` — file/folder entries with optional mapping `src:dst`.
   Plain paths are relative to the workspace root; `../<project>/...`
   points at another project's output (the leading `../` is stripped).
-  Folders are walked recursively.
+  Folders are walked recursively. The list may continue on indented lines
+  with a comma between entries; the newlines, tabs and commas are
+  separators, never part of a path:
+
+  ```text
+  release.files = bin/rupa:bin/rupa,
+                  README.md:share/rupa/README.md,
+                  LICENSE:share/rupa/LICENSE
+  ```
 - `release.exclude` — entries applied while walking folder entries:
   exact relative path, basename, or directory prefix. Never applied to
   explicit file entries.

@@ -151,7 +151,7 @@ Isi `.satria/` (root workspace pada mode workspace):
 | `compile_commands.cache/.blob` | sidik CompDB agar isi identik tidak ditulis ulang |
 | `report.blob` | data laporan build terakhir |
 
-- `cfg/config_cache.c` memakai **versi 15** (terakhir: `langDeclared`).
+- `cfg/config_cache.c` memakai **versi 16** (terakhir: `release.files`/`pack.files` multi-baris).
   Cache hit bila Buildfile & kondisi terkait tak berubah → skip parse penuh;
   seluruh `Config` diserialisasi (sejak v6 termasuk `PackConfig`).
 - `sources.cache` sengaja tidak menyimpan pemilik proyek: pemetaan
