@@ -1,6 +1,6 @@
-# Release Note - satria v0.6.0 
+# Release Note - satria v0.6.1 
 
-v0.6.0 adds two ways to use satria outside the full Buildfile lifecycle —
+v0.6.1 adds two ways to use satria outside the full Buildfile lifecycle —
 ad-hoc compilation and a development mode — and cleans up static archive
 membership, project language selection, and the unit-test tooling.
 
@@ -115,6 +115,7 @@ transition, printing a one-time deprecation warning that suggests the rename.
   presence; the workspace save walk reuses the no-op gate stat memo.
 - Bench: edit+relink and serial scenarios are part of the summary.
 - fix: fixed bug windows getpid
+- Multi-line syntax for `release.files` in `Buildfile` or `WsBuildfile` configurations is now supported.
 
 ## Known limitations
 
@@ -127,7 +128,7 @@ transition, printing a one-time deprecation warning that suggests the rename.
 
 ## Verification for this release
 
-- `bin/satria test miniws`: **PASS=359 FAIL=0 PRE=0** (30 tests).
+- `bin/satria test miniws`: **PASS=371 FAIL=0 PRE=0** (31 tests).
 - `bin/satria version` still reports `satria v0.5.0` — `.satria-version` has
   not been bumped ; the self-host build succeeds.
 - Ad-hoc smoke: `satria x.c -o build/x.o -b bin/x` → rc 0, object and binary
