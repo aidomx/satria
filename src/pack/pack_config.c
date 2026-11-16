@@ -1,6 +1,6 @@
 /*
  * pack_config — parsing section pack.* (Buildfile) dan key bare (hasil
- * sintesis Buildfile.ws). Dipisah dari config.c agar ukuran file
+ * sintesis WsBuildfile). Dipisah dari config.c agar ukuran file
  * tetap di bawah 500 baris; satu-satunya pemakai adalah configApply() —
  * deklarasi ada di pack_internal.h.
  */
@@ -24,7 +24,7 @@ static void packAddCommaList(List *dst, const char *value) {
   }
 }
 
-/* Setel string pack; sepasang kutip pembuka/penutup dilepas (nilai    `pack.deb.maintainer = "Nama <email>"` di Buildfile.ws). */
+/* Setel string pack; sepasang kutip pembuka/penutup dilepas (nilai    `pack.deb.maintainer = "Nama <email>"` di WsBuildfile). */
 void packSetStr(char *dst, size_t n, const char *value) {
   size_t len = strlen(value);
   if (len >= 2 && value[0] == '\"' && value[len - 1] == '\"') {
@@ -49,7 +49,7 @@ void packAddFiles(PackConfig *p, const char *value) {
   }
 }
 
-/* Key deb.* — dipakai section `pack` + `pack.deb.*` maupun key bare    `deb.*` hasil sintesis Buildfile.ws. */
+/* Key deb.* — dipakai section `pack` + `pack.deb.*` maupun key bare    `deb.*` hasil sintesis WsBuildfile. */
 void packApplyDeb(Config *c, const char *key, const char *value) {
   if (strcmp(key, "maintainer") == 0)
     packSetStr(c->pack.debMaintainer, sizeof(c->pack.debMaintainer), value);

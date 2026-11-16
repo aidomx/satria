@@ -146,7 +146,7 @@ int satriaRun(int argc, const char *argv[]) {
     return cmdTest(bs.test_argv, bs.test_argc, argv[0]);
   }
 
-  /* Workspace hanya dipilih melalui -w. Keberadaan Buildfile.ws tidak
+  /* Workspace hanya dipilih melalui -w. Keberadaan WsBuildfile tidak
      boleh mengubah mode CLI secara implisit. */
   if (bs.want_workspace) {
     if ((bs.cmd == CMD_BUILD || bs.cmd == CMD_CLEAN || bs.cmd == CMD_RELEASE) &&
@@ -155,7 +155,7 @@ int satriaRun(int argc, const char *argv[]) {
       return 2;
     }
     /* init -p di mode workspace: scaffold interaktif bisa menghasilkan
-       Buildfile.ws sendiri (pilihan "Uses workspace?"), jadi diajukan
+       WsBuildfile sendiri (pilihan "Uses workspace?"), jadi diajukan
        sebelum template cmdInitWorkspace. */
     if (bs.cmd == CMD_INIT) {
       if (bs.interactive) {
@@ -227,7 +227,7 @@ int satriaRun(int argc, const char *argv[]) {
   }
 
   /* Guard keanggotaan: build/clean dari direktori anggota sebuah workspace
-     induk ditolak — keanggotaan divalidasi lewat model Buildfile.ws induk
+     induk ditolak — keanggotaan divalidasi lewat model WsBuildfile induk
      (design/workspace_v1.md aturan 1 & 5). `-g compdb` ikut tercakup (ada
      di jalur CMD_BUILD); proyek standalone di luar workspace tidak
      terpengaruh. */

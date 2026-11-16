@@ -23,7 +23,7 @@ static void wsLegacyStateRemove(void) {
   cmdsLegacyStateSweep();
 }
 
-/* Read a global boolean switch from the restored startup model, not Buildfile.ws.
+/* Read a global boolean switch from the restored startup model, not WsBuildfile.
    Default false; project-specific settings are intentionally excluded. */
 static bool wsCommonBool(const WsModel *m, const char *want) {
   bool enabled = false;
@@ -152,8 +152,9 @@ static void wsWarnMissingCdepsLibs(const WsModel *m, const unsigned char *needed
 }
 
 /*
- * workspace — implementasi mode `use workspace` (Buildfile.ws; nama lama
- * Buildfile.workspace masih diterima bila file baru tidak ada).
+ * workspace — implementasi mode `use workspace` (WsBuildfile; nama lama
+ * Buildfile.ws dan Buildfile.workspace masih diterima bila WsBuildfile tidak
+ * ada, dengan peringatan deprecasi sekali per proses).
  *
  * Workspace adalah LAYER TIPIS di atas jalur build satu project yang sudah
  * ada: file workspace di-parse untuk daftar proyek + setting per proyek +
@@ -163,7 +164,7 @@ static void wsWarnMissingCdepsLibs(const WsModel *m, const unsigned char *needed
  * proyeknya. FastState, fingerprint, library, compdb — semuanya ikut
  * otomatis tanpa diubah.
  *
- * Rute key di Buildfile.ws:
+ * Rute key di WsBuildfile:
  *   projects = a, b           -> daftar proyek (validasi eksplisit)
  *   projects.<nama>.*         -> setting per proyek (alias `projects.<n> as
  *                                <singkatan>` diperbolehkan; batas titik
@@ -696,7 +697,20 @@ int workspaceRun(const char *cmd, int jobs, const char *only, const char *releas
 }
 const char *workspaceFileName(void) {
   if (fsFileExists(WORKSPACE_FILENAME)) return WORKSPACE_FILENAME;
-  if (fsFileExists(WORKSPACE_FILENAME_LEGACY)) return WORKSPACE_FILENAME_LEGACY;
+  /* Nama lama tetap didukung selama masa transisi, tapi beri tahu sekali
+     per proses agar repo lama segera rename (bukan gagal diam-diam). */
+  static bool warned;
+  const char *old = NULL;
+  if (fsFileExists(WORKSPACE_FILENAME_DEPRECATED)) old = WORKSPACE_FILENAME_DEPRECATED;
+  else if (fsFileExists(WORKSPACE_FILENAME_LEGACY)) old = WORKSPACE_FILENAME_LEGACY;
+  if (old) {
+    if (!warned) {
+      warned = true;
+      fprintf(stderr, "satria: warning: '%s' is deprecated; rename it to '%s'\n", old,
+              WORKSPACE_FILENAME);
+    }
+    return old;
+  }
   return NULL;
 }
 bool workspaceFileExists(void) {

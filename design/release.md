@@ -42,7 +42,7 @@ Model itu kaku:
 
 Revisi 2 membalik modelnya:
 
-- release TUNGGAL di level workspace (section release.* di Buildfile.ws)
+- release TUNGGAL di level workspace (section release.* di WsBuildfile)
   dan juga tersedia di mode satu-proyek (release.* di Buildfile);
 - isi paket bebas: release.files bisa menunjuk file/folder proyek mana
   pun (prefix ../<n>/...), artefak build, sumber, atau dokumen;
@@ -56,7 +56,7 @@ Revisi 2 membalik modelnya:
 
 ## 3. Konfigurasi
 
-Section release.* di Buildfile.ws (workspace) maupun Buildfile (proyek
+Section release.* di WsBuildfile (workspace) maupun Buildfile (proyek
 tunggal) — key-nya sama dengan pack.*:
 
 ```yaml
@@ -125,7 +125,7 @@ setting release (name, version, target->format, ...).
 
 ```bash
 satria --dev                    # Buildfile: pack.* diabaikan run ini
-satria -w --dev                 # Buildfile.ws: fase release dilewati
+satria -w --dev                 # WsBuildfile: fase release dilewati
 satria -w release --dev         # DITOLAK — kontradiktif (rc 2)
 satria -w --dev release -- v=1  # DITOLAK — sama, selektor = release
                                 # (token SETELAH `--` milik selektor,
@@ -142,7 +142,7 @@ untuk run tersebut:
   tersimpan normal); proyek kemasan murni (`output.binary = false`)
   tetap membangun arsip embedded-nya karena proyek lain bergantung
   padanya, hanya packaging yang dilewati.
-- **Buildfile.ws**: FASE 3 release pass dilewati; report menandai
+- **WsBuildfile**: FASE 3 release pass dilewati; report menandai
   `* Release : skipped (--dev)`. State workspace cache &
   artifact.cache tidak tersentuh, jadi run berikutnya tanpa `--dev`
   kembali normal (release ikut no-op bila semua input sama).

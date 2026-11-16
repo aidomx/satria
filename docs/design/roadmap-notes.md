@@ -64,6 +64,6 @@ The build tool should remain independent of those projects even when it is used 
 Implemented (see the design at `design/profile.md` and the guide at
 `guide/profile.md`): `satria profile <context>` measures operations without a
 normal build and never mutates build state. Shipped contexts are `archive=`,
-`embed=`, `library=`, and `binary=`; `project=` and `workspace=` remain
-planned until the individual contexts they would aggregate are reliable.
-Candidate options not yet implemented: `--repeat <N>`.
+`embed=`, `library=`, `binary=`, `project=`, and `workspace=`; options include
+`with=`, `jobs=`, `--report FILE`, and `--repeat N` (the sandbox is kept
+between repeats so later runs measure the warm path).

@@ -200,6 +200,17 @@ int cmdInitWorkspace(const char *buildfilePath) {
     printf("> %s already exists, nothing to do\n", path);
     return 0;
   }
+  /* Nama lama tidak boleh tertimpa diam-diam oleh file baru: pengguna akan
+     punya dua workspace file dan yang lama berhenti terbaca. Minta rename. */
+  if (strcmp(path, WORKSPACE_FILENAME) == 0) { /* jalur default, bukan -f */
+    static const char *legacy[] = {WORKSPACE_FILENAME_DEPRECATED, WORKSPACE_FILENAME_LEGACY};
+    for (size_t i = 0; i < sizeof(legacy) / sizeof(legacy[0]); i++) {
+      if (!fsFileExists(legacy[i])) continue;
+      fprintf(stderr, "satria: %s already exists — rename it to %s, then run init again\n",
+              legacy[i], path);
+      return 1;
+    }
+  }
 
   FILE *fp = fopen(path, "w");
   if (!fp) {
@@ -506,6 +517,10 @@ int cmdInteractiveInit(void) {
       if (wantWs) {
         if (fsFileExists(WORKSPACE_FILENAME))
           copyStr(conflictPath, sizeof(conflictPath), WORKSPACE_FILENAME);
+        else if (fsFileExists(WORKSPACE_FILENAME_DEPRECATED))
+          copyStr(conflictPath, sizeof(conflictPath), WORKSPACE_FILENAME_DEPRECATED);
+        else if (fsFileExists(WORKSPACE_FILENAME_LEGACY))
+          copyStr(conflictPath, sizeof(conflictPath), WORKSPACE_FILENAME_LEGACY);
       } else {
         snprintf(p, sizeof(p), "%s/Buildfile", name);
         if (fsFileExists(p)) copyStr(conflictPath, sizeof(conflictPath), p);

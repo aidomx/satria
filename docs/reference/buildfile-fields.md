@@ -14,7 +14,7 @@ the [workspace guide](../guide/workspace.md).
 |---|---|
 | `use project` | Single-project mode. |
 | `use project c`, `cpp`, `c++` | Language for the project (see below). Without an argument the language is detected from the sources. |
-| `use workspace` | Workspace mode (requires a `Buildfile.ws` at the workspace root). |
+| `use workspace` | Workspace mode (requires a `WsBuildfile` at the workspace root). |
 | `use workspace c`, `cpp`, `c++`, `hybrid` | Default language for every member project. `hybrid` (the default, and the behaviour of a bare `use workspace`) detects each project separately. |
 | `<project>.lang` | Workspace only. Overrides the workspace language for one project (`c`, `cpp`, `c++`, `hybrid`). |
 | `name as alias` | Declares an alias. `clean as c`, then `c.build = false`. |
@@ -96,6 +96,12 @@ project's own `include/`. `auto` means `I.` only when that folder exists.
 
 In workspace mode, `bin/`, `lib/`, and `build/<project>/` are created at the
 workspace root.
+
+A static library (`lib<name>.a`) holds one member per compiled object, named
+after the object's basename. Objects that would collide on basename are staged
+as `<tag>_<name>.o` first, so an archive never contains two members with the
+same name; a stale archive (duplicate or obsolete members) is rebuilt from
+scratch on the next run.
 
 ## Clean
 

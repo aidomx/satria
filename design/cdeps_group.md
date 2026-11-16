@@ -1,6 +1,6 @@
 # Grup cdeps level atas
 
-Status: diimplementasikan. Pemilik: Buildfile.ws (workspace).
+Status: diimplementasikan. Pemilik: WsBuildfile (workspace).
 
 ## Latar belakang
 
@@ -13,7 +13,7 @@ Dengan banyak proyek, relasi kelompok harus ditulis berulang dan mudah tidak kon
 
 ## Sintaks
 
-Satu baris di `Buildfile.ws` (key level atas, tanpa titik):
+Satu baris di `WsBuildfile` (key level atas, tanpa titik):
 
     cdeps = {a,b}, {b,c}, {a,c}
 
@@ -35,7 +35,7 @@ Hasilnya diperlakukan sama dengan `cdeps` per proyek, sehingga jalur build lain 
 
 ## Validasi
 
-Kesalahan dicetak dengan lokasi baris Buildfile.ws, dan parse gagal:
+Kesalahan dicetak dengan lokasi baris WsBuildfile, dan parse gagal:
 
 | Kondisi                                  | Pesan (potongan)                                  |
 |------------------------------------------|---------------------------------------------------|

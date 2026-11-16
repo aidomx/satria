@@ -112,7 +112,7 @@ project tetap memakai `cmdsFastStateSave`/`cmdsFastStateValid` tanpa perubahan.
    - Bug yang ditemukan dan diperbaiki: kunci memo memakai cwd, dan validator ws
      tidak menyetelnya, sehingga entri proyek lain terpakai (`cmdsStatMemoSetCwd`).
    - Hasil: no-op bench 153 -> 100 stat, opendir 19 -> 2. Benchmark identik dengan
-     baseline. Terverifikasi: hapus object, hapus library, ubah Buildfile.ws, touch
+     baseline. Terverifikasi: hapus object, hapus library, ubah WsBuildfile, touch
      archive embed, tambah/hapus header, dan edit/revert/touch semuanya terdeteksi;
      no-op setelah tiap perubahan kembali ke jalur cached.
 3. **Langkah 3, sebagian: jalur rebuild.** Di mode workspace, save single project
@@ -229,7 +229,7 @@ Bug yang ditemukan dan diperbaiki selama langkah ini:
   membuka folder itu lagi (sekarang valid selama tetap tidak ada).
 
 Uji yang lulus: bench `view.csv` identik dengan baseline; edit/revert header;
-hapus object; hapus library (dibuat ulang); ubah `Buildfile.ws` (std); tambah
+hapus object; hapus library (dibuat ulang); ubah `WsBuildfile` (std); tambah
 dan hapus source; no-op setelah tiap langkah cached; single project 102 stat.
 
 Sisa yang belum dikerjakan: memo stat di jalur decide (langkah 2) untuk menurunkan
@@ -264,7 +264,7 @@ No-op: 107 stat (sebelumnya 106). Single project: 102 stat.
 
 Uji yang lulus: bench view identik dengan baseline; edit/revert header; hapus
 object; hapus library; hapus `build/embedded.h` (dibuat ulang); ubah `std` di
-Buildfile.ws (dan revert); build gagal lalu diperbaiki (no-op cached setelahnya);
+WsBuildfile (dan revert); build gagal lalu diperbaiki (no-op cached setelahnya);
 tambah dan hapus source; single project edit (compile 1), revert (cached), no-op 102.
 
 Yang masih menyisakan selisih terhadap ninja: stat untuk folder yang tidak ada

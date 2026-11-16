@@ -21,7 +21,7 @@ disk. Keluaran tanpa argumen sengaja dipertahankan: `tests/unit/common/embed_get
 memeriksa `bade=7` dan `tests/miniws` memakai keluaran yang sama.
 
 Modul tersimpan di `modules/rupa_modules.tar` (diproduksi `rupamod`, arsip
-direktori ini dengan `exclude` di `Buildfile.ws`) dan ditanam ke `bin/bade`
+direktori ini dengan `exclude` di `WsBuildfile`) dan ditanam ke `bin/bade`
 lewat `bade.embedded.modules`. `bade` mengekstraknya ke `bademod.extract`
 seperti loader lama: tulis arsip, lalu `tar xf`.
 

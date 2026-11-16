@@ -319,7 +319,7 @@ void wsApplyCdeps(const WsModel *m, const WsProject *p, Config *c) {
 }
 
 /* ==================== grup cdeps level atas ==================== */
-/* design/cdeps_group.md:  cdeps = {a,b}, {b,c}, {a,c}  di Buildfile.ws.
+/* design/cdeps_group.md:  cdeps = {a,b}, {b,c}, {a,c}  di WsBuildfile.
  * Setiap grup dua arah (semua anggota saling bergantung) dan tanpa batas
  * jumlah anggota. Diekspansi ke baris per proyek `cdeps = <daftar>`, yaitu
  * bentuk yang sudah didukung wsApplyCdeps. Relasi yang sudah ditulis per

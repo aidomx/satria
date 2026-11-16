@@ -44,7 +44,7 @@ dikonfirmasi (lihat pertanyaan terbuka).
 - Mengubah nilai `diagnostics.color` tidak memicu rebuild dan tidak mengubah
   compdb. Output yang berubah hanya warnanya.
 - MSVC tidak memakai flag ini; nilai `always` pada MSVC tidak berpengaruh.
-- Di workspace, key ditulis di `Buildfile.ws` sebagai setting bersama dan berlaku
+- Di workspace, key ditulis di `WsBuildfile` sebagai setting bersama dan berlaku
   ke semua proyek.
 
 ## Dampak lain

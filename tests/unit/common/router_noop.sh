@@ -10,7 +10,7 @@ SRC=$(abspath "${2:-$(dirname "$0")/../../miniws}")
 W="$UNIT_TMP/router_noop"; rm -rf "${W}"; mkdir -p "${W}" || exit 1
 cp -r "$SRC/." "$W/" || exit 2
 # Cache butuh file .d (-MMD) untuk dependensi header; tanpa itu cache tidak ditulis.
-printf "flags = MMD, MP\n" >> "$W/Buildfile.ws"
+printf "flags = MMD, MP\n" >> "$W/WsBuildfile"
 cd "$W" || exit 2
 export NO_COLOR=1
 wait_tick # hindari racy terhadap build pertama

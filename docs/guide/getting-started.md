@@ -2,7 +2,7 @@
 
 ## The basic idea
 
-satria is a declarative build tool for C projects. A project is described by a `Buildfile`; satria handles compilation, dependency tracking, incremental builds, libraries, workspaces, embedded assets, compile commands, and packaging.
+satria is a declarative build tool for C and C++ projects. A project is described by a `Buildfile`; satria handles compilation, dependency tracking, incremental builds, libraries, workspaces, embedded assets, compile commands, and packaging.
 
 The intended user experience is simple: a conventional project should require very little configuration, while unusual projects can opt into explicit settings.
 
@@ -57,7 +57,7 @@ For a workspace:
 satria init -w
 ```
 
-creates a workspace Buildfile listing projects:
+creates a `WsBuildfile` listing projects:
 
 ```text
 use workspace
@@ -87,6 +87,8 @@ satria help
 satria -j4
 satria -j1
 satria watch
+satria src/x.c -o build/x.o -b bin/x   # ad-hoc, no Buildfile
+satria test miniws                    # unit-test suite (repo checkout)
 ```
 
 `-j` enables the normal parallel build behavior; `-jN` chooses an explicit job

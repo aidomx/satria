@@ -42,7 +42,7 @@
 
 
 /* State startup persisten (design/startup.md §3): konfigurasi hasil
-   penerjemahan Buildfile.ws. DIPERTAHANKAN oleh clean (§6); divalidasi ulang
+   penerjemahan WsBuildfile. DIPERTAHANKAN oleh clean (§6); divalidasi ulang
    lewat hash file workspace setiap run. */
 #define WS_STARTUP_FILE ".satria/startup.state"
 
@@ -54,12 +54,12 @@ typedef struct {
 
 /*
  * ReleaseConfig — konfigurasi release TUNGGAL workspace (design/
- * release.md revisi 2). Section release.* di Buildfile.ws; key-nya sama
+ * release.md revisi 2). Section release.* di WsBuildfile; key-nya sama
  * dengan pack.* karena fase release menjalankan pack engine yang sama
  * pada root workspace. Isi paket bebas: file/folder proyek mana pun.
  */
 typedef struct {
-  bool present; /* section release.* disebut di Buildfile.ws */
+  bool present; /* section release.* disebut di WsBuildfile */
   List lines;   /* baris "release.<key> = <value>" apa adanya */
 } WsReleaseCfg;
 

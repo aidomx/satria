@@ -291,7 +291,7 @@ static int buildSandboxed(ProfCtx *p, const char *passKind) {
 
 /*
  * workspace=<dir> — profil siklus workspace (design "workspace"):
- * parse (baca Buildfile.ws), dependency (topo sort), library, binary.
+ * parse (baca WsBuildfile), dependency (topo sort), library, binary.
  *
  * Keterbatasan nyata yang TIDAK dikarang: fase library/binary di sini
  * mengeksekusi build proyek via jalur yang sama dengan `satria -w`, yang

@@ -45,6 +45,17 @@ Header search paths are configurable per workspace and per project
 (`headers = ...`), and `headers.internal = ...` tracks shared headers as build
 inputs without passing them with `-I`.
 
+## Static library archives
+
+A static library is incremental like any other artifact, with one extra rule:
+`ar rcs` only replaces members whose names already exist and never removes
+obsolete ones. satria therefore builds `lib<name>.a` from one uniquely named
+member per object (staging duplicate basenames as `<tag>_<name>.o`), drops the
+old archive before a rebuild, and — only when a basename collision was staged —
+checks the archive's member list. An archive left with duplicate or obsolete
+members by an older build is repaired by the next run; an archive that already
+matches is reported `cached`.
+
 ## Why this matters
 
 The objective is not to claim that satria is always faster than Ninja. The objective is predictable incremental behavior with low overhead across environments.

@@ -180,6 +180,17 @@ library.macos = m
 library.windows = ws2_32
 ```
 
+### Static library archive
+
+`output.libraryName` produces `lib<name>.a` with **one member per compiled
+object**, named after the object's basename. When two sources share a
+basename (for example `src/install.c` and `src/manager/install.c`), satria
+stages the objects with unique names (`install.o` and `manager_install.o`)
+before `ar rcs`, so the archive never contains two members with the same
+name. If the on-disk archive turns out to be stale (duplicate or obsolete
+members from an older build), it is rebuilt from scratch instead of being
+patched in place, and the result is `cached` on the next run.
+
 ## Platform & compiler suffixes
 
 `flags`, `library`, `headers`, `defines` and `std` accept a target suffix:
@@ -232,7 +243,7 @@ its stdout/stderr redirected to `.satria/background.log`:
 background = true
 ```
 
-In `Buildfile.ws` it is written as a global line (applies to `satria -w`):
+In `WsBuildfile` it is written as a global line (applies to `satria -w`):
 
 ```text
 use workspace

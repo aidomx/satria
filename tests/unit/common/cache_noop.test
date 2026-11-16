@@ -9,7 +9,7 @@
 
 work.new
 fixture.copy
-file.append Buildfile.ws flags = MMD, MP
+file.append WsBuildfile flags = MMD, MP
 time.tick
 
 env.set SATRIA_CACHE_NOOP=1
@@ -71,7 +71,7 @@ run.build as recover
 @end
 
 time.tick
-file.append Buildfile.ws "# x"
+file.append WsBuildfile "# x"
 run.build as wsfresh
 @response wsfresh
   out.not-contains "Cache valid"

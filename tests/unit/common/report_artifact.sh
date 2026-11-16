@@ -23,7 +23,7 @@ hit_ws() { grep -q "Nothing to build" "$1" && grep -q "Cache valid *:" "$1"; }
 : "${UNIT_TMP:=${UNIT_BASE:-/tmp/miniws}/t}"
 W="$UNIT_TMP/report_artifact"; rm -rf "${W}"; mkdir -p "${W}" || exit 1
 cp -r "$MWS/." "$W/" || exit 2
-printf "flags = MMD, MP\n" >> "$W/Buildfile.ws"
+printf "flags = MMD, MP\n" >> "$W/WsBuildfile"
 cd "$W" || exit 2
 "$SAT" -j${UNIT_JOBS:-2} -w > c.txt 2>&1; check "ws: cold build" $?
 [ -s .satria/report.blob ]; check "ws: report.blob terbentuk dan tidak kosong" $?
@@ -50,7 +50,7 @@ cp -r "$MWS/." "$R/" || exit 2
 cd "$R" || exit 2
 rm -rf build bin lib modules dist .satria
 printf 'perintah-test\n' > core/src/cmd.txt
-cat >> Buildfile.ws <<'REL'
+cat >> WsBuildfile <<'REL'
 release.name = rupa
 release.version = 0.2.4
 release.files = core/src/cmd.txt
@@ -103,7 +103,7 @@ cp -r "$MWS/." "$O/" || exit 2
 cd "$O" || exit 2
 rm -rf build bin lib modules dist .satria
 printf 'perintah-test\n' > core/src/cmd.txt
-cat >> Buildfile.ws <<'REL'
+cat >> WsBuildfile <<'REL'
 release.name = rupa
 release.version = 0.3.0
 release.files = core/src/cmd.txt
@@ -122,14 +122,14 @@ check "optimize: blob berbaris Releases" $?
 grep -q "cmd.txt" .satria/artifact.cache
 check "optimize: input tercatat di artifact.cache" $?
 # value tak valid ditolak dengan pesan, build tetap lanjut
-cat >> Buildfile.ws <<'BAD'
+cat >> WsBuildfile <<'BAD'
 release.optimize = maybe
 BAD
 "$SAT" -j${UNIT_JOBS:-2} -w > oc1.txt 2>&1
 grep -q "optimize 'maybe' tidak valid" oc1.txt
 check "optimize: nilai tidak valid ditolak (pesan pack)" $?
-sed -i '/release.optimize = maybe/d' Buildfile.ws
-# edit Buildfile.ws membatalkan no-op sekali; pulihkan lalu cek HIT
+sed -i '/release.optimize = maybe/d' WsBuildfile
+# edit WsBuildfile membatalkan no-op sekali; pulihkan lalu cek HIT
 "$SAT" -j${UNIT_JOBS:-2} -w > /dev/null 2>&1
 # no-op pulih; tarball hasil optimize masih valid
 "$SAT" -j${UNIT_JOBS:-2} -w > oc2.txt 2>&1

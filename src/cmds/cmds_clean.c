@@ -120,7 +120,7 @@ void cmdsLegacyStateSweep(void) {
 }
 
 /* Jalankan logika bersih TANPA loadConfig — dipakai jalur clean tunggal
-   (cmdClean) dan mode workspace (Config disusun dari Buildfile.ws oleh
+   (cmdClean) dan mode workspace (Config disusun dari WsBuildfile oleh
    wsBuildConfig; path state mengikuti cmdsStateSetWsProject). */
 int cmdsCleanRunEx(const Config *c, bool *anyOut) {
   bool any = false;
@@ -200,7 +200,7 @@ int cmdsCleanRunEx(const Config *c, bool *anyOut) {
      blob/store — dibuang juga saat clean (lihat cmdsLegacyStateSweep). */
   cmdsLegacyStateSweep();
   /* startup.state TIDAK dihapus clean: workspaceRun (mode ws) menyinkronkannya
-     dengan Buildfile.ws sebelum clean berjalan (design/startup.md §6). */
+     dengan WsBuildfile sebelum clean berjalan (design/startup.md §6). */
   if (anyOut) *anyOut = any;
   return 0;
 }

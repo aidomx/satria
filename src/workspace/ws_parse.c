@@ -1,4 +1,4 @@
-/* ws_parse.c — Parser Buildfile.ws: baris setting, section engine, dan pembacaan file.
+/* ws_parse.c — Parser WsBuildfile: baris setting, section engine, dan pembacaan file.
  * Bagian dari modul workspace (src/workspace/). Lihat ws_internal.h.
  */
 #include "ws_internal.h"
@@ -17,7 +17,7 @@ bool wsIsEngineSection(const char *seg) {
     if (strcmp(seg, names[i]) == 0) return true;
   return false;
 }
-/* ==================== parse Buildfile.ws ==================== */
+/* ==================== parse WsBuildfile ==================== */
 /* Satu baris setting. Tiga bentuk diterima (alias di-resolve lebih dulu):
      projects.<nama>.<setting> = v   (bentuk kanonik)
      <nama>.<setting> = v            (use workspace mewakili namespace —
@@ -33,7 +33,7 @@ static void wsRecordLine(WsModel *m, const char *key, const char *value) {
 
   /* releases = rupa, ruka — sintaks revisi 1 (daftar release terikat
      proyek) SUDAH DIHAPUS (design/release.md revisi 2). Pesan migrasi
-     di sini supaya Buildfile.ws lama gagal JELAS, bukan diam-diam
+     di sini supaya workspace lama gagal JELAS, bukan diam-diam
      salah kemas. */
   if (strcmp(key, "releases") == 0 || strncmp(key, "releases.", 9) == 0) {
     if (!wsGuardQuiet)

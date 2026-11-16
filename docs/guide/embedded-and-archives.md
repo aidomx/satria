@@ -27,7 +27,8 @@ mod.archive.dir = ../ruka/modules
 
 The source root defines what is considered for archiving. Exclusion rules determine what is omitted.
 
-`.git` is excluded from source archives by default.
+`.git` and `.satria` are excluded from source archives by default (the latter
+keeps build state out of the archive so a no-op does not look stale).
 
 ## Embedded files
 

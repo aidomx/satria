@@ -68,14 +68,14 @@ unit_project_sources() {
 
 # unit_project_binary <root> [proyek]
 #   Path binary hasil proyek, dari `X.output as A` + `A.binaryName = N` -> bin/N
-#   INTERIM: micro-read Buildfile.ws sampai ada query targets native satria
+#   INTERIM: micro-read WsBuildfile sampai ada query targets native satria
 #   (design §6); hanya membaca DUA key sederhana, bukan parser.
 unit_project_binary() {
   _root=${1:-.}
   _want=${2:-core}
-  _alias=$(sed -n "s/^$_want\.output as *//p" "$_root/Buildfile.ws" 2> /dev/null | head -1 | tr -d ' \t')
+  _alias=$(sed -n "s/^$_want\.output as *//p" "$_root/WsBuildfile" 2> /dev/null | head -1 | tr -d ' \t')
   _name=""
-  [ -n "$_alias" ] && _name=$(sed -n "s/^$_alias\.binaryName *= *//p" "$_root/Buildfile.ws" 2> /dev/null | head -1 | tr -d ' \t')
+  [ -n "$_alias" ] && _name=$(sed -n "s/^$_alias\.binaryName *= *//p" "$_root/WsBuildfile" 2> /dev/null | head -1 | tr -d ' \t')
   [ -n "$_name" ] || _name=$_want
   printf 'bin/%s\n' "$_name"
 }
@@ -84,12 +84,12 @@ unit_project_binary() {
 #   Nama proyek yang memaket direktori (`<proyek>.archive.src`), mis. rupamod.
 #   Kunci di Buildfile bisa berupa alias (`projects.rupamod as mod`), sedangkan
 #   direktori proyek memakai nama proyek — alias dipetakan balik ke nama proyek.
-#   INTERIM: micro-read Buildfile.ws sampai ada query targets native satria.
+#   INTERIM: micro-read WsBuildfile sampai ada query targets native satria.
 unit_archive_project() {
   _root=${1:-.}
-  _key=$(sed -n 's/^\([A-Za-z0-9_]*\)\.archive\.src *= *\. *$/\1/p' "$_root/Buildfile.ws" 2> /dev/null | head -1)
+  _key=$(sed -n 's/^\([A-Za-z0-9_]*\)\.archive\.src *= *\. *$/\1/p' "$_root/WsBuildfile" 2> /dev/null | head -1)
   [ -n "$_key" ] || return 0
-  _proj=$(sed -n "s/^projects\.\([A-Za-z0-9_]*\) as *$_key *$/\1/p" "$_root/Buildfile.ws" 2> /dev/null | head -1)
+  _proj=$(sed -n "s/^projects\.\([A-Za-z0-9_]*\) as *$_key *$/\1/p" "$_root/WsBuildfile" 2> /dev/null | head -1)
   printf '%s\n' "${_proj:-$_key}"
 }
 

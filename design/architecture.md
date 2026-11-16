@@ -8,7 +8,7 @@
 ## Gambar umum
 
 satria adalah build tool untuk project C yang dikelola satu file konfigurasi
-deklaratif (`Buildfile`, atau `Buildfile.ws` untuk banyak proyek).
+deklaratif (`Buildfile`, atau `WsBuildfile` untuk banyak proyek).
 Satu binary tanpa dependensi runtime; bootstrap build lewat
 `install.sh --dev` (compiler C langsung, tanpa cmake; Windows:
 `install.ps1 --dev`). satria self-hosting: `./install.sh --dev` lalu

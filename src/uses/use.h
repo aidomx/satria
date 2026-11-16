@@ -15,7 +15,7 @@
  *                    diabaikan (tanpa deklarasi, .cpp memicu jalur C++).
  *   use project cpp | c++  — deklarasi bahasa C++ (std c++17, g++), sama
  *                    dengan deteksi otomatis tetapi tidak bergantung isi tree.
- *   use workspace  — pembungkus banyak project (file: Buildfile.ws;
+ *   use workspace  — pembungkus banyak project (file: WsBuildfile;
  *                    lihat uses/workspace.h).
  *   use alias      — nama lama untuk `use project`; tetap diterima demi
  *                    kompatibilitas (Buildfile satria & template `satria init`).

@@ -58,7 +58,7 @@ BK="$UNIT_TMP/opts_sources_sync-bak"; : > "$BK"
 : "${UNIT_TMP:=${UNIT_BASE:-/tmp/miniws}/t}"
 W="$UNIT_TMP/opts_sources_sync"; rm -rf "${W}"; mkdir -p "${W}" || exit 1
 cp -r "$SRC/." "$W/" || exit 2
-printf "flags = MMD, MP\n" >> "$W/Buildfile.ws"
+printf "flags = MMD, MP\n" >> "$W/WsBuildfile"
 cd "$W" || exit 2
 run() { "$SAT" -j${UNIT_JOBS:-2} -w >"$W/out.txt" 2>&1; return $?; }
 valid() { grep -q "Nothing to build" "$W/out.txt" && grep -q "Cache valid *:" "$W/out.txt"; }

@@ -37,7 +37,7 @@ The resulting binary is `build\bin\satria.exe`.
 satria            # build project from Buildfile
 satria -f FILE    # use a different Buildfile
 satria init       # create a new Buildfile
-satria init -w    # create a new Buildfile.ws
+satria init -w    # create a new WsBuildfile
 satria -w         # build all projects in the workspace
 satria -w NAME    # build project NAME and its dependencies
 satria -w release -- name=NAME    # release a single project via CLI
@@ -48,7 +48,7 @@ satria profile binary=DIR [jobs=N] [--report FILE]
 satria version    # display satria version
 satria help       # display help
 ```
-Without arguments, `satria` looks for a `Buildfile`. At the workspace root, `Buildfile.ws` can be used to manage multiple projects.
+Without arguments, `satria` looks for a `Buildfile`. At the workspace root, `WsBuildfile` can be used to manage multiple projects (`Buildfile.ws` is still read, with a deprecation warning — rename it to `WsBuildfile`).
 
 ## Buildfile
 For a standard project — a `src/` folder (and an optional `include/` folder) — a single line is enough; the rest follows satria conventions:
@@ -74,7 +74,7 @@ o.compileCommands = auto
 The old Buildfile format is still supported. The complete list of fields and defaults is available at [docs/reference/buildfile-fields.md](./docs/reference/buildfile-fields.md).
 
 ## Multi-project Workspace
-`Buildfile.ws` manages multiple projects at once. A minimal workspace just lists the projects — each project follows the standard convention (a `<name>/` folder containing `src/`), without needing its own Buildfile:
+`WsBuildfile` manages multiple projects at once. A minimal workspace just lists the projects — each project follows the standard convention (a `<name>/` folder containing `src/`), without needing its own Buildfile:
 ```text
 use workspace
 projects = rupamod, rupa, ruka
@@ -105,7 +105,7 @@ release.target = deb
 satria -w                          # build + release all -> dist/release/
 satria -w release -- name=rupa     # release a single project via CLI
 ```
-Releases can be fully triggered from the CLI without declaration in `Buildfile.ws`. Details in [docs/guide/releases.md](./docs/guide/releases.md).
+Releases can be fully triggered from the CLI without declaration in `WsBuildfile`. Details in [docs/guide/releases.md](./docs/guide/releases.md).
 
 ## Other Features
 - **Incremental build** — two-layer header tracking (mtime + content hash), dependency/fingerprint cache; see [docs/guide/incremental.md](./docs/guide/incremental.md).

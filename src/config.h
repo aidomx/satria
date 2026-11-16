@@ -29,7 +29,7 @@
  *     entri pack.files dipasang di <install_prefix>/<entri>.
  * pack.checksum = sha256 menulis <artefak>.sha256 (format `sha256sum -c`).
  *
- * Di Buildfile.ws, setting per proyek disintesis TANPA prefix
+ * Di WsBuildfile, setting per proyek disintesis TANPA prefix
  * projects.<nama>. — sehingga key bare (name, version, files, output,
  * compress, checksum, format, deb.*) juga dirutekan ke pack di sini.
  * Proyek pack tanpa sources otomatis output.binary = false (tidak ada
@@ -201,7 +201,7 @@ typedef struct {
    * build dijalankan di child proses terpisah (output ->
    * .satria/background.log, PID -> .satria/build.pid); induk keluar segera
    * dan user memantau lewat `satria watch`. Default false.
-   * Di Buildfile.ws dinyatakan sebagai setting global (baris bare
+   * Di WsBuildfile dinyatakan sebagai setting global (baris bare
    * `background = true`) — dibaca workspace.c dari commonLines.
    */
   bool background;
@@ -270,7 +270,7 @@ bool loadConfigEx(Config *c, const char *path, bool cacheWrite);
  * configApplyLine — terapkan SATU baris `key = value` format `use project`
  * (key bertitik; tanpa indentasi; alias sudah di-resolve pemanggil) ke
  * Config. Dipakai jalur workspace: WsConfig menyusun Config per proyek
- * DI MEMORI dari Buildfile.ws — tanpa file sintesis & tanpa loadConfig
+ * DI MEMORI dari WsBuildfile — tanpa file sintesis & tanpa loadConfig
  * (design/workspace_v1.md §Pemisahan Jalur Build). Panggil configFinalize()
  * setelah seluruh baris diterapkan (lihat urutan di uses/workspace.c).
  */
@@ -319,7 +319,7 @@ void addCommaList(List *dst, const char *value);
 int sfxTarget(const char *name);
 
 /* ---- --dev (mode pengembangan) ----
- * `satria --dev` [dan `satria -w --dev`]: section release pada Buildfile.ws
+ * `satria --dev` [dan `satria -w --dev`]: section release pada WsBuildfile
  * dan pack.* pada Buildfile DIABAIKAN untuk run ini — build hanya compile +
  * link, tanpa tarball/deb/checksum. Dipakai mengukur biaya compile+link
  * saat mengembangkan, tanpa biaya release yang stabil tapi mahal. Flag

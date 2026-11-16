@@ -8,8 +8,8 @@
 # setelah berkas startup muncul (cold miniws jauh lebih lambat dari itu).
 
 fixture.copy
-file.append Buildfile.ws flags = MMD, MP
-file.append Buildfile.ws background = true
+file.append WsBuildfile flags = MMD, MP
+file.append WsBuildfile background = true
 
 run.bg -j2 -w as bg
 

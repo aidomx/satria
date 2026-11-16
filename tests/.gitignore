@@ -11,7 +11,7 @@ mini/*
 
 miniws/*
 !bade
-!Buildfile.ws
+!WsBuildfile
 !CMakeLists.txt
 !core
 !include
@@ -20,7 +20,7 @@ miniws/*
 !*.sh
 
 wstest/*
-!Buildfile.ws
+!WsBuildfile
 !rupaapi
 !ruka
 !rupa

@@ -71,11 +71,11 @@ sel_source() { # $1=proyek → path `<proyek>/<sumber>` relatif WORK
   printf '%s/%s' "$want" "$r"
 }
 
-sel_binary() { # $1=proyek → bin/<binaryName> (micro-read Buildfile.ws di WORK)
+sel_binary() { # $1=proyek → bin/<binaryName> (micro-read WsBuildfile di WORK)
   local p=$1 alias name
-  alias=$(sed -n "s/^$p\.output as *//p" "$WORK/Buildfile.ws" 2>/dev/null | head -1 | tr -d ' \t')
+  alias=$(sed -n "s/^$p\.output as *//p" "$WORK/WsBuildfile" 2>/dev/null | head -1 | tr -d ' \t')
   name=''
-  [ -n "$alias" ] && name=$(sed -n "s/^$alias\.binaryName *= *//p" "$WORK/Buildfile.ws" 2>/dev/null | head -1 | tr -d ' \t')
+  [ -n "$alias" ] && name=$(sed -n "s/^$alias\.binaryName *= *//p" "$WORK/WsBuildfile" 2>/dev/null | head -1 | tr -d ' \t')
   [ -n "$name" ] || name=$p
   printf 'bin/%s' "$name"
 }
@@ -103,13 +103,13 @@ sel_dir() { # proyek → root dir-nya relatif WORK (fallback proyek-pertama)
 
 sel_archive() { # berkas arsip proyek: alias embed (`<p>.embedded.<x> as a` → a.file)
   local p=$1 alias f dir name          # fallback: <p>.archive.dir + <p>.archive.name
-  alias=$(sed -n "s/^$p\.embedded\.[A-Za-z0-9_]* as *//p" "$WORK/Buildfile.ws" 2>/dev/null | head -1 | tr -d ' \t')
+  alias=$(sed -n "s/^$p\.embedded\.[A-Za-z0-9_]* as *//p" "$WORK/WsBuildfile" 2>/dev/null | head -1 | tr -d ' \t')
   if [ -n "$alias" ]; then
-    f=$(sed -n "s/^$alias\.file *= *//p" "$WORK/Buildfile.ws" 2>/dev/null | head -1 | tr -d ' \t')
+    f=$(sed -n "s/^$alias\.file *= *//p" "$WORK/WsBuildfile" 2>/dev/null | head -1 | tr -d ' \t')
     [ -n "$f" ] && { printf '%s' "$f"; return 0; }
   fi
-  dir=$(sed -n "s/^$p\.archive\.dir *= *//p" "$WORK/Buildfile.ws" 2>/dev/null | head -1 | tr -d ' \t')
-  name=$(sed -n "s/^$p\.archive\.name *= *//p" "$WORK/Buildfile.ws" 2>/dev/null | head -1 | tr -d ' \t')
+  dir=$(sed -n "s/^$p\.archive\.dir *= *//p" "$WORK/WsBuildfile" 2>/dev/null | head -1 | tr -d ' \t')
+  name=$(sed -n "s/^$p\.archive\.name *= *//p" "$WORK/WsBuildfile" 2>/dev/null | head -1 | tr -d ' \t')
   [ -n "$dir" ] && [ -n "$name" ] && { printf '%s/%s.tar' "$dir" "$name"; return 0; }
   return 1
 }
@@ -144,8 +144,8 @@ resolve_args() { # interpolasi {var} + selektor project(p).* / repo() / work() /
   local re4='ws\(([^)]+)\)'
   while [[ "$s" =~ $re4 ]]; do
     w=${BASH_REMATCH[1]}
-    r=$(sed -n "s/^$w *= *//p" "$WORK/Buildfile.ws" 2>/dev/null | head -1 | tr -d ' \t')
-    [ -n "$r" ] || precond "kunci Buildfile.ws tidak ada: $w"
+    r=$(sed -n "s/^$w *= *//p" "$WORK/WsBuildfile" 2>/dev/null | head -1 | tr -d ' \t')
+    [ -n "$r" ] || precond "kunci WsBuildfile tidak ada: $w"
     s=${s/"ws($w)"/$r}
   done
   printf '%s' "$s"

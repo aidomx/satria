@@ -27,7 +27,7 @@
 #     -s PATH binary satria (default <repo>/bin/satria)
 #     -o DIR  folder log (default direktori sementara)
 #     -k      jangan hapus salinan A/B di akhir (inspeksi manual)
-#     proyek  folder berisi Buildfile.ws / Buildfile
+#     proyek  folder berisi WsBuildfile / Buildfile
 #             (default: tests/rupaws — workspace nyata di repo ini)
 #
 # Contoh:
@@ -79,8 +79,8 @@ PROJECT="${PROJECT%/}"
   echo "proyek tidak ditemukan: $PROJECT" >&2
   exit 2
 }
-if [ ! -f "$PROJECT/Buildfile.ws" ] && [ ! -f "$PROJECT/Buildfile" ]; then
-  echo "bukan proyek satria (tidak ada Buildfile.ws/Buildfile): $PROJECT" >&2
+if [ ! -f "$PROJECT/WsBuildfile" ] && [ ! -f "$PROJECT/Buildfile" ]; then
+  echo "bukan proyek satria (tidak ada WsBuildfile/Buildfile): $PROJECT" >&2
   exit 2
 fi
 case "$NRUN" in '' | *[!0-9]* | 0)

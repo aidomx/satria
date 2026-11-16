@@ -13,7 +13,7 @@ void showHelp(void);
 int cmdInit(const char *buildfilePath);
 
 /*
- * `satria init -w` — tulis template workspace (default "Buildfile.ws";
+ * `satria init -w` — tulis template workspace (default "WsBuildfile";
  * bila -f diberikan, path itulah yang dipakai). Menolak menulis jika
  * file sudah ada, sama seperti cmdInit.
  */
@@ -33,7 +33,7 @@ int cmdInitWorkspace(const char *buildfilePath);
  * polos di pipe/CI atau saat NO_COLOR/SATRIA_NO_COLOR/TERM=dumb.
  * Nama selalu menjadi folder scaffold <nama>/: single-project berisi
  * Buildfile + src/ (+ include/ bila diminta); proyek workspace tidak
- * punya Buildfile sendiri (satria mensintesisnya dari Buildfile.ws).
+ * punya Buildfile sendiri (satria mensintesisnya dari WsBuildfile).
  * Jawaban non-default ditulis eksplisit ke Buildfile; sisanya konvensi.
  * Pra-cek overwrite: satu saja file target sudah ada => init dibatalkan
  * tanpa menimpa apa pun. EOF di stdin => dibatalkan.

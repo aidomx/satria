@@ -38,6 +38,18 @@ and optionally a checksum:
 pack.checksum = sha256
 ```
 
+## Faster packaging
+
+```text
+pack.optimize = true
+```
+
+Builds the tarball in two steps — `tar` first, then the compressor at its
+lowest (fastest) level (`gzip -1`, likewise `-1` for `xz` and `bzip2`) — which
+trades archive size for build time. Default `false` keeps the single-step
+`tar czf` behavior. The same key works as `release.optimize` for workspace
+releases.
+
 ## Debian
 
 Example:
@@ -49,7 +61,10 @@ pack.deb.description = "A simple builder for you"
 pack.deb.architecture = arm64
 ```
 
-The install prefix is combined with package destinations when constructing the Debian filesystem tree.
+The install prefix is combined with package destinations when constructing the Debian filesystem tree. The `.deb` is assembled by satria itself from the staged files (ar + tar members), so `dpkg-deb` is not required.
+
+`pack.format = deb` adds the `.deb` beside the tarball; make `pack.output` end
+in `.deb` to skip the tarball and produce a deb-only package.
 
 ## Package merge
 

@@ -20,7 +20,7 @@ SRC=$(abspath "${2:-$(dirname "$0")/../../miniws}")
 : "${UNIT_TMP:=${UNIT_BASE:-/tmp/miniws}/t}"
 W="$UNIT_TMP/background"; rm -rf "${W}"; mkdir -p "${W}" || exit 1
 cp -r "$SRC/." "$W/" || exit 2
-printf "flags = MMD, MP\nbackground = true\n" >> "$W/Buildfile.ws"
+printf "flags = MMD, MP\nbackground = true\n" >> "$W/WsBuildfile"
 cd "$W" || exit 2
 export NO_COLOR=1
 pass=0; fail=0
@@ -32,7 +32,7 @@ check() { if [ "$2" -eq 0 ]; then pass=$((pass+1)); echo "PASS  $1"; else fail=$
 stop_bg() { kill -s STOP "$(cat "$1" 2>/dev/null)" 2>/dev/null; }
 cont_bg() { kill -s CONT "$(cat "$1" 2>/dev/null)" 2>/dev/null; }
 
-echo "== workspace (background = true di Buildfile.ws) =="
+echo "== workspace (background = true di WsBuildfile) =="
 
 # §3A: spawn mengembalikan kontrol segera, tanpa output build di induk.
 "$SAT" -j${UNIT_JOBS:-2} -w > out.txt 2>&1

@@ -31,9 +31,9 @@ ostamp() { stat -c '%y' .satria/opts.cache; }
 : "${UNIT_TMP:=${UNIT_BASE:-/tmp/miniws}/t}"
 W="$UNIT_TMP/crud_touch_delete"; rm -rf "${W}"; mkdir -p "${W}" || exit 1
 cp -r "$SRC/." "$W/" || exit 2
-printf "flags = MMD, MP\n" >> "$W/Buildfile.ws"
+printf "flags = MMD, MP\n" >> "$W/WsBuildfile"
 cd "$W" || exit 2
-# Source proyek core dari Buildfile.ws (miniws: core/src/core.c, rupaws:
+# Source proyek core dari WsBuildfile (miniws: core/src/core.c, rupaws:
 # core/src/main.c) supaya tes tidak bergantung pada nama fixture.
 ENG=$(unit_project_source . core)
 [ -n "$ENG" ] || unit_precondition "fixture tidak punya sumber .c untuk dimutasi"

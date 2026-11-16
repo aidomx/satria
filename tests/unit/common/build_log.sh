@@ -16,7 +16,7 @@ cd "$W"
 # meninggalkan .satria/build.log di repo) — buang dulu supaya asersi
 # "cold build tanpa log" di bawah deterministik.
 rm -rf .satria
-# Source proyek core diambil dari Buildfile.ws (lihat lib/layout.sh): nama
+# Source proyek core diambil dari WsBuildfile (lihat lib/layout.sh): nama
 # berkas berbeda antar target (miniws: core/src/core.c, rupaws: core/src/main.c).
 ENG=$(unit_project_source .)
 [ -n "$ENG" ] || unit_precondition "fixture tidak punya sumber .c untuk dimutasi"
@@ -24,7 +24,7 @@ ENG=$(unit_project_source .)
 # Default must not create a log or a relay, even on a cold build.
 "$SAT" -j${UNIT_JOBS:-2} -w >out 2>err
 [ ! -f .satria/build.log ]
-printf '\nflags = Wall, Wextra, MMD, MP\nlog = true\n' >> Buildfile.ws
+printf '\nflags = Wall, Wextra, MMD, MP\nlog = true\n' >> WsBuildfile
 printf '\n#warning BUILDLOG_UNIT_WARNING\n' >> "$ENG"
 "$SAT" -j${UNIT_JOBS:-2} -w >out 2>err
 [ -f .satria/build.log ]
@@ -43,13 +43,13 @@ grep -q 'build failed' .satria/build.log
 grep -q 'build failed' shown
 # Configuration changes must invalidate startup.state without cleaning.
 sed -i '/invalid buildlog syntax !!!/d' "$ENG"
-sed -i 's/log = true/log = false/' Buildfile.ws
+sed -i 's/log = true/log = false/' WsBuildfile
 printf '\n#warning BUILDLOG_DISABLED_WARNING\n' >> "$ENG"
 before=$(wc -c < .satria/build.log)
 "$SAT" -j${UNIT_JOBS:-2} -w >out 2>err
 [ "$(wc -c < .satria/build.log)" -eq "$before" ]
 grep -q 'C log = false' .satria/startup.state
-sed -i 's/log = false/log = true/' Buildfile.ws
+sed -i 's/log = false/log = true/' WsBuildfile
 printf '\n#warning BUILDLOG_REENABLED_WARNING\n' >> "$ENG"
 "$SAT" -j${UNIT_JOBS:-2} -w >out 2>err
 grep -q BUILDLOG_REENABLED_WARNING .satria/build.log

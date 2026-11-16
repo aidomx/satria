@@ -3,7 +3,7 @@
 Dokumen ini merinci desain eksekusi build di latar belakang (*background*) dan mekanisme pemantauannya (*watch*) di Satria. Fitur ini memungkinkan developer memulai build proyek besar dan langsung menggunakan terminal untuk tugas lain, sambil tetap bisa memantau progresnya.
 
 ## 1. Konfigurasi
-Fitur ini diaktifkan melalui deklarasi di `Buildfile` atau `Buildfile.ws`:
+Fitur ini diaktifkan melalui deklarasi di `Buildfile` atau `WsBuildfile`:
 ```text
 background = true
 ```

@@ -57,7 +57,7 @@ The scaffold builds and runs out of the box:
 └── src/main.c       # src/main.cpp when language = cpp
 ```
 
-A workspace scaffold writes `Buildfile.ws` (`projects = ...`, optional
+A workspace scaffold writes `WsBuildfile` (`projects = ...`, optional
 `<p>.depends_on = <p>` lines) plus a `src/main.c` per member — no per-project
 Buildfiles; satria synthesizes them. `init -p` never overwrites: if any target
 file already exists, it aborts before writing anything. Ctrl+C or EOF on a
@@ -79,6 +79,18 @@ satria -w NAME
 ```
 
 Build all projects or one named project and its dependencies.
+
+```bash
+satria -w NAME --with-cdeps
+```
+
+Opt-in: the selective closure also pulls in `cdeps` providers (transitively,
+including cyclic cdeps) — for example `satria -w bade --with-cdeps` builds
+`core` when bade links its library through cdeps. Without the flag the old
+contract holds: cdeps never widens the closure. The flag is only valid with
+`-w` (otherwise exit code 2). When a cdeps provider outside the closure has
+no library on disk yet, a pre-flight warning names it and suggests
+`--with-cdeps`.
 
 ## Dev mode
 
@@ -104,7 +116,7 @@ satria -w release -- key=value[,key=value...]
 ```
 
 Build the workspace and package ONE release artifact into the workspace
-`dist/` (when a `release.*` section exists in `Buildfile.ws`). With `--`,
+`dist/` (when a `release.*` section exists in `WsBuildfile`). With `--`,
 each `key=value` pair overrides a release setting for this run (`name`,
 `version`, `format`, `target` — accepted as a legacy alias of `format`).
 See [Releases](../guide/releases.md).
@@ -116,6 +128,38 @@ satria clean
 ```
 
 Remove generated build artifacts according to the active project/workspace configuration.
+
+## Watch a background build
+
+```bash
+satria watch
+satria watch --full
+satria -w watch [--full]
+```
+
+With `background = true` in `Buildfile` (or as a workspace-global line in
+`WsBuildfile`), a build starts detached and returns immediately; output goes
+to `.satria/background.log`. `satria watch` replays progress, the summary and
+the final status, then exits; `--full` streams the log live. The watcher never
+starts a build of its own.
+
+## Compilation database only
+
+```bash
+satria -g compdb
+```
+
+Write/refresh `compile_commands.json` without building. See
+[Compilation Database](compdb.md).
+
+## Convert Ninja or Makefile
+
+```bash
+satria -xf build.ninja     # convert for this run only
+satria -xcf Makefile       # convert and save as Buildfile
+```
+
+See [Ninja Buildfile Import](satria-ninja-import.md).
 
 ## Jobs
 
@@ -155,12 +199,28 @@ state, behaves like the gcc command you would have typed yourself.
 - `-jN` works here too (see [Jobs](#jobs)); the link step always runs once
   at the end.
 - Mixing `-F` with `-o`/`-b` is an error; sources together with `-f` or
-  `-w` is an error. Compiler flags such as `-O2` or `-I` are not accepted
+  `-w` is an error. No `.satria` state is written, so ad-hoc runs never
+  no-op; compiler failures pass through unchanged. Compiler flags such as `-O2` or `-I` are not accepted
   on the CLI — put them in the `-F` config (`flags`, `headers`, `defines`).
 - The compiler is auto-detected (`cc`, `gcc`, `clang`, `tcc`, `cl` — first
   on `PATH` wins); a `compiler =` key in the `-F` config overrides it.
 
 See `satria help adhoc` and [design/compile.md](../../design/compile.md).
+
+## Unit tests
+
+```bash
+satria test miniws                 # full sweep for the miniws fixture
+satria test miniws -t cache_noop   # one test only
+satria test complexws -j 2         # whole suite, 2 jobs
+satria test -w                     # watch an active run
+```
+
+Delegate to `scripts/unit.sh`: `<target>` is a fixture name under `tests/`,
+not a path. The exit code of the runner becomes the exit code of satria.
+Tests are `.test`/`.t` DSL files under `tests/unit/common/` (classification
+in `tests/unit/classes.conf`); see [Unit Tests](unit-test) for running and
+writing them.
 
 ## Profile
 

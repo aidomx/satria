@@ -48,7 +48,7 @@ static void configApply(Config *c, const char *section, const char *sub, const c
       c->background = b; /* design/background.md §1 */
     else if (strcmp(key, "target") == 0)
       copyStr(c->target, sizeof(c->target),
-              value); /* Key bare hasil sintesis Buildfile.ws (prefix projects.<n>. dan
+              value); /* Key bare hasil sintesis WsBuildfile (prefix projects.<n>. dan
        aliasnya dilepas): name/version/files/output/... -> pack. Tanpa
        files/output proyek biasa tidak terpengaruh (pack tak aktif). */
     else if (strcmp(key, "name") == 0 || strcmp(key, "version") == 0 ||
@@ -204,7 +204,7 @@ static void configApply(Config *c, const char *section, const char *sub, const c
   }
 
   if (strcmp(section, "deb") == 0) {
-    /* Key bare deb.<key> (hasil sintesis Buildfile.ws: kunci
+    /* Key bare deb.<key> (hasil sintesis WsBuildfile: kunci
        `deb.maintainer = ...` di-rute sebagai section "deb"). */
     packApplyDeb(c, key, value);
     return;

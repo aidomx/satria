@@ -1,9 +1,9 @@
-# Selektor repo() + ws() (baca kunci Buildfile.ws).
+# Selektor repo() + ws() (baca kunci WsBuildfile).
 # expect: lulus=2 gagal=0 rc=0
 @suite project
 @purpose "Selektor repo() dan ws()"
 
-file.write Buildfile.ws <<T
+file.write WsBuildfile <<T
 use project
 kit.key = nilai-kit
 T

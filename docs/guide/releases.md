@@ -19,7 +19,7 @@ content you choose freely.
 ## Declaring release
 
 The release configuration lives in one `release.*` section of
-`Buildfile.ws` (workspace mode) — and equally in a project's `Buildfile`
+`WsBuildfile` (workspace mode) — and equally in a project's `Buildfile`
 (single-project mode). Keys are the same as `pack.*` because the release
 phase runs the pack engine:
 
@@ -31,6 +31,7 @@ release.exclude = .git, .satria, build, node_modules
 release.output = dist/{name}-v{version}.tar.gz
 release.format = deb
 release.compress = gzip
+release.optimize = true
 release.checksum = sha256
 release.deb.install_prefix = /usr/local
 ```
@@ -47,7 +48,8 @@ release.deb.install_prefix = /usr/local
   exact relative path, basename, or directory prefix. Never applied to
   explicit file entries.
 - `release.format` — `tar` (default) or `deb`; `release.compress`,
-  `release.checksum` (sha256), `release.deb.*` work exactly like `pack.*`.
+  `release.optimize`, `release.checksum` (sha256), `release.deb.*` work
+  exactly like `pack.*`.
 - All keys mirror the `pack` engine (see packaging guide for `deb.*`
   metadata).
 
@@ -62,11 +64,18 @@ projects contribute nothing.
 ```bash
 satria -w                                   # build + release (when release.* exists)
 satria -w clean                             # clean, no release
-satria -w <project>                         # build closure; release stays full-workspace
-satria -w release                           # same as satria -w (release name), kept for clarity
+satria -w <project>                         # build closure only — no release package
+satria -w release                           # build + release (same as plain -w)
 satria -w release -- version=0.2.3          # override release settings for this run
 satria -w release -- format=tar,version=1.0 # multiple overrides, comma separated
+satria -w --dev                             # compile + link only; release skipped
 ```
+
+A selective build (`-w <project>`) alone never packages a release, even when
+`release.*` exists — the build closure is all it does; run a full `satria -w`
+(or `-w release`) for the package. Adding a `-- key=value` override requests
+the release pass explicitly. `--dev` skips it for one run and is rejected
+together with `release` or a `--` selector.
 
 `-- key=value` pairs override release settings for the run (`name`,
 `version`, `format`, `target` — accepted as a legacy alias of `format` —

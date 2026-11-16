@@ -87,7 +87,7 @@ int wsRelease(WsModel *m, int jobs, const char *wsDir) {
       const WsProject *pp = &m->projects[i];
       /* isArchive dihitung penuh lebih dulu (helper bersama): proyek
          kemasan tidak pernah punya entri lib default, apa pun urutan
-         baris di Buildfile.ws. */
+         baris di WsBuildfile. */
       bool isArchive = wsProjectArchiveOnly(pp);
       for (int l = 0; l < pp->lines.count; l++) {
         const char *ln = pp->lines.items[l];

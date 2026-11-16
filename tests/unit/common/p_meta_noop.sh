@@ -44,7 +44,7 @@ meta_re() { grep -cE '^P [0-9a-f]{16} [SDOWH] [0-9a-f]{16} [0-9]+ [0-9]+ ' "$1";
 : "${UNIT_TMP:=${UNIT_BASE:-/tmp/miniws}/t}"
 W="$UNIT_TMP/p_meta_noop"; rm -rf "${W}"; mkdir -p "${W}" || exit 1
 cp -r "$SRC/." "$W/" || exit 2
-printf "flags = MMD, MP\n" >> "$W/Buildfile.ws"
+printf "flags = MMD, MP\n" >> "$W/WsBuildfile"
 cd "$W" || exit 2
 
 "$SAT" -j${UNIT_JOBS:-2} -w > c1 2>&1
@@ -61,7 +61,7 @@ check "ws: pesan no-op tampil" $?
 
 wait_tick
 # Touch pada berkas yang tidak ada akan MEMBUAT sumber baru, dan build memang
-# harus jalan — jadi pakai berkas yang benar-benar ada, dari Buildfile.ws
+# harus jalan — jadi pakai berkas yang benar-benar ada, dari WsBuildfile
 # (miniws: core/src/core.c, rupaws: core/src/main.c).
 CRUDFILE=$(unit_project_source . core)
 [ -n "$CRUDFILE" ] || unit_precondition "fixture tidak punya sumber .c proyek core"
@@ -156,7 +156,7 @@ check "ws: P opts.cache bermetadata ($n/$pt)" $?
 
 # Stamp per proyek: konfigurasi satu proyek berubah -> gate menolak & menyebut
 # proyeknya SEBELUM membuka seluruh entri; build pemulihan -> P-fast lagi.
-printf "core.flags = DEXTRA\n" >> Buildfile.ws
+printf "core.flags = DEXTRA\n" >> WsBuildfile
 SATRIA_CACHE_TRACE=1 "$SAT" -j${UNIT_JOBS:-2} -w > s1 2>&1
 # grep -q "project stamp changed core" s1
 check "ws: stamp proyek menolak & menyebut core" $?

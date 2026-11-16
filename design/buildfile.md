@@ -46,7 +46,7 @@ core.lang = cpp
 - Nilai tak dikenal **tidak** diabaikan diam-diam: `use workspace foo` dan
   `base.lang = rust` mencetak peringatan, lalu memakai default workspace.
 - Bahasa ikut masuk hash konfigurasi (`wsLogCfgHash`) dan label fast-state
-  (`Buildfile.ws:<proyek>:<bahasa>`), jadi mengganti `c` ↔ `cpp` membatalkan
+  (`WsBuildfile:<proyek>:<bahasa>`), jadi mengganti `c` ↔ `cpp` membatalkan
   state lama dan benar-benar mengompilasi ulang — daftar sumber bisa tampak
   sama padahal std/driver berubah.
 

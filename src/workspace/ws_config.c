@@ -248,7 +248,7 @@ static void wsApplyLine(const WsModel *m, const WsProject *p, Config *c, const c
      foreground/target/depends_on): diterapkan apa adanya. */
   configApplyLine(c, key, value);
 }
-/* Susun Config proyek `idx` dari model Buildfile.ws — tanpa file sintesis,
+/* Susun Config proyek `idx` dari model WsBuildfile — tanpa file sintesis,
    tanpa loadConfig. Urutan: defaults -> baris bersama -> baris proyek ->
    cdeps -> fixup output/konvensi -> configFinalize -> resolveCompiler
    (dipanggil pemanggil, wsRunProject). */
@@ -270,7 +270,7 @@ bool wsBuildConfig(const WsModel *m, int idx, Config *c) {
     }
   }
   wsApplyCdeps(m, p, c);
-  profMark("cfg-lines"); /* profil: loop baris Buildfile.ws + cdeps */
+  profMark("cfg-lines"); /* profil: loop baris WsBuildfile + cdeps */
 
   const char *root = p->root[0] ? p->root : ".";
   /* Root proyek anggota -> projRoot (basis path sumber/object). `root` tetap

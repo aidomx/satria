@@ -10,7 +10,7 @@ Menulis unit test dengan bash/sh itu bukanlah perkara mudah, akar masalah:
 Dengan memperlakukan unit test sebagai bagian dari dsl, itu akan mempermudah penulisan, pembacaan, dan dapat didokumentasikan serta pengguna bisa mencoba menulis unit testnya sendiri terhadap satria tanpa perlu memahami cara kerja internal dari satria.
 
 Ukuran keberhasilan:
-- Seluruh `tests/unit/common` (25 tes) dapat dinyatakan **tanpa satu pun baris
+- Seluruh `tests/unit/common` (30 tes) dapat dinyatakan **tanpa satu pun baris
   bash/sh di sisi penulis tes** — dicapai bertahap lewat milestone parser.
 - Syntax baru yang harus dipelajari penulis tes kecil: **8 objek aksi +
   3 objek hasil + 14 direktif** — dan objek bisa dibuka untuk keperluan lain
@@ -173,10 +173,10 @@ runtime sehingga `contains` aman dari SGR.
 ## Ekspresi (L3)
 
 - **Selektor**: `project(p).source|sources|binary|dir|embedded|stamp|archive`
-  (sources.tsv + micro-read Buildfile.ws, perilaku `lib/layout.sh` termasuk
+  (sources.tsv + micro-read WsBuildfile, perilaku `lib/layout.sh` termasuk
   fallback proyek-pertama; `embedded.c` selalu di-skip) dan `repo(<rel>)`
   (berkas di UNIT_REPO, untuk cmdhelp/trace_src_sync), `work(<rel>)`
-  (berkas/berkasar di WORK, mendukung path absolut), `ws(<kunci-Buildfile.ws>)`
+  (berkas/berkasar di WORK, mendukung path absolut), `ws(<kunci-WsBuildfile>)`
   (nilai kunci workspace). `repo()` tidak mem-validasi keberadaan berkas —
   predikat `exists`/`absent` yang memutuskan; selektor lain yang tidak
   terurai di argumen → PRECONDITION otomatis.
@@ -257,7 +257,7 @@ Tes [snap]: tanpa `work.clean`, mulai dari snapshot; mutasi sumber cukup
 @purpose "Cache no-op: sentuh tetap no-op; edit isi membangun"
 @requires snap
 
-file.append Buildfile.ws "flags = MMD, MP"   # cache butuh file .d (-MMD)
+file.append WsBuildfile "flags = MMD, MP"   # cache butuh file .d (-MMD)
 time.tick                                    # hindari racy mtime snapshot
 
 run.build as noop1                           # laporan STATUS build terakhir
@@ -290,18 +290,18 @@ Query `compdb` sebagai pembanding + validasi pesan bernomor baris:
 fixture.copy
 run.cmd -w -g compdb as base
 
-file.append Buildfile.ws "cdeps = {a, b}"    # setara a.cdeps = b && b.cdeps = a
+file.append WsBuildfile "cdeps = {a, b}"    # setara a.cdeps = b && b.cdeps = a
 run.cmd -w -g compdb as grouped
 @response grouped
   rc.ok
   out.equals base grouped
 @end
 
-file.append Buildfile.ws "cdeps = {solo}"    # grup satu anggota: ditolak
+file.append WsBuildfile "cdeps = {solo}"    # grup satu anggota: ditolak
 run.cmd -w -g compdb as solo
 @response solo
   rc.fail
-  out.contains "Buildfile.ws:"
+  out.contains "WsBuildfile:"
   out.contains "cdeps"
 @end
 ```
@@ -419,6 +419,7 @@ run.cmd watch as w
 | semantic_header_workspace | cold* | workspace | M0 | dua `work.new` (unused/consumed) |
 | version_alias | snap | — | M0 | `run.cmd version/--version`, `out.equals` |
 | workspace_selective_target | cold* | workspace | M0 | selektor core + bade |
+| wsbuildfile_legacy | cold | workspace | — | `init -w` menulis WsBuildfile; Buildfile.ws lama masih dibaca + warning deprecasi |
 | embed_getembed | cold | workspace | M1 | `run.exec` program hasil build |
 | embed_stamp_skip | cold* | workspace | M1 | contoh §terjemahan (time.mark/mtime) |
 | p_meta_noop | snap | workspace | M1 | `env.set SATRIA_CACHE_TRACE` + contains |
@@ -476,7 +477,7 @@ menjadi runner asli, tanpa bash sama sekali. Tes tetap berkas `.test`/`.t`
 | --- | --- | --- |
 | M4a parser | `scripts/lib/parser.sh` → `src/test/parser.c` | kit parser (positif + negatif) diport jadi uji unit C; jejak event TSV identik byte-per-byte dengan parser bash |
 | M4b evaluator+eksekutor | `tests/unit/lib/dsl.sh` → `src/test/eval.c` + `exec.c` (konvensi `EV`/`CUR`, tabel `obj.aksi` → fungsi C) | kit konforman `tests/unit/dsl/` 14/14 dijalankan runner C, hasil verdict identik |
-| M4c runner/discovery | `lib/unit_runner.sh`+`unit_watcher.sh` → `src/test/runner.c`: discovery `.test`>`.t`>`.sh` + dedupe, `classes.conf`, staging/snapshot, `-j`, log/timing | sweep miniws via runner C = 348 asersi / 29 tes, log & timing.tsv setara |
+| M4c runner/discovery | `lib/unit_runner.sh`+`unit_watcher.sh` → `src/test/runner.c`: discovery `.test`>`.t`>`.sh` + dedupe, `classes.conf`, staging/snapshot, `-j`, log/timing | sweep miniws via runner C = 359 asersi / 30 tes, log & timing.tsv setara |
 | M4d `satria test` native | delegasi `cmdTest` (src/test.c) diganti pemanggilan runner C langsung (in-process, tanpa exec) | semua tes lulus tanpa bash; arsip bash dipensiunkan |
 
 Catatan rancangan:
@@ -550,5 +551,5 @@ resmi untuk tes di `tests/unit/common`.
 - [x] `satria test` fase 1 (delegasi, tanpa porting): parsing standalone-break (pola `trace`) + `src/test.c` menemukan root repo dari exe (`/proc/self/exe`, fallback cwd bila `scripts/unit.sh` ada di cwd) lalu exec `bash scripts/unit.sh <args…>`; shorthand `satria test miniws` — binary satria sendiri disisipkan bila argumen pertama bukan opsi/kata mode/path binary, dan path binary relatif-repo dari subdirektori diabsolutkan (unit.sh me-resolve relatif cwd); rc unit.sh = rc satria; sweep miniws via `satria test miniws` 348/29, rc 0; `help test` tersedia
 - [ ] M4a: parser → C (`src/test/parser.c`) — uji unit C positif+negatif, jejak event identik
 - [ ] M4b: evaluator + eksekutor → C (`src/test/eval.c`, `src/test/exec.c`) — kit dsl 14/14 via runner C
-- [ ] M4c: runner/discovery/klasifikasi → C (`src/test/runner.c`) — sweep miniws 348/29 via runner C
+- [ ] M4c: runner/discovery/klasifikasi → C (`src/test/runner.c`) — sweep miniws 359/30 via runner C
 - [ ] M4d: `satria test` native in-process; pensiunkan `unit.sh`/`unit_dev.sh`/`lib/unit_*.sh` (arsip) — verifikasi "tanpa bash" via `satria trace`

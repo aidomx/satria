@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # ============================================================================
-# workspace.sh — benchmark mode workspace satria (Buildfile.ws)
+# workspace.sh — benchmark mode workspace satria (WsBuildfile)
 #
 # Meniru tests/wstest: 3 proyek dalam satu workspace
 #   rupamod : proyek kemasan (archive .rp -> dist/rupa_modules.tar.gz)
 #   rupa    : binary C mandiri
 #   ruka    : binary C, depends_on rupamod, meng-embed arsip rupamod
-# Buildfile.ws dibuat persis seperti tests/wstest (alias, archive,
+# WsBuildfile dibuat persis seperti tests/wstest (alias, archive,
 # depends_on, embedded). Sebagai PEMBANDING dibuat juga build.ninja dan
 # Makefile untuk graf yang sama (satu graf datar, ruka relink bila arsip
 # berubah). Bukan klaim: pembanding tidak punya konsep workspace.
@@ -38,7 +38,7 @@
 #   ./bench/workspace.sh -s mod,leaf      # subset skenario
 #   ./bench/workspace.sh -t satria,ninja    # subset tool (default: satria,ninja,make)
 #   ./bench/workspace.sh -a "--foo"       # argumen tambahan untuk satria
-#   ./bench/workspace.sh -c "gcc, clang"  # compiler di Buildfile.ws
+#   ./bench/workspace.sh -c "gcc, clang"  # compiler di WsBuildfile
 #   ./bench/workspace.sh -d 1.1           # jeda detik antara build & edit berikutnya
 #                                         # (uji deteksi perubahan berbasis mtime detik)
 #   NO_COLOR=1 ./bench/workspace.sh       # tanpa warna / progress bar
@@ -57,7 +57,7 @@ NMOD=40         # -m : jumlah file .rp di rupamod/stdlib
 NRUN=5          # -r : pengulangan per skenario (median)
 SATRIA=bin/satria   # -b : binary satria
 SATRIA_ARGS=""    # -a : argumen tambahan untuk satria
-COMPILERS="gcc" # -c : nilai 'compiler =' di Buildfile.ws
+COMPILERS="gcc" # -c : nilai 'compiler =' di WsBuildfile
 KEEP=0          # -k : jangan hapus workspace di akhir
 ONLY=""         # -s : subset skenario
 TOOLS_OPT="satria,ninja,make"  # -t : subset tool pembanding
@@ -211,7 +211,7 @@ gen_ws() {
     printf 'module m%s\nexport f%s\n' "$i" "$i" >"$WS/rupamod/stdlib/m$i.rp"
   done
 
-  # ---- Buildfile.ws (bentuk sama dengan tests/wstest) ----
+  # ---- WsBuildfile (bentuk sama dengan tests/wstest) ----
   {
     echo "use workspace"
     echo
@@ -245,7 +245,7 @@ gen_ws() {
     echo "ruka.embedded.modules.file = rupamod/dist/rupa_modules.tar.gz"
     echo "ruka.embedded.modules.variable = MODULES"
     echo "ruka.headers = build, I."
-  } >"$WS/Buildfile.ws"
+  } >"$WS/WsBuildfile"
 
   # ---- pembanding: build.ninja (graf datar yang setara) ----
   {

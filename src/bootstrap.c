@@ -125,7 +125,7 @@ int bootstrapParse(int argc, const char *argv[], Bootstrap *bs) {
     const char *a = argv[i];
     const char *err = NULL;
 
-    /* -w: mode workspace (Buildfile.ws). `satria -w` = semua proyek;
+    /* -w: mode workspace (WsBuildfile). `satria -w` = semua proyek;
        `satria -w <nama>` = hanya proyek itu. OPSI, bukan command — argumen
        setelahnya TIDAK diperlakukan sebagai command (kecuali command yang
        dikenal, lihat di bawah). */
@@ -298,7 +298,7 @@ int bootstrapParse(int argc, const char *argv[], Bootstrap *bs) {
       continue;
     }
 
-    /* `--dev`: mode pengembangan — section release (Buildfile.ws) dan pack.*
+    /* `--dev`: mode pengembangan — section release (WsBuildfile) dan pack.*
        (Buildfile) diabaikan run ini: build = compile + link saja, tanpa
        tarball/deb/checksum. Berguna mengukur biaya compile+link tanpa
        release (design/release.md §--dev). Penerapan & konfliknya dengan

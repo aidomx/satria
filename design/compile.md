@@ -29,7 +29,7 @@ satria src/bootstrap.c -F Buildfile
 ```
 
 ### C. Mode Override Konfigurasi Build (`-f`)
-Memberitahu Satria untuk **mengabaikan** file default (`Buildfile` / `Buildfile.ws`) dan menggunakan file konfigurasi yang ditentukan. Menjalankan **seluruh fase build** sesuai isi file.
+Memberitahu Satria untuk **mengabaikan** file default (`Buildfile` / `WsBuildfile`) dan menggunakan file konfigurasi yang ditentukan. Menjalankan **seluruh fase build** sesuai isi file.
 ```bash
 # Menggunakan file konfigurasi alternatif (isi file yang menentukan workspace/single project)
 satria -f Other-Buildfile
@@ -45,7 +45,7 @@ satria -f Buildfile.dev
 | `satria src/main.c` | ❌ **ERROR** | Niat tidak eksplisit. Meminta `-o`/`-b` atau `-F`. |
 | `satria src/main.c -o a.o -b bin/a` | ✅ **SUCCESS** | Ad-hoc murni. Mengabaikan semua file config. |
 | `satria src/main.c -F Buildfile` | ✅ **SUCCESS** | Ad-hoc config. Baca `Buildfile`, ambil `o.*` & `flags`, skip `release`. |
-| `satria -f Buildfile.ws` | ✅ **SUCCESS** | Full build. Baca `Buildfile.ws`, jalankan fase sesuai isi file. |
+| `satria -f WsBuildfile` | ✅ **SUCCESS** | Full build. Baca `WsBuildfile`, jalankan fase sesuai isi file. |
 | `satria` | ✅ **SUCCESS** | Default behavior. Mencari `Buildfile` default di root. |
 
 ### 3.1 Keputusan implementasi (klarifikasi 15/11/2026, sematan §2)

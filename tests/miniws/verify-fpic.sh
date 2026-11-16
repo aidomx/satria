@@ -32,7 +32,7 @@ fail=0
 # ---------- Uji 1: sintesis workspace tanpa dependensi melingkar ----------
 echo "== Uji 1: sintesis workspace =="
 mkdir -p "$TMP/ws/core/src" "$TMP/ws/bade/src" "$TMP/ws/rupamod/stdlib"
-cat > "$TMP/ws/Buildfile.ws" << 'EOF'
+cat > "$TMP/ws/WsBuildfile" << 'EOF'
 use workspace
 projects.rupamod as mod
 projects = rupamod, core, bade

@@ -6,7 +6,7 @@
 
 static void wsStartupPrepare(const char *wsDir);
 
-/* Pratinjau `background = true` di Buildfile.ws — dipanggil SEBELUM
+/* Pratinjau `background = true` di WsBuildfile — dipanggil SEBELUM
  * wsModelLoad. Fase startup dicetak SAAT model dimuat, sedangkan keputusan
  * spawn baru diketahui belakangan (setelah gerbang no-op); tanpa pratinjau
  * ini run background masih akan mencetak startup ke terminal. Semantik
@@ -50,7 +50,7 @@ static void wsStartupPrepare(const char *wsDir) {
 }
 /* Muat model workspace + validasi dasar yang sama untuk semua mode (build,
    release, profile workspace=): state startup bila valid, kalau tidak parse
-   Buildfile.ws — lalu minimal satu proyek dan validasi pack merge.
+   WsBuildfile — lalu minimal satu proyek dan validasi pack merge.
    cacheWrite=false (jalur baca-saja: profile/enumerasi) membaca cache yang
    valid tapi TIDAK menulisnya dan tidak mencetak fase startup.
    false = pesan error sudah dicetak dan model sudah dibebaskan; pemanggil

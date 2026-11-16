@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ============================================================================
-# workspace.sh — benchmark mode workspace satria (Buildfile.ws)
+# workspace.sh — benchmark mode workspace satria (WsBuildfile)
 #
 # Meniru tests/wstest: 3 proyek dalam satu workspace
 #   rupamod : proyek kemasan (archive .rp -> modules/rupa_modules.tar)
@@ -62,7 +62,7 @@ SATRIA_ARGS=""                # -a : argumen tambahan untuk satria
 # paralel hanya aktif di child background). Set SATRIA_WS_PAR=0 di env bila
 # ingin mengukur jalur serial.
 export SATRIA_WS_PAR="${SATRIA_WS_PAR:-1}"
-COMPILERS="gcc"               # -c : nilai 'compiler =' di Buildfile.ws
+COMPILERS="gcc"               # -c : nilai 'compiler =' di WsBuildfile
 KEEP=0                        # -k : jangan hapus workspace di akhir
 ONLY=""                       # -s : subset skenario
 TOOLS_OPT="satria,cmake" # -t : subset tool pembanding

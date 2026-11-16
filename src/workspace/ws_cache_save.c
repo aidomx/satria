@@ -680,7 +680,7 @@ static void wsCacheSaveBody(const WsModel *m, const char *wsName) {
      port (design O7). Isinya tidak dipakai — hanya keberadaan entri. */
   CsEntry wsEnt;
   if (sel && csGet(st, wsProj, wKey, &wsEnt)) {
-    /* Buildfile.ws TIDAK disentuh build selektif: stempel lama dipertahankan —
+    /* WsBuildfile TIDAK disentuh build selektif: stempel lama dipertahankan —
        konfigurasi bisa berubah bagi proyek di luar closure, jangan mengklaim
        valid. Baris P lamanya ikut bertahan lewat aturan merge di bawah. */
   } else {
@@ -804,7 +804,7 @@ static void wsCacheSaveBody(const WsModel *m, const char *wsName) {
             g_aD, g_aDRead, g_aDSkip, g_aH, g_aHStat, g_aHHashed, g_aHHash, g_aIn,
             g_aInMs, g_aDSCheck, g_aDSCheckMs, g_aOut, g_aOutMs, g_aDSMemo, g_aOMemo);
   /* Metadata grup P (§4): stamp per proyek + grup workspace (content = hash
-     Buildfile.ws dari entri W). Disimpan SEBELUM commit agar baris P di
+     WsBuildfile dari entri W). Disimpan SEBELUM commit agar baris P di
      fingerprint.cache memuat <content> <time> <size>. */
   WsProjStamp stamps[WS_MAX_PROJECTS + 1];
   int sn = 0;

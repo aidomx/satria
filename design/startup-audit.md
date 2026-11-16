@@ -85,7 +85,7 @@ artefak `.deb` diubah → no-op batal dan fase release berjalan lagi; file input
   dokumen; tentukan satu sumber.
 - File `*.orig` tertinggal di `src/` (contoh `src/cmds/cmds_wsstate.c.orig`).
 - `tests/unit/common/build_log.sh` dahulu gagal (rc=1, tanpa pesan karena `set -eu`) karena menulis
-  `#warning` ke `a/src/main.c`, padahal `a` tidak ada di `projects` `Buildfile.ws` fixture,
+  `#warning` ke `a/src/main.c`, padahal `a` tidak ada di `projects` `WsBuildfile` fixture,
   sehingga warning tidak pernah dikompilasi. **Sudah diperbaiki** (target `core/src/core.c`);
   skrip lulus penuh.
 - `tests/unit/test_state_blob.c` tidak bisa dikompilasi dengan perintah standalone karena

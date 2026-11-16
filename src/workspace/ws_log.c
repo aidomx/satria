@@ -15,7 +15,7 @@ static uint64_t wsFnv1aStr(uint64_t h, const char *s);
 bool wsLogFastOk[WS_MAX_PROJECTS];
 /* ==================== workspace_log + CompDB merged ==================== */
 /* Indeks no-op & CompDB (design/workspace_v1.md §No-op dan CompDB): satu
-   blok per proyek — (2) hash konfigurasi Buildfile.ws, (3) fingerprint
+   blok per proyek — (2) hash konfigurasi WsBuildfile, (3) fingerprint
    daftar source dari snapshot <n>.src, (4) hash isi compile_commands.json
    terakhir (sama untuk seluruh workspace). Hanya dua keputusan: (a) proyek
    fast-hit + (2)+(3) identik -> daftar source dimuat dari snapshot tanpa
@@ -34,7 +34,7 @@ static uint64_t wsFnv1aStr(uint64_t h, const char *s) {
   return wsFnv1a(h, &sep, 1);
 }
 /* Hash konfigurasi proyek (field 2): baris bersama + root override + baris
-   proyek — semua baris Buildfile.ws yang memengaruhinya. */
+   proyek — semua baris WsBuildfile yang memengaruhinya. */
 uint64_t wsLogCfgHash(const WsModel *m, int idx) {
   uint64_t h = 1469598103934665603ULL;
   for (int i = 0; i < m->commonLines.count; i++)

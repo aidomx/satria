@@ -11,7 +11,7 @@ Menggabungkan **mtime**, **content hash**, dan **fingerprint** memberi tingkat a
 
 ### Solusi: Persistent Startup
 
-Seperti CMake yang menghasilkan konfigurasi siap pakai, Satria menerjemahkan `Buildfile` atau `Buildfile.ws` menjadi konfigurasi persisten di `.satria` tanpa membutuhkan perintah konfigurasi terpisah.
+Seperti CMake yang menghasilkan konfigurasi siap pakai, Satria menerjemahkan `Buildfile` atau `WsBuildfile` menjadi konfigurasi persisten di `.satria` tanpa membutuhkan perintah konfigurasi terpisah.
 
 ```sh
 satria -w
@@ -46,7 +46,7 @@ startUp()              Cek .satria/startup.state
     │
     ├── Ada & cocok ───────► Pulihkan model workspace dari startup.state (diam)
     │
-    ├── Ada, Buildfile ────► Parse Buildfile.ws, perbarui startup.state (diam)
+    ├── Ada, Buildfile ────► Parse WsBuildfile, perbarui startup.state (diam)
     │   berubah
     │
     └── Tidak ada ─────────► Startup penuh (clean cold):
@@ -62,10 +62,10 @@ workspaceRun()         Validate build state & execute
 
 - Startup penuh hanya terjadi saat `startup.state` belum ada: clean pertama, atau `rm -rf .satria`.
 - Run no-op tidak mencetak output startup dan tidak membuat direktori.
-- Buildfile.ws yang berubah cukup memperbarui `startup.state`; startup penuh tidak dijalankan ulang.
+- WsBuildfile yang berubah cukup memperbarui `startup.state`; startup penuh tidak dijalankan ulang.
 - `satria -w clean` mendahulukan pengecekan `.satria` sebelum startup apa pun (lihat §6). Tanpa `.satria`, startup tidak dijalankan sama sekali. Dengan `.satria`, `startup.state` disinkronkan lalu clean berjalan.
 
-> **Status (diverifikasi 2026-10-20):** alur di atas berjalan untuk cold, no-op, perubahan Buildfile.ws, dan clean, pada mode workspace dan single-project (cold dan no-op single terverifikasi di TTY). CRUD per-source dan flag `log` single-project kini selesai (lihat *Daftar Implementasi*). Yang **belum** selesai: penulisan atomik untuk Windows (lihat *Daftar Implementasi*).
+> **Status (diverifikasi 2026-10-20):** alur di atas berjalan untuk cold, no-op, perubahan WsBuildfile, dan clean, pada mode workspace dan single-project (cold dan no-op single terverifikasi di TTY). CRUD per-source dan flag `log` single-project kini selesai (lihat *Daftar Implementasi*). Yang **belum** selesai: penulisan atomik untuk Windows (lihat *Daftar Implementasi*).
 
 ## 3. Struktur `.satria`
 
@@ -90,7 +90,7 @@ workspaceRun()         Validate build state & execute
 | File | Fungsi |
 |---|---|
 | `artifact.cache` | Cache release. |
-| `startup.state` | Konfigurasi lengkap hasil penerjemahan Buildfile / Buildfile.ws, termasuk alamat sumber terkait. |
+| `startup.state` | Konfigurasi lengkap hasil penerjemahan Buildfile / WsBuildfile, termasuk alamat sumber terkait. |
 | `sources.cache` | Daftar seluruh sumber terkait workspace, menggantikan `ws.src`. |
 | `opts.cache` | Router cache: indeks semua entri (alamat utama, file cache, proyek, content, time, size). No-op membaca ini lebih dulu. |
 | `caches/deps.cache` | Cache dependency. |
@@ -134,7 +134,7 @@ satria --log
 ```text
 Magic          : SATRIA-STARTUP-1
 Buildfile Hash : 64-bit FNV-1a
-Buildfile Path : Buildfile.ws
+Buildfile Path : WsBuildfile
 Timestamp      : ...
 ```
 
@@ -194,7 +194,7 @@ PATCH 12345 678910 91b151cd599dd53a 1792314999290000000 1034
 ```
 
 - `<alamat_proyek>` dan `<alamat_file>` adalah hash FNV-1a 64 (proyek dan path file). `<alamat_file>` sama dengan alamat di `sources.cache`.
-- **Metadata grup `P <alamat_proyek> <content> <time> <size>`** (diimplementasikan 2026-10-20, `csProjMetaSet`): `content` = stamp proyek (hash konfigurasi Buildfile.ws + daftar sumber kanonik, `wsProjStamp`); `time` = stempel ns save; `size` = jumlah entri grup. Grup workspace (`fingerprint`/`workspace`) memakai hash Buildfile.ws dari entri `W`. Ditulis di `fingerprint.cache` DAN `opts.cache` saat save. Gate no-op jalur penuh membandingkan stamp dengan model pulih: konfigurasi/daftar sumber satu proyek berubah -> miss SEBELUM membuka seluruh entri, jejak (`SATRIA_CACHE_TRACE`) menyebut nama proyeknya. Grup tanpa metadata (cache versi lama) dilewati — kompatibel mundur; simpan berikutnya menulis stamp baru. Terverifikasi: `p_meta_noop.sh` 32/32.
+- **Metadata grup `P <alamat_proyek> <content> <time> <size>`** (diimplementasikan 2026-10-20, `csProjMetaSet`): `content` = stamp proyek (hash konfigurasi WsBuildfile + daftar sumber kanonik, `wsProjStamp`); `time` = stempel ns save; `size` = jumlah entri grup. Grup workspace (`fingerprint`/`workspace`) memakai hash WsBuildfile dari entri `W`. Ditulis di `fingerprint.cache` DAN `opts.cache` saat save. Gate no-op jalur penuh membandingkan stamp dengan model pulih: konfigurasi/daftar sumber satu proyek berubah -> miss SEBELUM membuka seluruh entri, jejak (`SATRIA_CACHE_TRACE`) menyebut nama proyeknya. Grup tanpa metadata (cache versi lama) dilewati — kompatibel mundur; simpan berikutnya menulis stamp baru. Terverifikasi: `p_meta_noop.sh` 32/32.
 - Saat dibaca, setiap entri dimasukkan ke indeks hash di memori dengan kunci `(alamat_proyek, alamat_file)`. Pencarian menjadi lookup langsung, tanpa menelusuri ulang file.
 - Nama file menentukan jenis cache (`deps`, `embed`, `fingerprint`, `lib`).
 - `PATCH` pada file teks berarti menulis ulang file. Perubahan dikumpulkan selama run, lalu setiap file ditulis sekali secara atomik (tmp lalu rename).
@@ -290,7 +290,7 @@ PATCH 0bf2fb911980759e 6fc4d9b9c935cff1 0000000000000000 1792476989969036354 160
 ```text
 Source                    Startup                    Build State                   Output
 ──────────────────────────────────────────────────────────────────────────────────────
-Buildfile.ws      ───►    .satria/            ───►    .satria/caches/      ───►     build/
+WsBuildfile      ───►    .satria/            ───►    .satria/caches/      ───►     build/
 Source files              ├─ startup.state            ├─ deps.cache                 bin/
 Dependencies              ├─ sources.cache            ├─ embed.cache                lib/
                           └─ opts.cache               ├─ fingerprint.cache
@@ -319,7 +319,7 @@ Dependencies              ├─ sources.cache            ├─ embed.cache    
 
 - Clean mengosongkan isi folder output dan isi `caches/*`. File cache tidak dihapus, sehingga jumlah file tetap.
 - `ld.cache` dipertahankan (file dan isinya). Keamanannya: validasi memeriksa path, mtime ns, dan ukuran binary `ld` yang sedang di-resolve. Verdict basi, atau cache dari mesin lain, otomatis tidak cocok dan diprobe ulang sekali, lalu ditulis ulang. Terverifikasi: clean menyisakan file dengan isi identik; build berikutnya tidak menulis ulang cache; `ld` yang berbeda di PATH membuat cache ditulis ulang dengan path baru.
-- Clean tidak menghapus `startup.state` atau `sources.cache`. Sebelum membersihkan, clean menyinkronkan `startup.state` dengan Buildfile.ws: bila Buildfile.ws berubah sejak state ditulis, state diperbarui di tempat; bila tidak, state tidak ditulis ulang.
+- Clean tidak menghapus `startup.state` atau `sources.cache`. Sebelum membersihkan, clean menyinkronkan `startup.state` dengan WsBuildfile: bila WsBuildfile berubah sejak state ditulis, state diperbarui di tempat; bila tidak, state tidak ditulis ulang.
 - Bila `startup.state` belum ada, clean membuatnya lewat startup penuh (cold).
 - Urutan clean mendahului startup: pertama cek `.satria`. Bila `.satria` tidak ada, clean hanya mengosongkan isi `bin/`, `build/`, `lib/`, dan `modules/`; startup tidak dijalankan dan `.satria` tidak dibuat.
 - Pesan `> Nothing to clean` dicetak sekali di akhir, dan hanya bila tidak ada yang terhapus. Tidak dicetak per proyek.
@@ -331,7 +331,7 @@ Dependencies              ├─ sources.cache            ├─ embed.cache    
 | Cold build | Parse + resolve setiap kali | Parse + resolve saat pertama kali | Saat pertama atau konfigurasi berubah |
 | No-op | Cek semua file | Cek dengan cache | Jauh lebih cepat pada workspace besar (target desain) |
 | Incremental | Cek dependency & fingerprint | Cek dengan cache | Lebih sedikit traversal dan I/O (target desain) |
-| Clean | Kosongkan isi folder output; hapus cache hasil build | Sinkronkan `startup.state` dengan Buildfile.ws | Konfigurasi tetap tersedia dan cocok dengan Buildfile.ws |
+| Clean | Kosongkan isi folder output; hapus cache hasil build | Sinkronkan `startup.state` dengan WsBuildfile | Konfigurasi tetap tersedia dan cocok dengan WsBuildfile |
 | Skala besar | Banyak file di `.satria` | Struktur cache lebih terorganisasi | Menghindari bottleneck file system (tujuan desain) |
 
 > Perbaikan performa di atas merupakan **hipotesis/target**, bukan hasil benchmark terverifikasi.
@@ -348,7 +348,7 @@ startup :
 * preparing execution: done
 ```
 
-- Hanya muncul saat cold startup (`startup.state` belum ada). No-op dan perubahan Buildfile.ws tidak mencetak apa pun.
+- Hanya muncul saat cold startup (`startup.state` belum ada). No-op dan perubahan WsBuildfile tidak mencetak apa pun.
 - Fase dicetak saat selesai, bukan saat mulai, supaya pesan dari parser (mis. peringatan Buildfile) tidak menimpa baris progres. Kalau ada pesan parser di tengah, ia muncul di antara baris fase.
 - Kegagalan dicetak sebagai `> <fase>: failed`.
 - Hanya ke terminal interaktif. Output yang di-capture (CI, pipe) tetap bersih.
@@ -393,7 +393,7 @@ Format yang tampil: blok `STATUS` (pesan no-op), satu baris kosong, lalu blok `L
 - Struktur cache lebih terorganisasi.
 - Mendukung workspace skala besar.
 - Menyediakan dasar untuk pengembangan lanjutan, misalnya remote cache dan distributed build.
-- Startup penuh hanya pada cold; perubahan Buildfile.ws dan clean menyinkronkan `startup.state`, tidak menghapusnya.
+- Startup penuh hanya pada cold; perubahan WsBuildfile dan clean menyinkronkan `startup.state`, tidak menghapusnya.
 
 ## Daftar Implementasi
 

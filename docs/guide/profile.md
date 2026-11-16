@@ -118,7 +118,7 @@ project's real `.satria/` is untouched.
 satria profile workspace=.
 ```
 
-Measures the workspace *model* cost — parsing `Buildfile.ws`, dependency
+Measures the workspace *model* cost — parsing `WsBuildfile`, dependency
 ordering (topological sort of `depends_on`), and validation of every
 member (each `<name>/` project directory exists). Projects are enumerated
 and validated but **not built**: building member projects writes state at

@@ -15,18 +15,18 @@ Satria - A simple builder for you
 -j[N]                  Parallel build with N jobs (default: SATRIA_JOBS env,
                        else CPU core count; -j1 forces serial)
 -g compdb              Generate compile_commands.json without building
---dev                  Dev build: abaikan release.* (Buildfile.ws) dan pack.*
+--dev                  Dev build: abaikan release.* (WsBuildfile) dan pack.*
                        (Buildfile) untuk run ini — compile + link saja,
                        tanpa tarball/deb/checksum
 
 satria init              Create a minimal Buildfile (use project)
 satria init -p           Interactive scaffold (name, language, workspace)
-satria init -w           Create Buildfile.ws (workspace template)
+satria init -w           Create WsBuildfile (workspace template)
 satria clean             Remove build artifacts
 satria profile <ctx>     Measure operation costs (see: help profile)
 satria trace [opts] -- <args>  Trace file access via LD_PRELOAD (see: help trace)
 satria test <args>          Run unit tests via scripts/unit.sh (see: help test)
-satria -w                Build all projects in workspace (Buildfile.ws)
+satria -w                Build all projects in workspace (WsBuildfile)
 satria -w <name>         Build <name> and its dependencies
 satria -w <name> --with-cdeps  ...plus its cdeps providers (see: help workspace)
 satria -w release [-- key=value]  Build + package the workspace release
@@ -77,7 +77,7 @@ and monitor it with `satria watch` — see: help watch
 Background build & watch (design/background.md)
 
 Set `background = true` in Buildfile (or as a global line in
-Buildfile.ws):
+WsBuildfile):
 
   use workspace
   background = true
@@ -170,7 +170,10 @@ Examples:
 ---endprofile
 
 ---workspace
-Workspace commands (Buildfile.ws)
+Workspace commands (WsBuildfile)
+
+Legacy names `Buildfile.ws` (used before v0.6.0) and `Buildfile.workspace`
+are still read with a one-time deprecation warning; rename to WsBuildfile.
 
 satria -w                Build (and release) every declared project
 satria -w <name>         Build <name> and its dependency closure
@@ -187,9 +190,9 @@ satria -w release -- key=value[,key=value]
                        format/target, or any pack.* key)
 satria -w watch [--full] Monitor a background build (requires
                        `background = true`; see: help watch)
-satria init -w           Create a workspace Buildfile (Buildfile.ws)
+satria init -w           Create a workspace Buildfile (WsBuildfile)
 
-A minimal workspace Buildfile.ws:
+A minimal workspace WsBuildfile:
   use workspace
   projects = app, tool
 
@@ -215,7 +218,7 @@ satria init -p           Interactive scaffold: project name, language
                        (c/cpp), std, compiler, flags, include/,
                        workspace membership, depends_on. Enter accepts
                        the default; the scaffold builds out of the box.
-satria init -w           Write a workspace template (Buildfile.ws)
+satria init -w           Write a workspace template (WsBuildfile)
 
 init never overwrites existing files: any existing target aborts
 before writing. Ctrl+C or EOF cancels.
@@ -253,13 +256,13 @@ satria -w release -- version=0.2.3
                        format, plus any pack.* key).
 
 satria --dev           Build development: skip the release pass
-                       entirely (release.* in Buildfile.ws, pack.*
+                       entirely (release.* in WsBuildfile, pack.*
                        in Buildfile are ignored for this run) —
                        compile + link only, no tarball/deb/checksum.
                        Useful to measure build cost while iterating.
 
 Releases are declared in one `release.*` section of
-Buildfile.ws (same keys as pack.*):
+WsBuildfile (same keys as pack.*):
   release.name = rupa
   release.version = 0.2.2
   release.files = bin/rupa, ../bade/bin/bade

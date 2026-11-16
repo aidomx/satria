@@ -101,7 +101,7 @@ Hasil discovery untuk setiap target:
 
 - nama target (miniws, rupaws, dst.)
 - identitas target: hash isi, tanpa artefak
-- daftar project dari Buildfile.ws
+- daftar project dari WsBuildfile
 - keberadaan prasyarat umum (mis. bade/src, core/src)
 
 Discovery hanya menghasilkan informasi untuk runner. Tes tetap membaca konfigurasi sendiri di work/ bila membutuhkannya (6.4).
@@ -332,7 +332,7 @@ Runner harus memahami konfigurasi workspace sebelum menjalankan test.
 
 Sumber kebenaran adalah mekanisme parser atau introspeksi konfigurasi milik Satria.
 
-Runner tidak boleh membuat parser Buildfile.ws kedua yang memiliki interpretasi berbeda.
+Runner tidak boleh membuat parser WsBuildfile kedua yang memiliki interpretasi berbeda.
 
 ## 6.1 Configuration Discovery
 
@@ -345,7 +345,7 @@ Sebelum test dimulai, runner harus memperoleh:
 - Dependency antarp-project.
 - Header search locations.
 
-Untuk workspace, informasi berasal dari konfigurasi "Buildfile.ws" melalui mekanisme Satria.
+Untuk workspace, informasi berasal dari konfigurasi "WsBuildfile" melalui mekanisme Satria.
 
 Project tidak boleh ditentukan hanya berdasarkan direktori yang ditemukan.
 
@@ -375,7 +375,7 @@ Validasi:
 - Project tidak dikenal harus ditolak.
 - Dependency tetap mengikuti konfigurasi Satria.
 
-Pemilihan project hanya mengatur cakupan unit test, bukan mengubah Buildfile.ws.
+Pemilihan project hanya mengatur cakupan unit test, bukan mengubah WsBuildfile.
 
 ## 6.3 Header Location
 
@@ -424,7 +424,7 @@ Informasi minimal:
 
 Format interface dapat berupa environment file atau format lain yang sesuai dengan implementasi Satria.
 
-`"common/*.sh"` tidak perlu membaca ulang Buildfile.ws atau melakukan discovery konfigurasi secara independen.
+`"common/*.sh"` tidak perlu membaca ulang WsBuildfile atau melakukan discovery konfigurasi secara independen.
 
 # 7. Non-interactive Configuration
 
@@ -643,7 +643,7 @@ Implementasi mengikuti nomor bagian di atas. Runner: `scripts/unit_dev.sh` (dev,
 - [x] Test isolation: folder work per tes + `UNIT_TMP` (§4)
 - [x] Fixture-aware helpers tanpa asumsi nama file (§5.1–5.2, §5.4): `unit_project_source`, `unit_project_binary` dll. di `lib/layout.sh`
 - [x] PRECONDITION kategori sendiri (§5.3): `unit_precondition()` verdict + talli `PRE` (bukan FAIL)
-- [x] Workspace-aware configuration (§6): discovery runner = `-w -g compdb` (query-only) pada salinan throwaway fixture → `discovery/sources.tsv`; `lib/layout.sh` makan TSV; tanpa runner → PRECONDITION; `unit_project_binary`/`unit_archive_project` masih micro-read Buildfile.ws (interim, tunggu query targets native)
+- [x] Workspace-aware configuration (§6): discovery runner = `-w -g compdb` (query-only) pada salinan throwaway fixture → `discovery/sources.tsv`; `lib/layout.sh` makan TSV; tanpa runner → PRECONDITION; `unit_project_binary`/`unit_archive_project` masih micro-read WsBuildfile (interim, tunggu query targets native)
 - [x] Non-interactive (§7): `-b`, `-j`, `-o`, `-t`, `-w`, `--clean` — tanpa prompt (interactive configuration dihapus dari design)
 - [x] Klasifikasi kegagalan 3 kategori (§8): FAIL / PRE / infra (exit 2)
 - [x] Watcher `-w` (§9): read-only atas `log/` (`run.pid`, `run.env`, `bg.pid`, `plan.tsv`, `timing.tsv`, log run); registri multiwatch `watch/<pid>` (tanpa lock); fase `# Prepare` + `* build:` → `√ <HH:MM:SS> <ukuran>` (registri `snap/<pid>.pid`); `# Execution test`; per tes `[i/N]` + `* PASS/FAIL/PRE TIME` atau `* process` ms+persen+ukuran; `# Summary` + exit 0; `# Paused`

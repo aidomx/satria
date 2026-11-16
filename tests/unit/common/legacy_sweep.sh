@@ -50,7 +50,7 @@ legacy_left() { # $1 = folder .satria; echo jumlah sisa legacy
 : "${UNIT_TMP:=${UNIT_BASE:-/tmp/miniws}/t}"
 W="$UNIT_TMP/legacy_sweep"; rm -rf "${W}"; mkdir -p "${W}" || exit 1
 cp -r "$SRC/." "$W/" || exit 2
-printf "flags = MMD, MP\n" >> "$W/Buildfile.ws"
+printf "flags = MMD, MP\n" >> "$W/WsBuildfile"
 cd "$W" || exit 2
 "$SAT" -j${UNIT_JOBS:-2} -w > c1 2>&1; check "ws: cold build" $?
 

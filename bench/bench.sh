@@ -44,7 +44,7 @@ ROOT="$(cd "$HERE/.." && pwd)"
 # Registri: nama | skrip | deskripsi | tool wajib (dipisah spasi)
 BENCHES=(
   "compare|compare.sh|Perbandingan build tool: satria vs ninja, make, cmake-ninja (project sintetis)|ninja make gcc"
-  "ws|ws.sh|Mode workspace satria (Buildfile.ws) vs CMake+Ninja, dengan audit pekerjaan|cmake ninja gcc"
+  "ws|ws.sh|Mode workspace satria (WsBuildfile) vs CMake+Ninja, dengan audit pekerjaan|cmake ninja gcc"
   "scale|scale.sh|Skala no-op: waktu parsing graph dan invalidasi untuk banyak node/edge|gcc"
   "scale-build|scale-build.sh|Skala full build untuk banyak node/edge|gcc"
   "scale-graph|scale-graph.sh|Skala graph/invalidasi tanpa recompile|gcc"

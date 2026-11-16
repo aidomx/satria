@@ -2,6 +2,25 @@
 
 Dokumen ini mencatat aturan, desain, dan target implementasi workspace `satria` v0.2.4+. Workspace adalah jalur build tersendiri; perubahan di sini tidak mengubah perilaku maupun performa single-project.
 
+## Nama file workspace
+
+Nama resmi file workspace adalah **`WsBuildfile`** — tanpa ekstensi, karena
+akhiran `.ws` bertabrakan dengan Witcher Script (editor/alat lain mengenali
+file itu sebagai script, bukan buildfile).
+
+Urutan deteksi (`workspaceFileName`):
+
+1. `WsBuildfile` — nama resmi, ditulis oleh `satria init -w`.
+2. `Buildfile.ws` — nama utama sampai v0.6.0, masih dibaca selama masa
+transisi dan memicu peringatan deprecasi sekali per proses.
+3. `Buildfile.workspace` — nama sebelum 3 Okt 2026, diperlakukan sama seperti
+   `Buildfile.ws`.
+
+Bila beberapa file ada di direktori yang sama, yang paling awal menang. Build
+log dan cache startup mencatat nama file yang terdeteksi, jadi rename otomatis
+membatalkan cache lama sekali. Kedua nama lama akan dihapus setelah masa
+transisi berakhir.
+
 ---
 
 ## Filosofi
@@ -9,7 +28,7 @@ Dokumen ini mencatat aturan, desain, dan target implementasi workspace `satria` 
 Workspace di `satria` dirancang dengan prinsip:
 - **Convention over Configuration** — proyek anggota tidak butuh `Buildfile` lokal kecuali memang ingin berdiri sendiri.
 - **Root-Centric Output** — semua artefak build (biner, objek, library, arsip, state, CompDB) dipusatkan di root workspace. Direktori anggota hanya berisi sumber.
-- **Single Source of Truth** — `Buildfile.ws` di root adalah satu-satunya konfigurasi untuk seluruh workspace.
+- **Single Source of Truth** — `WsBuildfile` di root adalah satu-satunya konfigurasi untuk seluruh workspace.
 - **Two-Phase Build** — library pass dulu (tanpa link binary), baru binary pass. Ini memungkinkan dependensi siklik (`core ↔ bade`) diselesaikan secara native.
 
 ---
@@ -22,8 +41,8 @@ Workspace di `satria` dirancang dengan prinsip:
    - **`satria -w <project> --with-cdeps`** (opt-in): closure ikut menarik provider cdeps secara transitif (fixpoint, aman untuk cdeps siklik seperti `bade ↔ core`). Flag hanya berlaku dengan `-w`; tanpa selektor (build penuh) sifatnya no-op karena seluruh proyek memang sudah masuk. Default tidak berubah — tanpa flag, perilaku identik dengan sebelumnya.
 3. **Editor sebaiknya membuka root workspace** agar source seluruh proyek dan satu `compile_commands.json` dapat diakses bersama.
 4. **Direktori anggota adalah penyedia source/config**, bukan tempat output build.
-5. **Deteksi anggota workspace** harus memvalidasi keanggotaan pada `Buildfile.ws` induk; keberadaan file workspace pada parent saja tidak cukup. Jalur single-project di luar workspace tidak berubah.
-6. **Proyek anggota tidak perlu `Buildfile` lokal.** Seluruh konfigurasi didefinisikan di `Buildfile.ws`. Pengecualian: proyek yang ingin bisa di-build secara standalone boleh punya `Buildfile` sendiri, dan diintegrasikan ke workspace via **symlink**.
+5. **Deteksi anggota workspace** harus memvalidasi keanggotaan pada `WsBuildfile` induk; keberadaan file workspace pada parent saja tidak cukup. Jalur single-project di luar workspace tidak berubah.
+6. **Proyek anggota tidak perlu `Buildfile` lokal.** Seluruh konfigurasi didefinisikan di `WsBuildfile`. Pengecualian: proyek yang ingin bisa di-build secara standalone boleh punya `Buildfile` sendiri, dan diintegrasikan ke workspace via **symlink**.
 
 ---
 
@@ -31,12 +50,12 @@ Workspace di `satria` dirancang dengan prinsip:
 
 ```text
 workspace/
- ├── Buildfile.ws                 # Satu-satunya file konfigurasi
+ ├── WsBuildfile                 # Satu-satunya file konfigurasi
  ├── compile_commands.json        # CompDB global (seluruh workspace)
  ├── library/                     # Shared headers (nama bebas, tidak harus 'include')
  │   └── ext.h
  ├── .satria/                       # State & cache terpusat
- │   ├── startup.state             # Config cache (parse Buildfile.ws)
+ │   ├── startup.state             # Config cache (parse WsBuildfile)
  │   ├── sources.cache             # Peta path -> hash isi + stamp (fast path no-op)
  │   ├── opts.cache                # Route/opsi + stamp grup per proyek
  │   ├── artifact.cache            # Validasi artefak release/embed
@@ -74,7 +93,7 @@ workspace/
 
 ---
 
-## Konfigurasi Buildfile.ws
+## Konfigurasi WsBuildfile
 
 ### Sintaks Dasar
 
@@ -249,7 +268,7 @@ satria -w release -- name=rupamod target=deb
 ### Pemisahan Jalur Build
 
 - `cmdBuildEx()` hanya menjadi referensi alur untuk implementasi workspace, **bukan dipanggil** dari build workspace.
-- Implementasi workspace berada di `src/workspace/` dengan `wsCmdBuild()` dan `WsConfig` sendiri. `WsConfig` adalah model workspace (parse `Buildfile.ws`, resolusi path per-kunci, closure) yang dimiliki penuh oleh modul workspace — tanpa sintesis sebagai konfigurasi yang bisa di-edit user, tanpa `loadConfig()` sebagai *jalur utama*, dan tanpa pemanggilan `cmdBuildEx()`. Mesin mekanis yang sudah matang (decide mtime + deps `.d`, parallel jobs, link, kemasan library, fingerprint, fast-state) dipakai ulang dengan `Config` per proyek yang **disusun/di-rebase di memori** sebagai pembungkus path hasil resolusi `WsConfig` — chdir tidak pernah terjadi, dan state/CompDB/output tetap mengikuti aturan root-centric di atas. (Amendasi hybrid: ketergantungan yang dilarang adalah *alur* Config+loadConfig+chdir, bukan pemakaian tipe `Config` sebagai wadah path.)
+- Implementasi workspace berada di `src/workspace/` dengan `wsCmdBuild()` dan `WsConfig` sendiri. `WsConfig` adalah model workspace (parse `WsBuildfile`, resolusi path per-kunci, closure) yang dimiliki penuh oleh modul workspace — tanpa sintesis sebagai konfigurasi yang bisa di-edit user, tanpa `loadConfig()` sebagai *jalur utama*, dan tanpa pemanggilan `cmdBuildEx()`. Mesin mekanis yang sudah matang (decide mtime + deps `.d`, parallel jobs, link, kemasan library, fingerprint, fast-state) dipakai ulang dengan `Config` per proyek yang **disusun/di-rebase di memori** sebagai pembungkus path hasil resolusi `WsConfig` — chdir tidak pernah terjadi, dan state/CompDB/output tetap mengikuti aturan root-centric di atas. (Amendasi hybrid: ketergantungan yang dilarang adalah *alur* Config+loadConfig+chdir, bukan pemakaian tipe `Config` sebagai wadah path.)
 - Jalur workspace **tidak mengubah CWD** ke direktori proyek (`fsSetCwd()` per-proyek dilarang).
 - Komponen bersama yang independen dari `Config` (filesystem, process runner) boleh dipakai tanpa mengubah perilakunya. Jangan menambah overhead workspace ke jalur single-project.
 - Setelah `wsCmdBuild()` lengkap dan lolos regresi, bersihkan cabang workspace yang sudah tidak diperlukan di `cmdBuildEx()`.
@@ -260,14 +279,14 @@ satria -w release -- name=rupamod target=deb
 
 - **Indeks no-op & CompDB** kini berupa entri per proyek di `caches/state.cache` (leaf `compdb-index-v1`; berkas `workspace_log` lama hanya objek sweep). Isi per proyek:
   1. nama proyek,
-  2. hash konfigurasinya dari `Buildfile.ws` (baris yang memengaruhinya),
+  2. hash konfigurasinya dari `WsBuildfile` (baris yang memengaruhinya),
   3. fingerprint daftar source terakhir (dari snapshot `src`),
   4. hash isi `compile_commands.json` terakhir.
 
   Indeks ini hanya dipakai untuk dua keputusan: **(a) no-op cepat** — proyek dengan (2)+(3) identik dilewati tanpa re-scan source-nya; **(b) skip-write CompDB** — `compile_commands.json` hanya ditulis ulang bila hash-nya berbeda dari (4). Indeks **tidak** menyimpan mtime/size/artefak — domain itu milik `caches/fingerprint.cache` (fingerprint + fast state) dan `artifact.cache`; jangan menduplikasinya.
 - `compile_commands.json` **hanya ada di root workspace** dan selalu merepresentasikan seluruh workspace, sekalipun build terakhir selektif.
 - `satria -g compdb` dari root workspace bersifat **query-only**: tidak menjalankan build atau mengubah build state.
-- Jangan tulis ulang CompDB yang identik. Perubahan daftar source atau command harus terdeteksi meski `Buildfile.ws` tidak berubah.
+- Jangan tulis ulang CompDB yang identik. Perubahan daftar source atau command harus terdeteksi meski `WsBuildfile` tidak berubah.
 - No-op tidak boleh memicu kompilasi, link, archive, atau penulisan artefak yang tidak diperlukan.
 
 ---
@@ -278,7 +297,7 @@ satria -w release -- name=rupamod target=deb
 
 Untuk mempercepat cold build, `satria` dapat menerapkan **Source Flattening & Batch Compilation**:
 
-1. **Fase 0 (Flatten):** `satria` membaca `Buildfile.ws` sekali, meratakan semua daftar source dari semua proyek menjadi satu daftar raksasa di memori.
+1. **Fase 0 (Flatten):** `satria` membaca `WsBuildfile` sekali, meratakan semua daftar source dari semua proyek menjadi satu daftar raksasa di memori.
 2. **Fase 1 (Batch Compile):** Antrian raksasa dilempar ke compiler pool secara bersamaan. Tidak ada sekat antar proyek. Kecepatan setara Ninja.
 3. **Fase 2 (Reverse Map):** Setelah `.o` terbentuk, `satria` melakukan pencocokan path (`src_a/a.c` → `build/a.o`) untuk mengembalikan object files ke proyek masing-masing.
 4. **Fase 3 (Library & Binary Pass):** Berjalan seperti biasa menggunakan object files yang sudah siap.
@@ -298,7 +317,7 @@ Untuk mempercepat cold build, `satria` dapat menerapkan **Source Flattening & Ba
 - [ ] Dependensi siklik (`core ↔ bade`) diselesaikan dengan Two-Phase Build tanpa error `dependency cycle`.
 - [ ] Shared headers di root (nama bebas) dikenali dan ditambahkan ke `-I` secara otomatis.
 - [ ] Platform-specific flags (`flags.linux`, `defines.windows`, dll.) di-resolve dan di-append dengan benar.
-- [ ] Fixture workspace (`Buildfile.ws` (workspace besar lokal)) dan generator bench dimigrasi ke path root-centric; seluruh regresi lulus (self-host, 12 skenario `bench/ws.sh`, workspace besar lokal).
+- [ ] Fixture workspace (`WsBuildfile` (workspace besar lokal)) dan generator bench dimigrasi ke path root-centric; seluruh regresi lulus (self-host, 12 skenario `bench/ws.sh`, workspace besar lokal).
 - [ ] `pack.*` per proyek diabaikan dengan peringatan di mode workspace (di luar scope v1, tidak menggagalkan build).
 
 ---

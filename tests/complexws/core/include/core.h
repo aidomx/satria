@@ -4,7 +4,7 @@
 
 /* Nilai tetap proyek core. bade_value() sengaja tidak dipanggil dari sini:
    simbol lintas shared library belum terselesaikan saat link di Windows.
-   Relasi cdeps dua arah tetap dideklarasikan di Buildfile.ws. */
+   Relasi cdeps dua arah tetap dideklarasikan di WsBuildfile. */
 int core_value(void);
 void thisCore(void);
 

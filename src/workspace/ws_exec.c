@@ -85,7 +85,7 @@ int wsRunProject(const WsModel *m, const char *name, const char *cmd, int jobs,
   WsLang langEff = wsProjectLang(m, idx);
   const char *langTag = langEff == WS_LANG_C ? "c" : langEff == WS_LANG_CPP ? "cpp" : "hybrid";
   char bfLabel[WS_NAME_LEN + 48];
-  snprintf(bfLabel, sizeof(bfLabel), "Buildfile.ws:%s:%s", name, langTag);
+  snprintf(bfLabel, sizeof(bfLabel), "%s:%s:%s", WORKSPACE_FILENAME, name, langTag);
   if (wsFastStateValid(bfLabel, libOnly)) {
     wsLogFastOk[idx] = true;
     /* Artefak cached proyek fast-hit: catat ke # Execution summary (design §2)

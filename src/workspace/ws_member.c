@@ -13,7 +13,7 @@ bool wsMemberCwdDetect(char *wsRootOut, size_t wsRootN, char *memberOut, size_t 
 bool wsGuardQuiet = false;
 /* ==================== guard direktori anggota ======================== */
 
-/* Batas naik ke parent saat mencari Buildfile.ws induk — jauh melebihi
+/* Batas naik ke parent saat mencari WsBuildfile induk — jauh melebihi
    kedalaman workspace wajar, tetapi tetap terbatas supaya tidak pernah
    menembus ke root filesystem. */
 /* Normalisasi path ("<ws>/a/../b/./c" -> "<ws>/b/c") secara leksikal atas
@@ -62,8 +62,8 @@ static void wsPathCanon(char *s) {
 }
 /*
  * wsMemberCwdDetect — true bila cwd berada DI DALAM direktori proyek anggota
- * sebuah workspace INDUK (Buildfile.ws di salah satu parent). Keanggotaan
- * divalidasi lewat model Buildfile.ws induk (parse daftar projects + root) —
+ * sebuah workspace INDUK (WsBuildfile di salah satu parent). Keanggotaan
+ * divalidasi lewat model WsBuildfile induk (parse daftar projects + root) —
  * keberadaan file workspace di parent saja TIDAK cukup (design/
  * workspace_v1.md aturan 1 & 5); proyek standalone di luar workspace tidak
  * terpengaruh (jalur single-project tidak berubah).
@@ -86,15 +86,16 @@ bool wsMemberCwdDetect(char *wsRootOut, size_t wsRootN, char *memberOut, size_t 
     *slash = '\0';
     if (!probe[0]) break;
 
-    /* Kandidat induk: Buildfile.ws (atau nama lama) di parent. */
+    /* Kandidat induk: WsBuildfile, lalu nama lama Buildfile.ws /
+       Buildfile.workspace (urutan sama dengan workspaceFileName; jalur ini
+       tidak memperingatkan karena hanya memeriksa keanggotaan). */
     char wsf[WS_PATH_LEN + 40];
     const char *wsName = NULL;
-    snprintf(wsf, sizeof(wsf), "%s/%s", probe, WORKSPACE_FILENAME);
-    if (fsFileExists(wsf))
-      wsName = WORKSPACE_FILENAME;
-    else {
-      snprintf(wsf, sizeof(wsf), "%s/%s", probe, WORKSPACE_FILENAME_LEGACY);
-      if (fsFileExists(wsf)) wsName = WORKSPACE_FILENAME_LEGACY;
+    static const char *candidates[] = {WORKSPACE_FILENAME, WORKSPACE_FILENAME_DEPRECATED,
+                                       WORKSPACE_FILENAME_LEGACY};
+    for (size_t ci = 0; ci < sizeof(candidates) / sizeof(candidates[0]) && !wsName; ci++) {
+      snprintf(wsf, sizeof(wsf), "%s/%s", probe, candidates[ci]);
+      if (fsFileExists(wsf)) wsName = candidates[ci];
     }
     if (!wsName) continue;
 
@@ -105,7 +106,7 @@ bool wsMemberCwdDetect(char *wsRootOut, size_t wsRootN, char *memberOut, size_t 
     char scache[WS_PATH_LEN + 40];
     snprintf(scache, sizeof(scache), "%s/%s", probe, WS_STARTUP_FILE);
     /* startUp() versi baca-saja (design/startup.md §2): state startup yang
-       valid (hash Buildfile.ws cocok) = model identik dengan parse; deteksi
+       valid (hash WsBuildfile cocok) = model identik dengan parse; deteksi
        anggota tidak pernah menulis cache. */
     bool parsed = wsStartupLoad(&m, wsf, wsName, scache);
     if (!parsed) parsed = wsParse(&m, wsf);

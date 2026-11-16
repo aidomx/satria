@@ -18,11 +18,11 @@ cp -a "$MW/." "$tmp/" || fail "salin miniws gagal"
 cd "$tmp" || fail "cd gagal"
 
 # 1. cdeps.preshared harus ditolak dengan nomor baris dan nama kunci
-printf 'cdeps.preshared = windows\n' >> Buildfile.ws
+printf 'cdeps.preshared = windows\n' >> WsBuildfile
 out=$("$S" -w -g compdb 2>&1)
 rc=$?
 [ $rc -ne 0 ] || fail "cdeps.preshared seharusnya ditolak (rc=0)"
-printf '%s' "$out" | grep -q "Buildfile.ws:" || fail "pesan tanpa nomor baris: $out"
+printf '%s' "$out" | grep -q "WsBuildfile:" || fail "pesan tanpa nomor baris: $out"
 printf '%s' "$out" | grep -q "cdeps.preshared" || fail "pesan tidak menyebut kunci: $out"
 printf '%s' "$out" | grep -q "belum didukung" || fail "pesan tidak menjelaskan penolakan: $out"
 

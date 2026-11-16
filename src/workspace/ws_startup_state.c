@@ -8,17 +8,17 @@ static char *wsStartupPayload(char *line);
 
 /* ==================== startup.state (design/startup.md §2–§4) =============
  *
- * Konfigurasi hasil penerjemahan Buildfile.ws dipersistenskan ke
+ * Konfigurasi hasil penerjemahan WsBuildfile dipersistenskan ke
  * `<wsDir>/.satria/startup.state`: run berikutnya MEMULIHKAN model workspace
  * tanpa parse ulang (resolusi alias, pemecahan namespace, pemilihan baris
  * per proyek sudah selesai saat penyimpanan) — startup penuh hanya saat
- * pertama kali atau saat Buildfile.ws berubah.
+ * pertama kali atau saat WsBuildfile berubah.
  *
  * Validasi cache (§4):
  *   - magic + versi SATRIA-STARTUP-1;
  *   - FNV-1a 64 atas isi file workspace == hash tersimpan (perubahan satu
- *     byte pun pada Buildfile.ws -> miss dan parse ulang);
- *   - nama file workspace ikut di header (Buildfile.ws vs nama lama);
+ *     byte pun pada WsBuildfile -> miss dan parse ulang);
+ *   - nama file workspace ikut di header (WsBuildfile vs nama lama);
  *   - seluruh entri terbaca utuh dan dalam batas (file terpotong/ganjal
  *     -> miss, bukan model setengah jadi).
  *
@@ -50,7 +50,7 @@ static char *wsStartupPayload(char *line) {
   while (*p == ' ') p++;
   return p;
 }
-/* Simpan model (parse mentah) + hash Buildfile.ws ke startup.state —
+/* Simpan model (parse mentah) + hash WsBuildfile ke startup.state —
    atomik: tulis .tmp lalu rename. */
 void wsStartupSave(const WsModel *m, const char *wsFile, const char *wsName,
                           const char *cacheFile) {

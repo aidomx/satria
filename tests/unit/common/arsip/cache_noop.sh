@@ -15,12 +15,12 @@ SRC="${2:-$(dirname "$0")/../../miniws}"
 : "${UNIT_TMP:=${UNIT_BASE:-/tmp/miniws}/t}"
 W="$UNIT_TMP/cache_noop"; rm -rf "${W}"; mkdir -p "${W}" || exit 1
 cp -rf "$SRC/." "$W/" || exit 2
-printf "flags = MMD, MP\n" >> "$W/Buildfile.ws" # cache butuh .d (-MMD)
+printf "flags = MMD, MP\n" >> "$W/WsBuildfile" # cache butuh .d (-MMD)
 cd "$W" || exit 2
 export NO_COLOR=1
 # Jeda agar mtime salinan tidak racy terhadap build pertama (lihat workspace.c, wsCacheVisit).
 wait_tick
-# Sumber yang dimutasi diambil dari Buildfile.ws: nama berkasnya berbeda antar
+# Sumber yang dimutasi diambil dari WsBuildfile: nama berkasnya berbeda antar
 # target (miniws: core/src/core.c, rupaws: core/src/main.c).
 SOURCE=$(unit_project_source . core)
 OUTPUT=$(unit_project_binary . core)
@@ -91,12 +91,12 @@ run
 valid
 check "setelah output pulih: no-op lagi" $?
 
-# Buildfile.ws berubah -> tidak valid
+# WsBuildfile berubah -> tidak valid
 wait_tick
-echo "# x" >> Buildfile.ws
+echo "# x" >> WsBuildfile
 run
 ! valid
-check "Buildfile.ws berubah: tidak no-op" $?
+check "WsBuildfile berubah: tidak no-op" $?
 run
 valid
 check "setelah Buildfile disimpan ulang: no-op lagi" $?

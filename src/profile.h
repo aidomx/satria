@@ -24,7 +24,7 @@
  *   project=<dir> [jobs=N]          — config/fingerprint/decide/compile/link
  *                                     (fase incremental; sandbox deps)
  *   workspace=<dir>                 — parse/dependency/library (baca
- *                                     model Buildfile.ws; fase build
+ *                                     model WsBuildfile; fase build
  *                                     tidak bermakna diisolasi -> tak
  *                                     dikarang)
  * Opsi global: --report <file>, --repeat N (1..100; tiap run sandbox

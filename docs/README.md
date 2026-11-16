@@ -15,7 +15,7 @@ cd hello && satria init && satria   # produces bin/hello
 
 ## Highlights
 
-- **Workspace builds** — one `Buildfile.ws` builds every member project in
+- **Workspace builds** — one `WsBuildfile` builds every member project in
   dependency order; `satria -w` (workspace), `satria -w NAME` (one project
   plus its closure), `satria -w release` (centralized `dist/`).
 - **Releases** — tarball + optional `.deb` (built without dpkg-deb),
@@ -28,13 +28,20 @@ cd hello && satria init && satria   # produces bin/hello
   (with named errnos) for diagnosing why a build did (or did not) happen.
 - **No-op is real** — content fingerprints (global PATCH hash) let repeated
   builds stop at the gate: 0 compiled, 0 linked, still correct.
+- **Ad-hoc compile** — `satria src/x.c -o build/x.o -b bin/x` (or `-F
+  quick.conf`) behaves like the gcc command you would have typed yourself:
+  no Buildfile, no `.satria` state.
+- **`satria test`** — runs the unit-test suite for a fixture (`satria test
+  miniws`, `-t <name>`, `-j N`, `-w` to watch); tests are written in the
+  `.test` DSL, not shell.
 
 ## Documentation
 
-Note: this site is a v0.2.4-era documentation snapshot. The newer
-features above are specified in the repository's `design/` folder
-(`design/packaging.md`, `design/README.md` and friends) and will fold
-into these pages in a later documentation pass.
+Note: the guide and reference pages are synced with the current code
+(v0.6.0); version numbers inside examples are illustrative. Newer features
+(ad-hoc compile, `--dev`, unit-test DSL) have their own pages. The newest
+specs always live in the repository's `design/` folder
+(`design/packaging.md`, `design/README.md` and friends).
 
 ### Guide
 
@@ -56,6 +63,7 @@ into these pages in a later documentation pass.
 - [Errors and Interrupts](reference/errors-and-interrupts)
 - [Compilation Database](reference/compdb)
 - [Ninja Buildfile Import](reference/satria-ninja-import)
+- [Unit Tests](reference/unit-test)
 - [Cheatsheet](cheatsheet)
 
 ### Design & Benchmark
@@ -69,8 +77,11 @@ into these pages in a later documentation pass.
 
 ## Version scope
 
-The published implementation reference is based on **satria v0.2.4**.
-The repository itself is ahead (v0.5.0 at the time of writing); features
-added since are explicitly documented in the repository `design/` and
-marked as such. Source, issues, and the latest design notes live on
+This snapshot documents **satria v0.6.0 (pre-release)**: the v0.5.0
+feature set plus
+ad-hoc compile (`-o`/`-b`/`-F`), `--dev`, project language selection
+(`use project c|cpp`), the unit-test DSL and `satria test`, unique members
+in static-library archives, and the refreshed CLI reference. Features
+still in flux are documented in the repository `design/` folder. Source,
+issues, and the latest design notes live on
 [GitHub - aidomx/satria](https://github.com/aidomx/satria).

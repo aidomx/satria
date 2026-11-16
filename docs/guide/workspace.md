@@ -2,6 +2,19 @@
 
 A workspace groups multiple satria projects under one top-level Buildfile.
 
+## Filename
+
+The workspace file is called **`WsBuildfile`** (no extension — `.ws` belongs
+to Witcher Script, which confused editors and tools). `satria init -w` writes
+that name.
+
+`Buildfile.ws` (and the older `Buildfile.workspace`) is still read during the
+transition window, printing a one-time deprecation warning that asks you to
+rename it; both legacy names will be removed once the transition window ends.
+When more than
+one candidate exists, detection order is `WsBuildfile`, `Buildfile.ws`,
+`Buildfile.workspace`.
+
 ## Initialization
 
 ```bash
@@ -55,9 +68,9 @@ mod.archive.dir = ../modules
 ```
 
 Packaging (archive) projects such as `mod` above run once during the
-library phase (as `Fase : archive`) and are skipped silently in the
-binary phase — their artifacts (archives, packages) are produced there
-and are not rebuilt.
+library phase and are skipped silently in the binary phase — their artifacts
+(archives, packages) are produced there and are not rebuilt. The build report
+lists them under `# Archive` / the execution summary.
 
 ## Build commands
 
@@ -74,14 +87,29 @@ satria -w rupa
 Build a named project and the dependencies needed by it.
 
 ```bash
+satria -w rupa --with-cdeps
+```
+
+A selective build normally stays inside the dependency closure. `--with-cdeps`
+(opt-in, only with `-w`) also pulls the project's `cdeps` providers —
+transitively and across cdeps cycles — so the compile-time dependency's library
+is available too. Without the flag, a provider outside the closure is not built;
+if its library is missing on disk a pre-flight warning names it and suggests
+this flag (the link would otherwise fail).
+
+`satria --dev` / `satria -w --dev` skips the release or packaging phase for one
+run (compile + link only); see [CLI Reference](../reference/cli.md#dev-mode).
+
+```bash
 satria -w release -- name=rupa
 cd ../ruka && satria -w clean
 ```
 
-Release a single project (see [Releases](releases.md)); `clean` works per
-project root like build.
+`-- name=rupa` renames the release package for this run (it does not select a
+project); a selective `-w <project>` never packages a release. `clean` works
+per project root like build. See [Releases](releases.md).
 
-With `background = true` in `Buildfile.ws`, `satria -w` returns to the
+With `background = true` in `WsBuildfile`, `satria -w` returns to the
 prompt immediately and the build runs detached; watch it with:
 
 ```bash
@@ -138,8 +166,10 @@ Synthesis expands `cdeps` internally into the dependency's library artifact
 (`library = ../rupa/lib/librupa.a`) and its public include folders (the
 folders the dependency itself declares as `headers`; `include` by default).
 `cdeps` cycles are allowed exactly like `library.<os>` cycles — the two-phase
-build resolves them — and selective builds (`-w <name>`) pull `cdeps`
-projects transitively. The expanded lines win over nothing: any explicit
+build resolves them — but a selective build (`-w <name>`) does **not** widen
+its closure through `cdeps` unless you pass `--with-cdeps`, which pulls the
+providers transitively (across cdeps cycles too). The expanded lines win over
+nothing: any explicit
 `headers`/`library` you also write stays valid and is not duplicated.
 
 Packaging a project's files can reference another project's build outputs;

@@ -13,7 +13,7 @@ bool wsListHas(const List *l, const char *s) {
 /* ==================== Susun Config di memori (WsConfig) ====================
  *
  * Menggantikan sintesis file + loadConfig (design/workspace_v1.md §Pemisahan
- * Jalur Build): tiap proyek memperoleh Config hasil resolusi Buildfile.ws
+ * Jalur Build): tiap proyek memperoleh Config hasil resolusi WsBuildfile
  * di memori — tanpa file .Buildfile sintesis, tanpa chdir. Skoping path
  * per-kunci:
  *   - konten-proyek (sources, headers, archive.src, embedded.*.src) ->

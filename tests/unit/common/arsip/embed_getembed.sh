@@ -2,7 +2,7 @@
 # Usage: sh tests/unit/common/embed_getembed.sh /absolute/path/to/satria [miniws-dir]
 #
 # Khusus fixture dengan tabel embed (miniws: contoh `bade`, bade/src/embed_use.c,
-# path ekstraksi /tmp/satria-miniws-system dari Buildfile.ws). Fixture lain
+# path ekstraksi /tmp/satria-miniws-system dari WsBuildfile). Fixture lain
 # (proyek nyata) tidak punya itu — berhenti dengan PRECONDITION, bukan FAIL.
 #
 # Verifikasi design/embedded.md (codegen sebagai satu-satunya mekanisme):
@@ -29,14 +29,14 @@ cd "$W"
 
 # Kebutuhan fixture (design unit_test.md §5.3 + §8): embed yang MENGUJI API
 # getEmbed itu sendiri —
-#   1) `bademod.extract` terdaftar di Buildfile.ws (path ekstraksi nyata dari
+#   1) `bademod.extract` terdaftar di WsBuildfile (path ekstraksi nyata dari
 #      fixture, bukan hardcode — bila beda antar-fixture ikut benar),
 #   2) proyek bade tersumber .c (discovery TSV §6),
 #   3) minimal satu sumber bade memakai API Embed: getEmbed().
 # Fixture dengan tabel embed gaya LAMA tanpa konsumen getEmbed (mis. rupaws:
 # `bademod.extract` masih ada, tapi pemanggilan masih mekanisme lama) →
 # PRECONDITION, bukan FAIL.
-EXTRACT=$(sed -n 's/^bademod\.extract *= *//p' Buildfile.ws | head -1 | tr -d ' \t')
+EXTRACT=$(sed -n 's/^bademod\.extract *= *//p' WsBuildfile | head -1 | tr -d ' \t')
 if [ -z "$EXTRACT" ] || [ -z "$(unit_project_source . bade)" ] \
    || ! unit_project_sources . bade | xargs grep -l -- 'getEmbed(' > /dev/null 2>&1; then
   unit_precondition "fixture tidak menguji API Embed (perlu bademod.extract + konsumen getEmbed di bade)"

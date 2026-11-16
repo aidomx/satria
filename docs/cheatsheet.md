@@ -25,7 +25,7 @@ satria init -w
 
 - `init` → Buildfile project minimal.
 - `init -p` → interactive scaffold.
-- `init -w` → `Buildfile.ws` workspace.
+- `init -w` → `WsBuildfile` workspace.
 
 `init -p` tidak pernah overwrite: jika target sudah ada, proses dibatalkan sebelum menulis.
 
@@ -45,7 +45,7 @@ selain itu jumlah core CPU. `-j1` memaksa serial. Berlaku juga untuk ad-hoc.
 
 ```bash
 satria --dev        # Buildfile: pack.* diabaikan run ini
-satria -w --dev     # Buildfile.ws: fase release dilewati
+satria -w --dev     # WsBuildfile: fase release dilewati
 ```
 
 Build pengembangan: compile + link saja, tanpa tarball/deb/checksum.
@@ -96,13 +96,13 @@ satria -w release -- name=rupamod target=deb
 
 ### Ninja conversion
 
-Tree v0.2.x memiliki dukungan konversi Ninja, tetapi flag persisnya implementation-specific. Gunakan:
-
 ```bash
-satria -h
+satria -xf build.ninja      # konversi untuk run ini saja (Buildfile tidak ditulis)
+satria -xcf Makefile        # konversi lalu simpan sebagai Buildfile
 ```
 
-sebagai sumber kebenaran untuk binary yang terpasang.
+`-xf` juga menerima Makefile (`-xf make`/path). `-xcf` meminta konfirmasi bila
+`Buildfile` sudah ada. Rincian: `docs/reference/satria-ninja-import.md`.
 
 ### Profile
 
@@ -121,7 +121,7 @@ satria profile binary=. jobs=4 --report profile.md
 
 ### Background build & watch
 
-Aktifkan di `Buildfile` (atau baris global di `Buildfile.ws`):
+Aktifkan di `Buildfile` (atau baris global di `WsBuildfile`):
 
 ```text
 background = true
@@ -368,7 +368,7 @@ use workspace
 projects = app, tool
 ```
 
-Project standar tidak membutuhkan Buildfile sendiri. satria mensintesis konfigurasi project dari `Buildfile.ws`.
+Project standar tidak membutuhkan Buildfile sendiri. satria mensintesis konfigurasi project dari `WsBuildfile`.
 
 Contoh per-project:
 

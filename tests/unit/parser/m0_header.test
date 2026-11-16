@@ -17,7 +17,7 @@ stage.log "startup"
 file.write Buildfile <<T
 use project
 T
-file.append Buildfile.ws "flags = MMD, MP"
+file.append WsBuildfile "flags = MMD, MP"
 file.touch src/a.c
 file.delete src/b.c
 file.copy cmd.txt cmd.crlf crlf

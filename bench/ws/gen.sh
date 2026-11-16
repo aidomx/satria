@@ -1,4 +1,4 @@
-# Generator workspace (source C, Buildfile.ws, CMakeLists.txt).
+# Generator workspace (source C, WsBuildfile, CMakeLists.txt).
 # ---------------------------- generator workspace --------------------------
 gen_c() { # gen_c <proyek> <prefix>
   local proj=$1 pre=$2 h i
@@ -105,7 +105,7 @@ EOF
 
   # -n 1 tetap memiliki dua translation unit untuk menguji siklus simbol.
   # Source tambahan khusus ini tidak mengubah arti -n (jumlah source beban).
-  # ---- Buildfile.ws (Sesuai desain terbaru) ----
+  # ---- WsBuildfile (Sesuai desain terbaru) ----
   if [ "$ws_tool" = satria ]; then
     {
       extract_tmp="${TMPDIR:-${PREFIX:+$PREFIX/tmp}}"
@@ -141,7 +141,7 @@ EOF
       echo "bade.embedded.modules.pattern = .rp"
       echo "bade.library.cdeps = core"
       echo "core.library.cdeps = bade"
-    } > "$WS/Buildfile.ws"
+    } > "$WS/WsBuildfile"
   fi
 
   # CMake idiomatis, mengikuti tests/miniws/CMakeLists.txt:

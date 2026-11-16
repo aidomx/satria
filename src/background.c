@@ -3,7 +3,7 @@
  * + watcher `satria watch`).
  *
  * Mekanisme inti (§2):
- *   1. `background = true` terdeteksi di Buildfile (single) atau Buildfile.ws
+ *   1. `background = true` terdeteksi di Buildfile (single) atau WsBuildfile
  *      (workspace) -> bgSpawn meluncurkan child proses memakai argv asli
  *      (design §2.1 Fork/Spawn) dengan env SATRIA_BG_CHILD.
  *   2. Child segera menulis PID-nya (design §2.2 PID Tracking); induk juga

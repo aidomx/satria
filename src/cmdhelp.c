@@ -136,7 +136,7 @@ static bool helpPrintSection(const char *name) {
       printf("init          create a minimal Buildfile\n");
       printf("clean         remove build artifacts\n");
       printf("profile <ctx> measure operation costs (see: help profile)\n");
-      printf("-w            workspace mode (Buildfile.ws)\n");
+      printf("-w            workspace mode (WsBuildfile)\n");
       printf("help <topic>  show topic help (build, profile, workspace,\n");
       printf("              init, clean, release, compdb, ninja)\n");
       printf("version       show version\n");

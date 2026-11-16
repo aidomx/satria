@@ -3,7 +3,7 @@
 #   - cdeps = {a,b} setara dengan a.cdeps = b dan b.cdeps = a (compdb identik)
 #   - grup yang saling tumpang tindih digabung tanpa duplikat
 #   - kesalahan: grup satu anggota, proyek tidak dikenal, bentuk lama tanpa
-#     kurung, kurung tidak ditutup, nama kosong; pesan menunjuk ke baris Buildfile.ws
+#     kurung, kurung tidak ditutup, nama kosong; pesan menunjuk ke baris WsBuildfile
 # Pemakaian: sh tests/unit/common/cdeps_group.sh <path-ke-satria> [path-ke-miniws]
 
 S="$1"
@@ -23,13 +23,13 @@ MW=$(abspath "$MW")
 tmp="$UNIT_TMP/cdeps_group"; rm -rf "${tmp}"; mkdir -p "${tmp}" || exit 1
 trap 'rm -rf "$tmp"' EXIT
 
-# Buildfile.ws = fixture tanpa baris cdeps, ditambah blok yang diuji
-base() { grep -v 'cdeps' "$MW/Buildfile.ws"; }
+# WsBuildfile = fixture tanpa baris cdeps, ditambah blok yang diuji
+base() { grep -v 'cdeps' "$MW/WsBuildfile"; }
 
-mkws() { # $1 = nama direktori, $2 = isi tambahan Buildfile.ws
+mkws() { # $1 = nama direktori, $2 = isi tambahan WsBuildfile
   rm -rf "$tmp/$1"; mkdir -p "$tmp/$1"
   cp -a "$MW/." "$tmp/$1/" || fail "salin miniws gagal"
-  { base; printf '%s\n' "$2"; } > "$tmp/$1/Buildfile.ws"
+  { base; printf '%s\n' "$2"; } > "$tmp/$1/WsBuildfile"
 }
 
 compdb() { # $1 = direktori, hasil ke $1/compile_commands.json
@@ -52,13 +52,13 @@ mkws tumpang 'cdeps = {bade,core}, {core,bade}'
 compdb tumpang
 cmp -s "$tmp/tumpang.norm" "$tmp/manual.norm" || fail "grup tumpang tindih tidak sama dengan satu relasi"
 
-# 3. error: pesan harus menunjuk ke baris Buildfile.ws
+# 3. error: pesan harus menunjuk ke baris WsBuildfile
 expect_err() { # $1 = nama, $2 = isi, $3 = potongan pesan yang diharapkan
   mkws "$1" "$2"
   out=$(cd "$tmp/$1" && "$S" -w -g compdb 2>&1)
   rc=$?
   [ $rc -ne 0 ] || fail "$1: seharusnya gagal"
-  printf '%s' "$out" | grep -q "Buildfile.ws:" || fail "$1: pesan tanpa lokasi baris"
+  printf '%s' "$out" | grep -q "WsBuildfile:" || fail "$1: pesan tanpa lokasi baris"
   printf '%s' "$out" | grep -q -- "$3" || fail "$1: pesan tidak memuat '$3' -> $out"
 }
 expect_err satu 'cdeps = {bade}'            'minimal dua proyek berbeda'
