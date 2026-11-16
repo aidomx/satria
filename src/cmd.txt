@@ -12,7 +12,8 @@ Satria - A simple builder for you
                        and o.* paths from <file>; compiles + links
 -xf <build.ninja|make>  Convert build.ninja or Makefile -> Buildfile.xf.tmp
 -xcf <build.ninja|make> Convert and write to Buildfile (confirm if exists)
--j[N]                  Parallel build with N jobs (default: CPU core count)
+-j[N]                  Parallel build with N jobs (default: SATRIA_JOBS env,
+                       else CPU core count; -j1 forces serial)
 -g compdb              Generate compile_commands.json without building
 --dev                  Dev build: abaikan release.* (Buildfile.ws) dan pack.*
                        (Buildfile) untuk run ini — compile + link saja,
@@ -393,8 +394,10 @@ satria src/x.c -F Buildfile
                        <file> resolve against the directory of <file>.
 
 -j[N]                  Compile sources in parallel, N jobs (same global -j
-                       as builds; without it or with -j1: serial). The
-                       link step always runs once at the end.
+                       as builds; flexible default: without -j it uses
+                       SATRIA_JOBS env, else the CPU core count — pass
+                       -j1 to force serial). The link step always runs
+                       once at the end.
 
 Rules (strict by default):
   satria src/x.c                    ERROR — no output destination

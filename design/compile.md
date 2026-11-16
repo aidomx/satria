@@ -71,7 +71,11 @@ satria -f Buildfile.dev
    memakai pola `cmdsRunParallelJobs` (`procStartCapture` per job — output
    compiler dicetak utuh per job selesai, anti-interleaving; kompaksi slot
    + `procStopAll` saat interupsi). Link selalu berjalan sekali di akhir.
-   Default serial (tanpa `-j` atau `-j1`). Ukur self-host 94 sumber di
+   Default FLEKSIBEL, identik build biasa: tanpa `-j`, `bootstrapParse`
+   mengisi jobs dari env `SATRIA_JOBS` bila diset, selain itu jumlah core
+   (`cpuCount()`); `-j1` memaksa serial. Verifikasi empiris 7 sumber di
+   host 8-core: tanpa `-j` memakai pola `[7/7]` paralel; `SATRIA_JOBS=1`
+   maupun `-j1` jatuh ke jalur serial. Ukur self-host 94 sumber di
    proot: serial 175,9 s → `-j4` 50,9 s (3,46×) → `-j6` 37,5 s (4,69×);
    `-j8` datar (38,9 s) — plafon efektif proot ~5× gcc mentah.
 

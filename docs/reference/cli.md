@@ -80,6 +80,22 @@ satria -w NAME
 
 Build all projects or one named project and its dependencies.
 
+## Dev mode
+
+```bash
+satria --dev
+satria -w --dev
+```
+
+Development build: the release/packaging phase is ignored for this run —
+compile + link only. In a workspace this skips the release pass (the
+build report shows `* Release : skipped (--dev)`); in a single project
+`pack.*` is treated as absent (pure packaging projects still build their
+embedded archives, since other projects depend on them). Useful to
+measure compile+link cost while iterating. Per-run only: no Buildfile or
+state mutation. Rejected combinations: `-w release --dev` and `--dev`
+together with a `--` selector.
+
 ## Workspace release
 
 ```bash
@@ -110,7 +126,41 @@ satria -j1
 satria --jobs=4
 ```
 
-Control parallel build jobs.
+Control parallel build jobs. Flexible default: without `-j`, the job count
+comes from the `SATRIA_JOBS` environment variable when set, otherwise from
+the CPU core count. `-j1` forces serial. Applies to normal builds and to
+ad-hoc compiles alike.
+
+## Ad-hoc compile
+
+```bash
+satria src/x.c -o build/x.o
+satria src/x.c -o build/x.o -b bin/app
+satria src/a.c src/b.c -o build -b bin/app
+satria src/x.c -F quick.conf
+```
+
+Compile without a Buildfile lifecycle: no project config, no `.satria`
+state, behaves like the gcc command you would have typed yourself.
+
+- `-o <path>`: object path (one source) or object directory (multi-source —
+  one `<basename>.o` per source, mirroring gcc).
+- `-b <path>`: link a binary; requires `-o`. With multi-source it links
+  every object produced from `-o`.
+- `-F <file>`: compile + link using a lightweight config file — `flags`,
+  `headers`, `defines`, `std` and `o.*` paths come from `<file>`; release,
+  cdeps and multi-project logic is skipped. Relative paths resolve against
+  the directory of `<file>`. Built-in aliases `output as o`, `clean as c`
+  and `library as lib` work in this mode.
+- `-jN` works here too (see [Jobs](#jobs)); the link step always runs once
+  at the end.
+- Mixing `-F` with `-o`/`-b` is an error; sources together with `-f` or
+  `-w` is an error. Compiler flags such as `-O2` or `-I` are not accepted
+  on the CLI — put them in the `-F` config (`flags`, `headers`, `defines`).
+- The compiler is auto-detected (`cc`, `gcc`, `clang`, `tcc`, `cl` — first
+  on `PATH` wins); a `compiler =` key in the `-F` config overrides it.
+
+See `satria help adhoc` and [design/compile.md](../../design/compile.md).
 
 ## Profile
 

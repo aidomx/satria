@@ -1,6 +1,6 @@
-# satria v0.2.4 — Cheatsheet
+# satria v0.6.0 — Cheatsheet
 
-Referensi cepat untuk penggunaan sehari-hari. Berdasarkan dokumentasi `satria-v0.2.4`; source dipakai untuk memeriksa detail implementasi yang relevan.
+Referensi cepat untuk penggunaan sehari-hari. Berdasarkan dokumentasi `satria` v0.6.0 (pre-release: fitur v0.5.0 + mode ad-hoc `-o`/`-b`/`-F`, flag `--dev`, dan `use project c|cpp`); source dipakai untuk memeriksa detail implementasi yang relevan.
 
 ---
 
@@ -37,6 +37,34 @@ satria -j4
 satria -j1
 satria --jobs=4
 ```
+
+Default fleksibel: tanpa `-j`, jumlah job dari env `SATRIA_JOBS` bila diset,
+selain itu jumlah core CPU. `-j1` memaksa serial. Berlaku juga untuk ad-hoc.
+
+### Dev mode (skip release)
+
+```bash
+satria --dev        # Buildfile: pack.* diabaikan run ini
+satria -w --dev     # Buildfile.ws: fase release dilewati
+```
+
+Build pengembangan: compile + link saja, tanpa tarball/deb/checksum.
+Per-run saja (tidak menulis state); report menandai
+`* Release : skipped (--dev)`. Tidak berlaku bersama `release` / selektor
+`--` (ditolak).
+
+### Ad-hoc compile
+
+```bash
+satria src/x.c -o build/x.o                # satu sumber -> object
+satria src/x.c -o build/x.o -b bin/app     # ...lalu link binary (-b butuh -o)
+satria src/a.c src/b.c -o build -b bin/app # multi-sumber: -o = dir object
+satria src/x.c -F quick.conf               # config ringan: flags/headers/o.*
+```
+
+Tanpa Buildfile dan tanpa state `.satria` — seperti gcc yang Anda ketik
+sendiri. Flag compiler (`-O2`, `-I`) hanya lewat config `-F`. `-jN` berlaku;
+link selalu sekali di akhir. Detail: `satria help adhoc`.
 
 ### Lainnya
 
@@ -694,7 +722,7 @@ bin/myapp
 # 23. Project C eksplisit
 
 ```text
-use project
+use project c
 
 compiler = gcc, clang
 flags = Wall, Wextra, O2, MMD, MP
@@ -707,6 +735,11 @@ output.binaryDir = bin
 output.buildDir = build
 output.compileCommands = auto
 ```
+
+`use project c` mengunci bahasa C: walk sumber tidak memungut `.cpp`.
+`use project cpp` (atau `c++`) mengaktifkan default C++ (`std`, compiler,
+linker) seperti ada source `.cpp`. Tanpa akhiran bahasa = auto-detect
+(perilaku lama).
 
 ---
 

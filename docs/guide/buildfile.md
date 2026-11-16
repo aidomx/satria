@@ -69,7 +69,20 @@ Notes:
 
 ### `use project`
 
-Selects project mode.
+Selects project mode. A trailing language selects the source dialect:
+
+```text
+use project c
+use project cpp
+use project c++   /* alias of cpp */
+```
+
+Case-insensitive. `use project c` stops the source walk from picking up
+`.cpp` files (pure-C project — declare the language instead of relying on
+defaults); `use project cpp` (or `c++`) enables C++ defaults (`std`,
+compiler, linker) the same way a `.cpp` source would. Plain `use project`
+keeps the historical auto-detect behavior. An unknown language token is
+reported instead of silently ignored.
 
 ### `root`
 

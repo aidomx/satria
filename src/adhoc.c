@@ -312,7 +312,9 @@ int adhocRun(const Bootstrap *bs) {
   if (link) mkparent(binPath);
 
   /* -jN (opsi global -j, tambahan design/compile.md 15/11): kompilasi
-     paralel pola build normal; tanpa -j / -j1 tetap serial. */
+     paralel pola build normal. Default FLEKSIBEL sama seperti build
+     biasa — bootstrap mengisi bs->jobs dari env SATRIA_JOBS atau jumlah
+     core bila -j tidak diberikan; -j1 memaksa serial. */
   int jobs = bs->jobs > 1 ? bs->jobs : 1;
   if (!compileList(&c, slots, bs->sources, n, jobs, !!bs->fconfig)) {
     for (int i = 0; i < n; i++) free(objs[i]);

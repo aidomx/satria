@@ -1,2 +1,4 @@
-satria docs v0.2.4
-Documentation snapshot based on satria v0.2.4 and subsequent design discussions.
+satria docs v0.6.0
+Documentation snapshot based on satria v0.6.0 (pre-release) — syncs the
+v0.5.0 feature set plus the ad-hoc compile mode (-o/-b/-F), the --dev flag,
+and `use project c|cpp` language selection.
