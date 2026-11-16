@@ -1,0 +1,313 @@
+# v0.6.0
+- 7c24a6b up: commit RELEASE_NOTE.md
+- 0dff989 chore: update to version 0.6.0
+- 557cea0 chore: reconstruction            - migration from Buildfile.ws to WsBuildfile      - synchronize  and  based on the implemented code
+- 7f6a1c5 chore: allow commit RELEASE_NOTE.md
+- d3514fa chore: no optimize O2 flags
+- 3c9c567 docs: sync adhoc -j default (flexible, not serial) + refresh docs/ for v0.6.0
+- f2e6af3 feat: --dev flag — skip release/pack to measure compile+link cost
+- 0e68cd3 fix: unique static-archive member names (ar stores basenames only)
+- 69beaf0 feat: ad-hoc CLI mode (-o/-b/-F) with -jN parallel compile
+- d204b5a feat: declare project language via 'use project c|cpp' — stop walking .cpp in pure-C projects
+- 3c2deb8 bench: extend editrel to the work audit and help text
+- 3aae283 chore: optimize release
+- c01207f chore: fix bug embedded on parallel
+- 85594c8 workflows: installation package from input.tools
+- 24de115 bench: add edit+relink and seri for summary
+- 81db176 docs(todos): close item 3 (collect+plan/decide) — no change warranted
+- c1afa33 perf(cache): defer opts.cache commits to phase boundaries
+- 2e8091c perf(cache): shared per-process store handle for opts.cache
+- 494d3dd perf(cache): content-keyed memo for the opts.cache router scan
+- 0e8c777 perf(cache): memo cache-file group presence + fs-save profile marks
+- fa720e0 perf(ws): reuse no-op gate stat memo for unchanged projects in save-walk
+- 96c7ce7 satria test: shorthand tanpa argumen binary — `satria test miniws`
+- 931dbdd satria test: aktivasi delegasi ke scripts/unit.sh + rencana M4 port ke C
+- 4f277b3 unit: arsipkan .sh yang sudah tergantikan port .test + sinkronkan dokumen
+- f2ded0d M3 DSL: run.bg/stop/wait + run.tool + stage + text — DSL test M0-M3 lengkap
+- 0f5fbc8 M2 DSL: @if/@else, @for (rentang/koleksi), @while + fragmen + contoh acuan
+- 2d68507 M1 DSL: evaluator ekspresi + selektor penuh + run.exec/file.copy + kit konforman
+- 5fb3646 unit: selesaikan M0 DSL test — parser, eksekutor, integrasi runner
+- fb8a85a scripts: relocation unit test trace_*.sh
+- 6289889 design: relocation unit test trace_*.sh
+- 594b49b design: audit startup.md
+- e5e14dd design: miniws, complexws intregation is success on windows/MSVC
+- 4d40095 design: relocation unit test embed_stamp_skip
+- c32a5ea design: relocation unit test cdeps_group
+- 09bcd68 design: note cache noop
+- 85f10fe design: intregation unit test
+- 0ccacb5 unit: report_binaries_uptodate - dump touch/noop2 saat gagal (diagnostik MSVC)
+- f51a049 complexws: keluarkan cli.c dari libbade - simbol core di shared lib Windows
+- dfb1d2a fix complexws build snap MSVC: mkdir POSIX -> _mkdir (WIN32) + rapikan workflow
+- a2b9e19 tests: fixture workspace complexws (bade, core, rupamod)
+- d8b62f1 runner: pause/stop/resume + daftar implementasi jadi checklist
+- 18e53f5 watcher: poles tampilan prepare - satu header, baris build, centang akhir
+- 4f5b7be watcher: gap blank line antar header (prepare - execution - summary)
+- 90b6fb3 watcher: timing.prev.tsv jadi akumulasi lintas run (fix persen * process)
+- db5530b watcher: registri multiwatch + fase prepare realtime (design §9.6)
+- e34350b watcher: tampilan disederhanakan ke design §9 — per-entri 2 baris, tanpa footer
+- 779596d watcher: relasi dua section — doc header+body mengalir, footer repaint
+- bc34426 watcher: body commit-style — entri selesai cetak sekali, tetap di riwayat
+- f0d5cce watcher: isi body tidak tertimpa baris berikutnya (repaint penuh jendela)
+- c7f3617 classes.conf: rujukan klasifikasi diperbarui ke unit_test.md §8 pasca renumber
+- 35dfdbf design: hapus Interactive Configuration (unit_test.md §7) + renumber
+- 0999fd9 runner: unit.sh jadi konsumen tipis unit_dev.sh (salinan sementara, bukan tersalin)
+- e649a7c runner: discovery §6 via compdb satria (bukan parser Buildfile.ws kedua)
+- 9f125c0 scripts: hapus tracker.sh (prototipe strace berdormantiknya openat_trace)
+- cb65c8f tests: embed_getembed masuk common dengan PRECONDITION embed
+- d711b69 tests: classes.conf masuk dalam pelacakan (runner menolak tanpa daftar klasifikasi)
+- d2a9400 ci: CLI unit.sh baru (<binary> <target-nama>) di workflow manual MSVC
+- 7532bf1 runner: stabilisasi unit_dev.sh, salinan identik ke unit.sh
+- 5a5d0b7 unit_v1: tes menerima fixture staged bersih ($FIX), bukan target mentah
+- 9a08349 unit_v1: propagasi -t ke anak background (re-exec menjatuhkan seleksi)
+- 5c4125e unit_v1: kolom timing snap-build diisi penuh (header 8 kolom)
+- 9edb571 unit_v1: seleksi tes via -t <nama> (boleh berulang)
+- eeff92d tests: podaowan semua pemanggilan $SAT dengan -j${UNIT_JOBS:-2}
+- c4cc99d unit_v1: --clean per target, PRECONDITION kategori sendiri, pin binary; -j default honôrat SATRIA_JOBS
+- b555f43 tests: crud touch pakai source yang ada di fixture (fallback main.c)
+- cfa4a37 report: hapus off-spec banner '* Release : (workspace, format deb)'
+- 3581579 docs: hasil run kedua CI tests-manual — PASS=241 FAIL=0, smoke optimize lulus
+- 9040438 docs: landing page Pertahankan deb menambah clarified
+- f3ef39d chore: update test unit
+- 7d6c1f7 tests: base for test unit
+- 7e39a5d tests: unit crud
+- ae2c380 test(windows): skip POSIX-only assertions and normalise CR in help output
+- e966af6 fix(windows): record the real .exe output and use 100 ns cache stamps
+- 115d677 diag: trace cache gate + dump cold single-project state
+- ba5f869 diag: dump gate debug + out.txt on crud failures
+- 11c3972 embed: compatible section
+- e969f43 gitignore: unchecklist todos
+- af7ab9a todos: commit todo
+- 4c0d621 problems: commit more problem
+- a5a5aca tests: fix ci tests-manual.yml
+- d95e036 chore: reject cdeps.*
+- d2fe882 chore: prints od -c copy contents on failure, so that the next CI shows the cause.
+- 1a64f7b chore: clear warning
+- bd4703f chore: `wb` is used when writing the listfile for `tar -T`. In text mode on Windows, `\n` is written as `\r\n`, which causes `tar` to interpret the `\r` as part of the filename (e.g., "math/index.rp\r"). Binary mode preserves `\n` exactly as it is, across all platforms.
+- c3a444b tests: resolve target
+- 0b52f69 attribute: handle crlf
+- ad33918 docs: new syntax release.optimize
+- 70b1688 design: add --raw
+- 97912f6 design: add release.optimize
+- 1ab5c86 fix: convert relative path to absolut path
+- 58adf51 fix: pclose,popen in windows/MSVC
+- 5edb977 workflows: use .satria-version
+- cfabcbf ws: route release.optimize
+- 463325b chore: bump version cache 13->14
+- a5177dc config: apply new syntax
+- bc23da3 command: update cmd.txt - trace for --raw - optimize of packaging
+- 210e751 trace: The trace output somewhat resembles that of strace.
+- 6d6541d tests: workflows tests-manual needed
+- df8660d workflows: test suite windows/MSVC
+- 86e9e9c tests: sync test suite
+- 64a151b design: add release
+- 4d815f6 chore: add release to LAST BUILD SUMMARY list
+- 951d6da up: deterministic release
+- 5ae5854 bench: benchmark - modular benchmark compare - benchmark list
+
+# v0.5.0
+- 1ecdf11 chore: update to version 0.5.0
+- 902cb0b Revert "fix(windows): link with link.exe so cl stops warning D9024 per object"
+- 3e2a776 fix(windows): link with link.exe so cl stops warning D9024 per object
+- 74bc854 fix(windows): clear the remaining MSVC /W4 warnings
+- 1b2e98a fix(windows): silence the MSVC/MinGW build warnings
+- fecf103 docs: close O9 after Windows incremental no-op verified
+- 176a140 fix(deps): read wrapped .d lines as dependency lists
+- d872f9b chore(diag): trace which header marks a source stale
+- 59d87c2 report: write report blob without tee
+- fe9ec82 fix(windows): correct FILETIME nanosecond conversion
+- 4674105 chore(diag): trace every fast-state save bail-out
+- 3385ba9 chore(diag): detail why the build.state snapshot is rejected
+- a13fbc8 chore(diag): log no-op gate rejection reasons
+- c837775 problems: detail problem of build report and any more
+- 3ced5d5 gitignore: add real problem of build report to repo
+- d09b85b fix(cmdhelp): keep help visible from CRLF cmd.txt on Windows
+- a48382c feat(test): add configurable job limits to test runners
+- 5cc3f53 feat(cli): add --version alias
+- 8c35ef7 feat(installer): improve Windows installation workflow
+- 9cb7b64 feat(workspace): add cdeps groups and selective dependency expansion
+- ec20144 perf(cache): optimize selective workspace caching
+- 5c9c688 feat(report): add structured build reporting
+- 674d3aa tests: remove is not used
+- c043935 script: background supported
+- 58451f8 design: next version for build report
+- 17428fa install: log is supported
+- 0030382 src: optimize stat for better performa
+- ad21141 unit: one run for all run tests/unit/*
+- 51ff1a0 ws: optimize prune ws
+- deab137 port: fix CLOCK_MONOTONIC for windows latest
+- 262485e test: unit test for build resume
+- 1d1b0ba build: optimize cache build
+- c9546f8 feat: satria trace for tracking stat
+- 05f214d embed: optimize API embed
+- 0e8d278 ws: optimize overhead satria-side
+- 1776337 refactor: split oversized sources, extract background/startup/runners modules
+- 8b7ed27 build: relocation build/bin to bin/
+- 9892a0e build: fix incremental build
+- 248fc06 build: target in build/bin
+- 3eab1af install.ps1: revert to v0.2.3, old output in windows
+- b20d62f build: incremental build is failed
+- c281277 build: lnk failed
+- a733301 fix: terbitkan header generate dalam mode biner agar tidak recompile tiap run
+- 6b70174 workflow: SELF_BIN pakai matrix.os (konteks runner tak tersedia di env job)
+- cc2723d fix windows: /OUT link MSVC +exe, self-host build tidak timpa binary berjalan
+- 96b5504 port: buffer command shell Windows dinamis — link self-host gagal diam-diam
+- c212225 fix: report_blob error on windows
+- f7f863e install.ps1: fix typo
+- a0f22c3 workflow: name of build manual
+- 3d7e183 install.ps1: parallelisme and correct location binary
+- 0745d90 workflow: build manual and correct old location binary
+- 07673ef workflow: move older location binary satria
+- 831243e bench: default urutan run -O abba (hilangkan bias urutan tool)
+- f78b499 bench: samakan pekerjaan antar tool — embed codegen + cakupan selektif setara
+- 46b3a79 embed: getEmbed codegen + ld cache, tangkap output child untuk build.log, sinkron docs & tests
+- 7e5ea20 workspace: perf startup+no-op, fix summary Binaries, sync docs v0.2.4
+- ea64734 version: update to v0.2.4
+- 93d9b9c workflow: ci build active when new release
+- 2159633 bench: benchmark cmake and satria only
+- f8a04b5 workflow: cmake and satria only for benchmark workspace
+- 84f691d bench: fix success rate
+- 93708f7 workflows: options strace
+- b18f77c bench: default strace off
+- be66356 bench: optimize display compare.sh and ws.sh
+- 01d46fe compare: new workflows for compare single project
+
+# v0.2.4
+- e28e0cf readme: remove old syntax release
+- 6e12b0c ignore: extracted from editor
+- 775c8f1 Buildfile: detail with comment
+- bb5f3ec editor: syntax highlight for vscode and vim,neovim
+- 443fa5e ws: improve batch serial and paralel
+- 1b687f9 bench: fix make prime, hard-check EXP_BIN=2
+- 03d75ac bench: fix header limit
+- 835cb72 bench: fix syscall for cmake
+- 0fb8a7a workflows: add cmake, and fix node deprecated version 20, use node version 24
+- 23506b9 bench: optimize bench
+- 2bbcebf bench: use -j for all tool
+- 686bc34 refactor: complete rbot to satria rebranding
+- f36d26e bench: new design workspace output
+- 66827b6 fix(workspace): resolve incremental rebuild overhead
+- 65169f7 bench: benchmark failed in workflows
+- 7672206 bench: tool selected
+- 4d2089d deps: skip recompiling units on semantically unused header changes
+- e26710b bench: keep workspace fixture free of relative include paths
+- e65ef5d config: scope headers to workspace, project, and per-project template
+- 922cd29 workflows: fix benchmark
+- 9140e90 workflows: benchmark workspace via github actions
+- bc9bb7f perf(workspace): optimize dependency tracking and state caching
+- bc6177d ws: updating workspace.state - check workspace.state in bootstrap - fix fast-state path that fails due to always cold build - update documentation
+- 9331330 embed: fixing the reading error where the archive always appears as new even though it is not
+- 8c27b18 bench: layout output according to design/bench_ws_output.md; embed LLD
+- 95279b0 port: spawn uses the path resulting from PATH resolution (once per process)
+- df4bd8f build: avoid unlinking objects that definitely do not exist; compdb profile marker
+- 9ec3fc2 ws: accurate workspace gateway, cache walk without staleness, cold status
+- 10521b0 define: strtok_r alias strtok_s
+- 5eb3e75 feat: improve workspace - workspace.state (no-op) - convert Makefile - setup node: 24
+- 37e7cd5 install.sh: fix install on termux
+
+# v0.2.3
+- 7060c88 port: forget semicolon
+- 2576537 port: report message for UnmapViewOfFile is failed
+- 2d02d72 port: add memoriapi.h
+- c784e94 Buildfile: add ws2_32 library
+- e891e79 port: remove redeclared UnMapViewOfFile
+- c88842d port: default int for UnmapViewOfFile
+- 0cb43d6 Buildfile: add kernel32
+- 23920c4 fix: UnmapViewOfFile referenced for windows
+- 8e0d158 release: clean tab
+- e2579b5 release: fix view design/release.md fot better
+- 5aa5024 feat: revisi release, upload design in repo, and fix silent bug in Buildfile or Buildfile.ws
+- ec12239 fix: archive with ext
+- 0be8718 fix: typo
+- a65b9fb refactor: separate bootstrap and CLI responsibilities
+- 0dd6ca2 feat: improve workspace, compdb, and build state handling
+- 37721a6 Buildfile: update version pack to v0.2.2
+- c812992 port: fix _isatty header not included
+
+# v0.2.2
+- d41f45e feat: C++ support, language field in `init -p`, and build warning fixes
+- a029741 feat: c++ supported
+- b27c1e8 feat: update to version 0.2.1
+
+# v0.2.1
+- 146609d feat(pack): improve packaging and workspace configuration
+- 6a90466 feat: ignore binary in repo, download via github release
+- f2dc858 feat: fix bug, support workspace release
+- ec59034 docs: add documentation of rbot
+- 5a8d0be Buildfile: remove duplicate description
+
+# v0.2.0
+- a7bbcfd feat: install.sh and install.ps1 read
+- d00c9a3 Buildfile: fix linked failed
+- 9572f44 Buildfile: library for windows
+- 826a4ef port: fix SHFileoperation
+- 523c5f1 install.ps1: fix smoke test
+- 4497c45 install.ps1: case sensitif
+- ae23218 prof: clocktime no support in windows
+- 2d62862 port: windows.h first before shellapi.h
+- d6133d2 Buildfile: cl add for windows
+- c59fb5a port: windows.h sebelum shellapi.h di cabang MSVC
+- ea59efe install.ps1: perbaikan untuk windows
+- 011a12c port: perbaiki cast _chmod untuk MSVC (mode_t -> int)
+- 149a1b9 feat: instalation from github release
+- 24b2e23 refactor(build): migrasi dari CMake ke Buildfile & tambah pack_stage
+- 6ac6cdd refactor: restructure source, workspace, benchmark, and tests
+
+# v0.1.8
+- 2a5d517 feat(v0.1.8): ninja interop, proot perf boost, and reliability fixes
+- 1a9d12e feat: add build fingerprints for configuration and source tracking
+- 03b8b49 feat: sync version to v0.1.7
+
+# v0.1.7
+- df6c657 feat: optimize rbot - Smart header tracking - Optimize cache - Support other configuration with -f<file> - Convert configuration ninja to Buildfile - Optimize rbot in proot-distro - Support on native termux - Optimize performa build
+- ed1b9a2 feat: rbot clean only remove buildDir
+
+# v0.1.6
+- c5365cf feat: up v0.1.6
+- 53f727c feat: add header tracking
+
+# v0.1.5
+- b48c3bf feat: up version
+- ae63b23 feat: improve rbot build portability and versioning
+
+# v0.1.4
+- 75aa2cc feat: log builder
+- c83ceda Update release.yml
+- eea0017 Update cmake.yml
+- 0299a68 Update cmake.yml
+- c45975c Update cmake.yml
+- 90cab08 Update cmake.yml
+- 21a0bdb Update release.yml
+
+# v0.1.3
+- 05bccdb feat: sync example Buildfile
+- 3603a21 feat: fix ambigu clean and output
+- 8369eba feat: remove version from Buildfile
+
+# v0.1.2
+- fa39502 feat: lib.a or lib.so
+
+# v0.1.1
+- 88f24f9 refactor: restructure source, optimize compile, linked, compd with cache
+
+# v0.1.0
+- 670236f feat: update use library in Buildfile
+- a9a92f7 feat: fix bin/rbot segfault
+- 3910c27 feat: update bin/rbot for library Buildfile multi platform
+- 1266564 Support platform-specific nested libraries in Buildfile
+- 942f0de feat: workflows for release
+- 589b48b Fix MinGW Windows shell API conflict by using the SDK declaration instead of a manual SHFILEOPSTRUCT redefinition
+- 90a1699 Fix CI binary output path for multi-config Windows builds
+- 490b372 Fix CI binary output path to match build dir
+- 6c361c5 feat: update info command list
+- 1025368 feat: update source to portable, and updaate docs for use embedded
+- 14f6796 feat: new cmake for github action
+- b3d6a11 feat: fix build action failed
+- f9793d4 Fix MSVC warning flags in CMake for Windows builds
+- ba7afad feat: add cmake configuration
+- 8a19798 Add multi-platform CMake workflow configuration
+- 90f2d9e feat: fix compdb and version unknown
+- 0a29867 feat: upload source
+- 0f1e125 feat: rbot under MIT License
+- 69c7d21 feat: add README.md for getting started, usage rbot
+- 8ff93c1 feat: first commit
+
