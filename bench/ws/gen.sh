@@ -115,7 +115,7 @@ EOF
       echo "projects.core as core"
       echo "projects = bade, core, rupamod"
       echo "compiler = $COMPILERS"
-      echo "flags = Wall, Wextra, MMD, MP, fPIC O2"
+      echo "flags = Wall, Wextra, MMD, MP, fPIC"
       echo "headers.each = auto"
       echo "std = gnu11"
       echo "mod.output.binary = false"
