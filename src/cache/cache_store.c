@@ -7,8 +7,20 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+/* PID proses untuk nama tmp commit yang unik. unistd.h/getpid tidak ada di MSVC,
++   jadi cabang Windows memakai GetCurrentProcessId dari windows.h. */
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#define CS_PID() ((long)GetCurrentProcessId())
+#else
 #include <sys/types.h> /* getpid: nama tmp commit unik per proses */
 #include <unistd.h>   /* getpid */
+#define CS_PID() ((long)getpid())
+#endif
+
 #include <time.h> /* csNowNs: clock_gettime */
 
 /* Penggantian atomik: POSIX rename; Windows MoveFileEx REPLACE_EXISTING |
@@ -444,7 +456,7 @@ bool csCommit(CsStore *st) {
   /* Nama tmp unik per proses: dua proses bisa meng-commit file yang sama
      hampir bersamaan (anak-anak fork pada akhir batch) — nama tetap membuat
      rename saling menimpa isi setengah jalan. */
-  snprintf(tmp, sizeof(tmp), "%s.tmp%ld", st->path, (long)getpid());
+ snprintf(tmp, sizeof(tmp), "%s.tmp%ld", st->path, CS_PID()); 
   FILE *fp = fopen(tmp, "w");
   if (!fp) {
     free(arr);
