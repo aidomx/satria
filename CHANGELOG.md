@@ -1,4 +1,8 @@
 # v0.6.0
+- 67e8daa workflows: use RELEASE_NOTE.md
+- 3f36863 chore: add fixed windows getpid
+- f5bac09 fix: windows getpid fixed
+- 8dfc016 up: commit CHANGELOG.md
 - 7c24a6b up: commit RELEASE_NOTE.md
 - 0dff989 chore: update to version 0.6.0
 - 557cea0 chore: reconstruction            - migration from Buildfile.ws to WsBuildfile      - synchronize  and  based on the implemented code
