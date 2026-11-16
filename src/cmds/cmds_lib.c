@@ -302,6 +302,238 @@ void cmdsEmitWarnLines(const char *buf, size_t n) {
    maupun serial dalam satu pass). Dikuras oleh cmdsWarningsTake(). */
 static int cmdsWarnAcc = 0;
 
+/* Salin file biner utuh (object yang diberi nama anggota baru). */
+static bool copyFileBytes(const char *from, const char *to) {
+  FILE *in = fopen(from, "rb");
+  if (!in) return false;
+  FILE *out = fopen(to, "wb");
+  if (!out) {
+    fclose(in);
+    return false;
+  }
+  char buf[65536];
+  size_t r;
+  bool ok = true;
+  while ((r = fread(buf, 1, sizeof(buf), in)) > 0)
+    if (fwrite(buf, 1, r, out) != r) {
+      ok = false;
+      break;
+    }
+  if (ferror(in)) ok = false;
+  fclose(in);
+  if (fclose(out) != 0) ok = false;
+  return ok;
+}
+
+/*
+ * Stage object yang basenamenya bertabrakan (lihat komentar pemanggil).
+ *
+ * stageDir: diisi path direktori stage bila ada object yang distage,
+ * kosong bila tidak ada tabrakan (pemanggil membuangnya via fsRemoveTree).
+ * Return false bila stage tak bisa dibuat padahal dibutuhkan — pemanggil
+ * membatalkan fase library dengan pesan ini.
+ */
+static bool objsStageCollisions(const Config *c, List *objs, char *stageDir, size_t stageCap) {
+  /* 1) Tandai object dengan basename yang muncul lebih dari sekali. */
+  bool *dup = calloc((size_t)objs->count, sizeof(bool));
+  if (!dup) return false;
+  bool any = false;
+  for (int i = 0; i < objs->count; i++) {
+    const char *bi = strrchr(objs->items[i], '/');
+    const char *bj = strrchr(objs->items[i], '\\');
+    if (bj > bi) bi = bj;
+    if (!bi) bi = objs->items[i] - 1;
+    for (int j = 0; j < objs->count && !dup[i]; j++) {
+      if (j == i) continue;
+      const char *b2 = strrchr(objs->items[j], '/');
+      const char *b3 = strrchr(objs->items[j], '\\');
+      if (b3 > b2) b2 = b3;
+      if (!b2) b2 = objs->items[j] - 1;
+      if (strcmp(bi + 1, b2 + 1) == 0) {
+        dup[i] = true;
+        any = true;
+      }
+    }
+  }
+  if (!any) {
+    free(dup);
+    return true; /* tidak ada tabrakan — path asli dipakai apa adanya */
+  }
+
+  /* 2) Direktori stage DI LUAR pohon build (TMPDIR, fallback /tmp —
+     Windows pakai TEMP), pola profTmpDirMake: unik lewat jam monotonic. */
+  const char *base = getenv("TMPDIR");
+#ifdef _WIN32
+  if (!base || !*base) base = getenv("TEMP");
+#endif
+  if (!base || !*base) base = "/tmp";
+  for (int i = 0; i < 64; i++) {
+    snprintf(stageDir, stageCap, "%s/satria-arstage-%ld-%d", base,
+             (long)(monotonicSeconds() * 1e6), i);
+    if (!fsDirExists(stageDir) && !fsFileExists(stageDir)) {
+      fsMakeDir(stageDir);
+      if (fsDirExists(stageDir)) break;
+    }
+    if (i == 63) {
+      fprintf(stderr, "satria: cannot create archive-member stage dir in %s\n", base);
+      free(dup);
+      stageDir[0] = '\0';
+      return false;
+    }
+  }
+
+  /* 3) Salin tiap object tabrakan dengan nama mangle: TAG_<path relatif thd
+     build dir>, pemisah direktori jadi '_'. Path object selalu di bawah
+     outBuildDir (objectPathFor), jadi rel selalu valid.
+
+     TAG = segmen terakhir outBuildDir (build/bade -> "bade") bila build dir
+     berada di subdirektori, supaya tabrakan yang sama di DUA proyek
+     workspace (build/bade/install.o vs build/rupamod/install.o) tidak lagi
+     menghasilkan anggota bernama sama: bade_install.o vs rupamod_install.o.
+     Single-project (outBuildDir = "build") tidak butuh tag. */
+  const char *tag = strrchr(c->outBuildDir, '/');
+  char tagBuf[128] = {0};
+  if (tag && tag[1]) {
+    snprintf(tagBuf, sizeof(tagBuf), "%s_", tag + 1);
+    for (char *s = tagBuf; *s; s++)
+      if (*s == '/' || *s == '\\' || *s == ' ') *s = '_';
+  }
+  char **used = calloc((size_t)objs->count, sizeof(char *));
+  int usedCount = 0;
+  if (!used) {
+    free(dup);
+    return false;
+  }
+  size_t pl = strlen(c->outBuildDir);
+  for (int i = 0; i < objs->count; i++) {
+    if (!dup[i]) continue;
+    const char *p = objs->items[i];
+    if (strncmp(p, c->outBuildDir, pl) != 0 || p[pl] != '/') {
+      fprintf(stderr, "satria: unexpected object path outside build dir: %s\n", p);
+      free(dup);
+      free(used);
+      stageDir[0] = '\0';
+      return false;
+    }
+    char mangle[SATRIA_MAX_PATH];
+    snprintf(mangle, sizeof(mangle), "%s%s", tagBuf, p + pl + 1);
+    for (char *s = mangle; *s; s++)
+      if (*s == '/' || *s == '\\') *s = '_';
+
+    /* Jaring pengaman: mangle harus unik (mis. tag sama karena outBuildDir
+       dipakai bersama). Beri sufiks _2, _3, ... pada pengulangan. */
+    char uniq[SATRIA_MAX_PATH];
+    snprintf(uniq, sizeof(uniq), "%s", mangle);
+    for (int k = 2;; k++) {
+      bool taken = false;
+      for (int u = 0; u < usedCount; u++)
+        if (strcmp(used[u], uniq) == 0) {
+          taken = true;
+          break;
+        }
+      if (!taken) break;
+      char stem[SATRIA_MAX_PATH];
+      snprintf(stem, sizeof(stem), "%s", mangle);
+      char *dot = strrchr(stem, '.');
+      if (dot) *dot = '\0';
+      /* stem dipotong agar suffix "_<k>.o" selalu muat dalam uniq (tanpa warning). */
+      snprintf(uniq, sizeof(uniq), "%.*s_%d%s", (int)(sizeof(uniq) - 16), stem, k, dot ? ".o" : "");
+    }
+    used[usedCount++] = strdup(uniq);
+
+    char staged[SATRIA_MAX_PATH * 2];
+    snprintf(staged, sizeof(staged), "%s/%s", stageDir, uniq);
+    if (!copyFileBytes(p, staged)) {
+      fprintf(stderr, "satria: cannot stage archive member: %s -> %s\n", p, staged);
+      for (int u = 0; u < usedCount; u++) free(used[u]);
+      free(used);
+      free(dup);
+      stageDir[0] = '\0';
+      return false;
+    }
+    /* listAdd mem-strdup — bebas-kan lama, ganti dengan path stage. */
+    free(objs->items[i]);
+    objs->items[i] = strdup(staged);
+    if (!objs->items[i]) {
+      for (int u = 0; u < usedCount; u++) free(used[u]);
+      free(used);
+      free(dup);
+      stageDir[0] = '\0';
+      return false;
+    }
+  }
+  for (int u = 0; u < usedCount; u++) free(used[u]);
+  free(used);
+  free(dup);
+  return true;
+}
+
+/* Nama anggota yang dilihat `ar` (dan lib.exe): basename object. */
+static const char *objMemberName(const char *obj) {
+  const char *b = strrchr(obj, '/');
+  const char *b2 = strrchr(obj, '\\');
+  if (b2 > b) b = b2;
+  return b ? b + 1 : obj;
+}
+
+/*
+ * Isi arsip statis harus PERSIS daftar object fase ini. Dua alasan:
+ *   - `ar rcs` menambah anggota bernama sama dua kali bila dua path berbeda
+ *     berbagi basename (perilaku ar, bukan bug kita); hasil lama dari
+ *     sebelum mangle bisa bertahan.
+ *   - `ar rcs` tidak pernah menghapus anggota yang object-nya sudah tidak
+ *     ada (source di-rename/dihapus), jadi arsip lama bisa basi.
+ * Karena itu, saat ada tabrakan nama, arsip yang "up-to-date" menurut mtime
+ * tetap diverifikasi isinya; bila tidak cocok ia dibangun ulang dari nol.
+ * Return true bila verifikasi tidak bisa dilakukan (ar tak ada) — rebuild
+ * paksa tanpa bukti hanya memperlambat, bukan memperbaiki.
+ */
+static bool archiveMembersMatch(const Config *c, const char *target, const List *objs) {
+  if (compilerIsMSVC(c)) return true; /* lib.exe: biarkan jalur lama */
+  char cmd[SATRIA_MAX_PATH * 2 + 16];
+  snprintf(cmd, sizeof(cmd), "ar t %s", target);
+  ProcHandle h;
+  if (!procStartCapture(cmd, &h)) return true;
+  ProcHandle *fin = NULL;
+  if (procWaitAny(&h, 1, &fin) < 0 || !fin || !fin->ok) {
+    size_t drop = 0;
+    free(procCaptureTake(&h, &drop));
+    return true;
+  }
+  size_t n = 0;
+  char *buf = procCaptureTake(&h, &n);
+  if (!buf) return n == 0 ? objs->count == 0 : true;
+
+  bool ok = true;
+  int lines = 0;
+  for (size_t i = 0; i < n;) {
+    size_t e = i;
+    while (e < n && buf[e] != '\n') e++;
+    size_t len = e - i;
+    if (len && buf[i + len - 1] == '\r') len--;
+    if (len) lines++;
+    i = e + 1;
+  }
+  if (lines != objs->count) ok = false;
+
+  for (int i = 0; ok && i < objs->count; i++) {
+    const char *name = objMemberName(objs->items[i]);
+    size_t nl = strlen(name);
+    int found = 0;
+    for (size_t k = 0; k < n;) {
+      size_t e = k;
+      while (e < n && buf[e] != '\n') e++;
+      size_t len = e - k;
+      if (len && buf[k + len - 1] == '\r') len--;
+      if (len == nl && memcmp(buf + k, name, nl) == 0) found++;
+      k = e + 1;
+    }
+    if (found != 1) ok = false;
+  }
+  free(buf);
+  return ok;
+}
+
 int cmdsWarningsTake(void) {
   int w = cmdsWarnAcc;
   cmdsWarnAcc = 0;
@@ -370,11 +602,38 @@ bool cmdsBuildLibraryEx(const Config *c, const List *srcs, bool linkPathLibs) {
        binary) — tetap dikompilasi untuk executable. Object embed kini
        object source biasa (embedded.c ikut srcs) — tanpa perlakuan khusus. */
     if (excludedSource(c, srcs->items[i])) continue;
-    if (objectPathFor(c, srcs->items[i], obj, sizeof(obj))) listAdd(&objs, obj);
+    if (!objectPathFor(c, srcs->items[i], obj, sizeof(obj))) continue;
+    /* sources bisa tumpang tindih (dir induk + dir anak terdaftar dua kali):
+       object yang sama JANGAN dimasukkan dua kali — `ar rcs a.o a.o`
+       menghasilkan dua anggota bernama sama. */
+    bool dupPath = false;
+    for (int j = 0; j < objs.count; j++)
+      if (strcmp(objs.items[j], obj) == 0) {
+        dupPath = true;
+        break;
+      }
+    if (!dupPath) listAdd(&objs, obj);
   }
 
   if (objs.count == 0) {
     fprintf(stderr, "satria: library requested but no object files found\n");
+    listFree(&objs);
+    return false;
+  }
+
+  /* Nama anggota di dalam .a/.lib adalah BASENAME object (ar/lib memotong
+     direktori), jadi dua source dengan basename sama dari root sumber
+     berbeda (mis. src/install.c vs manager/install.c -> build/install.o vs
+     build/manager/install.o) menghasilkan anggota duplikat: `ar r` hanya
+     menimpa, `ar x`/ekstraksi per anggota jadi ambigu, dan audit isi arsip
+     (ar t) sulit dibaca. Object yang bertabrakan disalin dulu ke direktori
+     stage sementara dengan nama mangle — path object relatif thd build dir
+     dengan '/' -> '_' (manager/install.o -> manager_install.o) — sehingga
+     member name unik. Object tanpa tabrakan memakai path aslinya, jadi
+     layout anggota yang sudah ada tidak berubah. Stage dibuang segera
+     setelah kemasan selesai (TMPDIR) — state build & prune tak tersentuh. */
+  char stageDir[SATRIA_MAX_PATH] = {0};
+  if (!objsStageCollisions(c, &objs, stageDir, sizeof(stageDir))) {
     listFree(&objs);
     return false;
   }
@@ -386,6 +645,12 @@ bool cmdsBuildLibraryEx(const Config *c, const List *srcs, bool linkPathLibs) {
 
   if (c->libStatic) {
     cmdsLibStaticPath(c, target, sizeof(target));
+    /* Ada tabrakan basename: arsip lama bisa berisi anggota dobel/basi yang
+       tak akan dibersihkan `ar rcs`. Verifikasi isinya dulu; hanya bila
+       tidak cocok, paksa rebuild (bukan tiap run — mtime tetap dipakai). */
+    if (staticUpToDate && stageDir[0] && fsFileExists(target) &&
+        !archiveMembersMatch(c, target, &objs))
+      staticUpToDate = false;
     if (staticUpToDate) {
       buildReportAddLibrary(target, REP_CACHED, fsFileSize(target));
     } else {
@@ -401,6 +666,9 @@ bool cmdsBuildLibraryEx(const Config *c, const List *srcs, bool linkPathLibs) {
         strcat(cmd, " ");
         strcat(cmd, objs.items[i]);
       }
+      /* Buang arsip lama agar isinya PERSIS objs: `ar rcs` hanya menimpa
+         anggota bernama sama dan tidak menghapus anggota basi. */
+      if (fsFileExists(target)) remove(target);
       staticDone = runCmd(cmd);
       if (staticDone) buildReportAddLibrary(target, REP_BUILT, fsFileSize(target));
       if (!staticDone) fprintf(stderr, "satria: static library command: %s\n", cmd);
@@ -413,6 +681,7 @@ bool cmdsBuildLibraryEx(const Config *c, const List *srcs, bool linkPathLibs) {
     cmdsLibSharedPath(c, target, sizeof(target));
     if (sharedUpToDate) {
       buildReportAddLibrary(target, REP_CACHED, fsFileSize(target));
+      if (stageDir[0]) fsRemoveTree(stageDir);
       listFree(&objs);
       return staticDone; /* .so dilewati; hasil .a tetap dihormati */
     }
@@ -478,6 +747,7 @@ bool cmdsBuildLibraryEx(const Config *c, const List *srcs, bool linkPathLibs) {
     if (!sharedDone) fprintf(stderr, "satria: shared library build failed\n");
   }
 
+  if (stageDir[0]) fsRemoveTree(stageDir);
   listFree(&objs);
   return staticDone && sharedDone;
 }
