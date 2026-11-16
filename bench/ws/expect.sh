@@ -41,10 +41,13 @@ expect_check() { # <tool> <scen> <obj> <arc> <lib> <bin> <cc>
       exp_chk cc "$c" "$EXP_CC"
       ;;
     leaf | bade)
-      # Satu TU berubah. CMake+Ninja relink kedua binary karena siklus;
-      # Satria hanya memperbarui library, tanpa relink binary pada skenario ini.
+      # Satu TU berubah. Satria memperbarui object+library lalu hanya binary
+      # konsumen yang menautkan arsip library berubah yang relink (edit core ->
+      # bade, edit bade -> rupa); binary proyek itu sendiri tidak relink karena
+      # object sumbernya identik secara isi. CMake+Ninja relink kedua binary
+      # karena keduanya memakai group archive static yang sama.
       EXP_OBJ=1 EXP_ARC=0 EXP_LIB=2 EXP_CC=1
-      if [ "$k" = cmake ]; then EXP_BIN=2; else EXP_BIN=0; fi
+      if [ "$k" = cmake ]; then EXP_BIN=2; else EXP_BIN=1; fi
       exp_chk obj "$o" "$EXP_OBJ"
       exp_chk arc "$a" "$EXP_ARC"
       exp_chk lib "$l" "$EXP_LIB"

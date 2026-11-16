@@ -113,7 +113,7 @@ rules_header() {
   echo "  satria :"
   printf '    %-10s: %s\n' "cold" "obj penuh, arc 1, lib 4, bin 2; cc = penuh + codegen embed"
   printf '    %-10s: %s\n' "noop" "obj/arc/lib/bin/cc semua 0"
-  printf '    %-10s: %s\n' "leaf/bade" "obj 1, cc 1, lib 2, bin 0 — perubahan source, tanpa relink binary"
+  printf '    %-10s: %s\n' "leaf/bade" "obj 1, cc 1, lib 2, bin 1 — relink binary konsumen arsip library (core<->bade)"
   printf '    %-10s: %s\n' "mod" "obj 1, cc 1, lib 2, bin 2 — codegen embed, relink lib + binary pengguna arsip"
   printf '    %-10s: %s\n' "touch" "obj/arc/lib/bin/cc semua 0 — content-hash"
   printf '    %-10s: %s\n' "hedit" "obj/cc 6, lib 4, bin 2 — konten header pusat berubah"
