@@ -4,6 +4,7 @@ build
 compile_commands.json
 .satria
 shared
+slog.sh
 
 problems/*
 !.gitkeep
@@ -20,7 +21,6 @@ todos/*
 dist
 tests/rupaws
 trash
-RELEASE_*.md
 *.orig
 *.bak
 *.plist
