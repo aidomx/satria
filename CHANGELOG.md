@@ -1,3 +1,10 @@
+# v0.6.1
+- 1a2242c chore: Update release notes for fixed release.files and update the version to v0.6.1
+- 708cbd2 chore: synchronize to support multiline release.files, and increase the cache level
+- 5f3c281 tests: new unit test for testing release.file multiline
+- d474b57 fix: release.file multiline
+- 505be4a chore: changelog v0.6.0
+
 # v0.6.0
 - 67e8daa workflows: use RELEASE_NOTE.md
 - 3f36863 chore: add fixed windows getpid
