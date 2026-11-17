@@ -431,14 +431,16 @@ static int wsRunCore(const char *cmd, int jobs, const char *only, const char *re
         if (grew) wsExpandLibDeps(&m, needed);
       } while (grew);
     }
-    if (strcmp(cmd, "build") == 0 && only && *only)
-      wsWarnSelectiveDivergence(&m, needed, only);
     /* Peringatan D (pre-flight): provider cdeps di LUAR closure dengan
        library yang belum ada — link hampir pasti gagal; sarankan opsi
        perbaikannya. Hanya bila file library benar-benar hilang (provider
        prebuilt yang sudah ada tidak perlu ditarik). */
     if (strcmp(cmd, "build") == 0 && only && *only)
       wsWarnMissingCdepsLibs(&m, needed, only);
+    /* Catatan: wsWarnSelectiveDivergence dipanggil SETELAH gerbang no-op
+       (lihat bawah) — gate valid berarti tak ada input berubah sehingga
+       peringatannya mustahil tercetak, sedangkan stat-nya (semua entri S/H
+       workspace) mahal di FS dengan syscall lambat. */
   } else {
     for (int i = 0; i < m.projectCount; i++)
       needed[i] = 1;
@@ -494,6 +496,13 @@ static int wsRunCore(const char *cmd, int jobs, const char *only, const char *re
       return 0;
     }
   }
+  /* Peringatan divergensi selektif — SETELAH gerbang no-op: sampai titik ini
+     gate pasti tidak valid (miss atau tidak dijalankan), dan gate valid berarti
+     tak ada input berubah sehingga peringatan tidak mungkin tercetak. Jadi
+     stat penuh entri S/H workspace hanya dibayar saat akan benar-benar build
+     (fix pengukuran v0.6.x: -w <nama> no-op stat dobel ~140 ms di FS lambat). */
+  if (strcmp(cmd, "build") == 0 && only && *only)
+    wsWarnSelectiveDivergence(&m, needed, only);
   /* `background = true` (design/background.md §2): spawn HANYA setelah gerbang
      no-op router di atas — run yang tidak ada yang dikerjakan tetap dilayani
      langsung (STATUS "Nothing to build"), tanpa child. Induk meluncurkan child
