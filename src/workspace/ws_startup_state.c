@@ -68,6 +68,11 @@ void wsStartupSave(const WsModel *m, const char *wsFile, const char *wsName,
   fprintf(fp, "%s %016llx %lld %s\n", WS_STARTUP_MAGIC, (unsigned long long)hash,
           (long long)time(NULL), wsName);
   fprintf(fp, "count %d\n", m->projectCount);
+  /* Bahasa default workspace (`use workspace c|cpp|hybrid`) ikut diserialisasi:
+     tanpa ini model hasil restore kehilangan deklarasi bahasa (m->lang = 0 =
+     HYBRID) — walk sumber kembali memungut .cpp dan std/driver melebar padahal
+     WsBuildfile tak berubah (hash cocok, jadi tak pernah parse ulang). */
+  fprintf(fp, "W %d\n", (int)m->lang);
   for (int i = 0; i < m->projectCount; i++) {
     fprintf(fp, "P %d %s\n", i, m->projects[i].name);
     fprintf(fp, "R %d %s\n", i, m->projects[i].root);
@@ -117,6 +122,7 @@ bool wsStartupLoad(WsModel *m, const char *wsFile, const char *wsName,
   int expectP = 0; /* P harus berurutan 0..count-1 — urutan = urutan parse */
   bool sawEnd = false;
   bool sawRelease = false;
+  bool sawLang = false;
   while (ok && fgets(line, sizeof(line), fp)) {
     size_t len = strlen(line);
     if (len && line[len - 1] == '\n')
@@ -130,6 +136,18 @@ bool wsStartupLoad(WsModel *m, const char *wsFile, const char *wsName,
       break;
     }
     switch (line[0]) {
+      case 'W': {
+        /* Bahasa default workspace (SATRIA-STARTUP-3). Cache lama (v2) tidak
+           memuat baris ini — m->lang tetap HYBRID, perilaku seperti sebelumnya. */
+        int v = -1;
+        if (sscanf(line, "W %d", &v) != 1 || v < 0 || v > WS_LANG_CPP || sawLang) {
+          ok = false;
+          break;
+        }
+        sawLang = true;
+        m->lang = (WsLang)v;
+        break;
+      }
       case 'P': {
         int i = -1;
         char nm[WS_NAME_LEN];

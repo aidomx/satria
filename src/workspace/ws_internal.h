@@ -90,7 +90,7 @@ typedef struct {
   char releaseStage[SATRIA_MAX_PATH];
 } WsModel;
 
-#define WS_STARTUP_MAGIC "SATRIA-STARTUP-2" /* 2: release.files multi-baris */
+#define WS_STARTUP_MAGIC "SATRIA-STARTUP-3" /* 2: release.files multi-baris; 3: + bahasa workspace (W) */
 
 typedef struct {
   int idx;          /* indeks proyek di WsModel */
