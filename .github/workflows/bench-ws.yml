@@ -14,28 +14,24 @@ on:
           - cmake,satria
           - satria,cmake
       warmup:
-        description: "Run untimed warm-up"
+        description: "Prime each tool once before measuring (untimed, built into satria bench)"
         type: boolean
         default: true
       artifacts:
-        description: "Keep and upload benchmark logs/artifacts"
+        description: "Keep and upload benchmark logs/CSV"
         type: boolean
         default: true
       strace:
         description: "Enable syscall profiling (strace; slower on large workspaces)"
         type: boolean
         default: false
-      audit:
-        description: "Validate actual workspace work before timing"
-        type: boolean
-        default: true
       sources:
         description: "C sources per project (core and bade)"
         type: number
         required: true
         default: 100
       repeats:
-        description: "Measured repetitions per scenario"
+        description: "Measured repetitions per scenario (median)"
         type: number
         required: true
         default: 5
@@ -44,16 +40,6 @@ on:
         type: number
         required: true
         default: 20
-      delay:
-        description: "Seconds between measurements (-D)"
-        type: number
-        required: true
-        default: 2
-      mutation_delay:
-        description: "Seconds before edits (-d)"
-        type: number
-        required: true
-        default: 0
       modules:
         description: "Number of .rp modules"
         type: number
@@ -70,14 +56,12 @@ jobs:
     env:
       BENCH_TOOLS: ${{ inputs.tools }}
       BENCH_ARTIFACTS: ${{ inputs.artifacts }}
-      BENCH_AUDIT: ${{ inputs.audit }}
       BENCH_STRACE: ${{ inputs.strace }}
       BENCH_SOURCES: ${{ inputs.sources }}
       BENCH_REPEATS: ${{ inputs.repeats }}
       BENCH_HEADERS: ${{ inputs.headers }}
       BENCH_MODULES: ${{ inputs.modules }}
-      BENCH_DELAY: ${{ inputs.delay }}
-      BENCH_MUTATION_DELAY: ${{ inputs.mutation_delay }}
+      BENCH_WARMUP: ${{ inputs.warmup }}
 
     steps:
       - uses: actions/checkout@v4
@@ -85,7 +69,7 @@ jobs:
       - name: Install benchmark dependencies
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends build-essential cmake ninja-build time
+          sudo apt-get install -y --no-install-recommends build-essential cmake ninja-build
 
       - name: Bootstrap satria
         run: |
@@ -104,50 +88,26 @@ jobs:
             df -h .
             gcc --version | head -1
             cmake --version
-            ninja --version
             bin/satria version || true
           } | tee benchmark-results/runner.txt
 
-      # The first measured run must not also be the first ever invocation of
-      # satria, GCC, the archiver, or Ninja on this runner. Warm up BOTH tools
-      # with an independent workspace, preserving the real cold-build work in
-      # every subsequent measured repetition.
-      - name: Warm up selected tools (not measured)
-        if: ${{ inputs.warmup }}
+      # Benchmark berjalan penuh di C: `satria bench --workspace` (src/bench).
+      # Warmup/audit/rolling built-in; audit kerja per skenario selalu jalan
+      # (dilaporkan di Detailed Validation Log), tidak ada lagi bench/ws.sh.
+      - name: Measure workspace benchmark (bin/satria bench --workspace)
+        shell: bash
         run: |
-          bash bench/ws.sh \
-            -b "$PWD/bin/satria" \
-            -n "$BENCH_SOURCES" \
-            -H "$BENCH_HEADERS" \
-            -m "$BENCH_MODULES" \
-            -r 1 -t "$BENCH_TOOLS" -w false -strace false -artifacts "$BENCH_ARTIFACTS" \
-            -o "$PWD/benchmark-results/warmup" \
-            > benchmark-results/warmup.log 2>&1
-          rc=$?
-          cat benchmark-results/warmup.log
-          if [ "$BENCH_ARTIFACTS" != true ]; then rm -f benchmark-results/warmup.log; fi
-          exit "$rc"
-
-      - name: Measure workspace benchmark
-        run: |
+          set -euo pipefail
           mkdir -p benchmark-results
-
-          bash bench/ws.sh \
-            -b "$PWD/bin/satria" \
-            -n "$BENCH_SOURCES" \
-            -H "$BENCH_HEADERS" \
-            -m "$BENCH_MODULES" \
-            -r "$BENCH_REPEATS" \
-            -t "$BENCH_TOOLS" \
-            -D "$BENCH_DELAY" \
-            -d "$BENCH_MUTATION_DELAY" \
-            -O abba -w "$BENCH_AUDIT" -strace "$BENCH_STRACE" -artifacts "$BENCH_ARTIFACTS" \
-            -o "$PWD/benchmark-results/measured" \
-            > benchmark-results/measured.log 2>&1
-          rc=$?
-          cat benchmark-results/measured.log
-          if [ "$BENCH_ARTIFACTS" != true ]; then rm -f benchmark-results/measured.log; fi
-          exit "$rc"
+          args=(--workspace -f "tools=$BENCH_TOOLS" -f "source=$BENCH_SOURCES"
+                -f "header=$BENCH_HEADERS" -f "module=$BENCH_MODULES"
+                -f "runs=$BENCH_REPEATS" -f "warmup=$BENCH_WARMUP" -f "trace=$BENCH_STRACE")
+          if [[ "$BENCH_ARTIFACTS" == true ]]; then
+            bin/satria bench "${args[@]}" -f artifact=true -f out="$PWD/benchmark-results/measured" \
+              2>&1 | tee benchmark-results/measured.log
+          else
+            bin/satria bench "${args[@]}" -f artifact=false -f out="$RUNNER_TEMP/satria-ws"
+          fi
 
       - name: Upload benchmark artifacts
         if: ${{ always() && inputs.artifacts }}

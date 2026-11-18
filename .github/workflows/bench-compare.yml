@@ -19,16 +19,12 @@ on:
         required: true
         default: 30
       repeats:
-        description: 'Measured repetitions'
+        description: 'Measured repetitions (median)'
         type: number
         required: true
         default: 5
       warmup:
-        description: 'Run an untimed warm-up'
-        type: boolean
-        default: true
-      audit:
-        description: 'Run untimed actual-work audit'
+        description: 'Prime each tool once before measuring (untimed, built into satria bench)'
         type: boolean
         default: true
       artifacts:
@@ -36,7 +32,7 @@ on:
         type: boolean
         default: true
       strace:
-        description: 'Add no-op syscall profiling (strace -c -f); installs strace'
+        description: 'Add no-op syscall profiling (strace -c); installs strace'
         type: boolean
         default: false
 
@@ -52,7 +48,7 @@ jobs:
       BENCH_SOURCES: ${{ inputs.sources }}
       BENCH_HEADERS: ${{ inputs.headers }}
       BENCH_REPEATS: ${{ inputs.repeats }}
-      BENCH_AUDIT: ${{ inputs.audit }}
+      BENCH_WARMUP: ${{ inputs.warmup }}
       BENCH_ARTIFACTS: ${{ inputs.artifacts }}
       BENCH_STRACE: ${{ inputs.strace }}
     steps:
@@ -61,8 +57,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # Dasar selalu dipasang: ninja, make, gcc (wajib di bench/compare.sh).
-          pkgs=(build-essential ninja-build make time)
+          # Dasar: build-essential (gcc, ar), ninja-build, make (gcc-floor).
+          pkgs=(build-essential ninja-build make)
           want_xmake=0
           IFS=',' read -r -a requested <<< "$BENCH_TOOLS"
           for raw in "${requested[@]}"; do
@@ -89,7 +85,6 @@ jobs:
           if [[ "$want_xmake" == 1 ]]; then
             curl -fsSL https://xmake.io/shget.text | bash
             echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-            export PATH="$HOME/.local/bin:$PATH"
           fi
           # Verifikasi: setiap tool yang diminta harus benar-benar bisa dieksekusi.
           missing=0
@@ -112,33 +107,20 @@ jobs:
         run: |
           ./install.sh --dev
           test -x bin/satria
-      - name: Warm up (untimed)
-        if: ${{ inputs.warmup }}
+      # Benchmark berjalan penuh di C: `satria bench` (src/bench). Warmup/
+      # audit/rolling built-in; tidak ada lagi pemanggilan bench/*.sh.
+      - name: Measure (bin/satria bench)
         shell: bash
         run: |
           set -euo pipefail
-          args=(-b "$PWD/bin/satria" -t "$BENCH_TOOLS" -n "$BENCH_SOURCES" -H "$BENCH_HEADERS" -r 1 -A -o "$RUNNER_TEMP/satria-compare-warmup")
-          bash bench/compare.sh "${args[@]}"
-          rm -rf "$RUNNER_TEMP/satria-compare-warmup"
-      - name: Measure
-        shell: bash
-        run: |
-          set -euo pipefail
-          args=(-b "$PWD/bin/satria" -t "$BENCH_TOOLS" -n "$BENCH_SOURCES" -H "$BENCH_HEADERS" -r "$BENCH_REPEATS")
-          if [[ "$BENCH_AUDIT" != true ]]; then args+=(-A); fi
-          # -s membatasi skenario. strace hanya berjalan bila diminta lewat -s,
-          # jadi daftar default ditulis lengkap ditambah strace.
-          if [[ "$BENCH_STRACE" == true ]]; then
-            args+=(-s cold,noop,touch,edit,editrel,compdb,strace)
-          fi
+          args=(-f "tools=$BENCH_TOOLS" -f "source=$BENCH_SOURCES" -f "header=$BENCH_HEADERS"
+                -f "runs=$BENCH_REPEATS" -f "warmup=$BENCH_WARMUP" -f "trace=$BENCH_STRACE")
           if [[ "$BENCH_ARTIFACTS" == true ]]; then
-            mkdir -p benchmark-results
-            args+=(-k -o "$PWD/benchmark-results/compare")
-            bash bench/compare.sh "${args[@]}" 2>&1 | tee benchmark-results/compare.log
+            mkdir -p benchmark-results/compare
+            bin/satria bench "${args[@]}" -f artifact=true -f out="$PWD/benchmark-results/compare" \
+              2>&1 | tee benchmark-results/compare.log
           else
-            args+=(-o "$RUNNER_TEMP/satria-compare-measured")
-            bash bench/compare.sh "${args[@]}"
-            rm -rf "$RUNNER_TEMP/satria-compare-measured"
+            bin/satria bench "${args[@]}" -f artifact=false -f out="$RUNNER_TEMP/satria-compare"
           fi
       - name: Upload artifacts
         if: ${{ always() && inputs.artifacts }}
