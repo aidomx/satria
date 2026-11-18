@@ -19,8 +19,8 @@ bool benchRuntimeOk(const Bench *b, const BenchTool *t) { (void)b; (void)t; retu
 void benchToolCommand(const Bench *b, const BenchTool *t, int mode, const char *ver, BenchArgv *out) {
   (void)b; (void)t; (void)mode; (void)ver; memset(out, 0, sizeof(*out));
 }
-int benchTraceTool(const Bench *b, const BenchTool *t, const char *reportPath) {
-  (void)b; (void)t; (void)reportPath; return -1;
+int benchTraceTool(const Bench *b, const BenchTool *t, const char *reportPath, bool follow) {
+  (void)b; (void)t; (void)reportPath; (void)follow; return -1;
 }
 bool benchFloorBuild(const Bench *b, const char *cwd, int *rc, double *ms) {
   (void)b; (void)cwd;
@@ -413,14 +413,14 @@ bool benchFloorBuild(const Bench *b, const char *cwd, int *rc, double *ms) {
 
 /* ---------- strace ---------- */
 
-int benchTraceTool(const Bench *b, const BenchTool *t, const char *reportPath) {
+int benchTraceTool(const Bench *b, const BenchTool *t, const char *reportPath, bool follow) {
   BenchArgv cmd;
   benchToolCommand(b, t, BENCH_CMD_FULL, NULL, &cmd);
   char *argv[20];
   int n = 0;
   argv[n++] = (char *)"strace";
   argv[n++] = (char *)"-c";
-  argv[n++] = (char *)"-f";
+  if (follow) argv[n++] = (char *)"-f";
   argv[n++] = (char *)"-o";
   argv[n++] = (char *)reportPath;
   for (int i = 0; cmd.argv[i] && n < 19; i++) argv[n++] = cmd.argv[i];

@@ -1483,7 +1483,11 @@ int cmdBench(const char *const argv[], int argc) {
           benchPathCat(report, sizeof(report), report, wscen[si]);
         }
         benchPathCat(report, sizeof(report), report, ".txt");
-        int rc = benchTraceTool(&b, t, report);
+        /* leaf: hanya proses utama satria tanpa -f — anak gcc/ld yang
+           mendominasi profil anak membuat biaya walk satria sendiri
+           tak terlihat. Cold tetap -f (biaya build penuh). */
+        bool follow = !(b.workspace && strcmp(wscen[si], "leaf") == 0);
+        int rc = benchTraceTool(&b, t, report, follow);
         if (rc != 0) {
           printf("  ✗ %-8s strace %-5s GAGAL\n", t->label, scenName);
           b.mismatchRuns++;

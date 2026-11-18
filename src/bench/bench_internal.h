@@ -164,7 +164,7 @@ typedef struct {
 
 void benchToolCommand(const Bench *b, const BenchTool *t, int mode, const char *ver, BenchArgv *out);
 bool benchFloorBuild(const Bench *b, const char *cwd, int *rc, double *ms);
-int benchTraceTool(const Bench *b, const BenchTool *t, const char *reportPath);
+int benchTraceTool(const Bench *b, const BenchTool *t, const char *reportPath, bool follow);
 
 /* Mode generator embed (CMake carray): satria bench --embed-source <in> <out.c> <sym> */
 int benchEmbedSource(const char *const argv[], int argc);
