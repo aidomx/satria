@@ -7,6 +7,12 @@
 name: Build
 
 on:
+  # Event `release: published` yang dibuat GITHUB_TOKEN di release.yml
+  # TIDAK memicu workflow ini (GitHub memblokir rekursi) — tag rilis v*
+  # yang di-push pengguna menjadi pemicunya.
+  push:
+    tags:
+      - "v*"
   release:
     types: [published]
 

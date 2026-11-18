@@ -35,6 +35,12 @@ on:
         description: 'Add no-op syscall profiling (strace -c); installs strace'
         type: boolean
         default: false
+  # Tag rilis (v*) yang di-push pengguna memicu uji benchmark otomatis —
+  # event `release: published` yang dibuat GITHUB_TOKEN di release.yml
+  # TIDAK memicu workflow lain (GitHub memblokir rekursi).
+  push:
+    tags:
+      - "v*"
 
 permissions:
   contents: read
@@ -44,13 +50,16 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 180
     env:
-      BENCH_TOOLS: ${{ inputs.tools }}
-      BENCH_SOURCES: ${{ inputs.sources }}
-      BENCH_HEADERS: ${{ inputs.headers }}
-      BENCH_REPEATS: ${{ inputs.repeats }}
-      BENCH_WARMUP: ${{ inputs.warmup }}
-      BENCH_ARTIFACTS: ${{ inputs.artifacts }}
-      BENCH_STRACE: ${{ inputs.strace }}
+      # Fallback untuk trigger push tag (input workflow kosong di event itu).
+      # Boolean TIDAK boleh `x || default`: false ikut falsy, jadi pakai
+      # perbandingan eksplisit.
+      BENCH_TOOLS: ${{ inputs.tools || 'ninja,cmake,satria' }}
+      BENCH_SOURCES: ${{ inputs.sources || 150 }}
+      BENCH_HEADERS: ${{ inputs.headers || 30 }}
+      BENCH_REPEATS: ${{ inputs.repeats || 5 }}
+      BENCH_WARMUP: ${{ inputs.warmup == false && 'false' || 'true' }}
+      BENCH_ARTIFACTS: ${{ inputs.artifacts == false && 'false' || 'true' }}
+      BENCH_STRACE: ${{ inputs.strace == true && 'true' || 'false' }}
     steps:
       - uses: actions/checkout@v4
       - name: Install benchmark dependencies
@@ -123,9 +132,9 @@ jobs:
             bin/satria bench "${args[@]}" -f artifact=false -f out="$RUNNER_TEMP/satria-compare"
           fi
       - name: Upload artifacts
-        if: ${{ always() && inputs.artifacts }}
+        if: ${{ always() && env.BENCH_ARTIFACTS == 'true' }}
         uses: actions/upload-artifact@v4
         with:
-          name: compare-${{ inputs.sources }}-r${{ inputs.repeats }}
+          name: compare-${{ env.BENCH_SOURCES }}-r${{ env.BENCH_REPEATS }}
           path: benchmark-results/
           if-no-files-found: warn

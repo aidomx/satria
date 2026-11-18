@@ -46,6 +46,13 @@ on:
         required: true
         default: 20
 
+  # Tag rilis (v*) yang di-push pengguna memicu uji benchmark otomatis —
+  # event `release: published` yang dibuat GITHUB_TOKEN di release.yml
+  # TIDAK memicu workflow lain (GitHub memblokir rekursi).
+  push:
+    tags:
+      - "v*"
+
 permissions:
   contents: read
 
@@ -54,14 +61,17 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 180
     env:
-      BENCH_TOOLS: ${{ inputs.tools }}
-      BENCH_ARTIFACTS: ${{ inputs.artifacts }}
-      BENCH_STRACE: ${{ inputs.strace }}
-      BENCH_SOURCES: ${{ inputs.sources }}
-      BENCH_REPEATS: ${{ inputs.repeats }}
-      BENCH_HEADERS: ${{ inputs.headers }}
-      BENCH_MODULES: ${{ inputs.modules }}
-      BENCH_WARMUP: ${{ inputs.warmup }}
+      # Fallback untuk trigger push tag (input workflow kosong di event itu).
+      # Boolean TIDAK boleh `x || default`: false ikut falsy, jadi pakai
+      # perbandingan eksplisit.
+      BENCH_TOOLS: ${{ inputs.tools || 'cmake,satria' }}
+      BENCH_ARTIFACTS: ${{ inputs.artifacts == false && 'false' || 'true' }}
+      BENCH_STRACE: ${{ inputs.strace == true && 'true' || 'false' }}
+      BENCH_SOURCES: ${{ inputs.sources || 100 }}
+      BENCH_REPEATS: ${{ inputs.repeats || 5 }}
+      BENCH_HEADERS: ${{ inputs.headers || 20 }}
+      BENCH_MODULES: ${{ inputs.modules || 20 }}
+      BENCH_WARMUP: ${{ inputs.warmup == false && 'false' || 'true' }}
 
     steps:
       - uses: actions/checkout@v4
@@ -77,7 +87,7 @@ jobs:
           test -x bin/satria
 
       - name: Capture runner environment
-        if: ${{ inputs.artifacts }}
+        if: ${{ env.BENCH_ARTIFACTS == 'true' }}
         run: |
           mkdir -p benchmark-results
           {
@@ -110,9 +120,9 @@ jobs:
           fi
 
       - name: Upload benchmark artifacts
-        if: ${{ always() && inputs.artifacts }}
+        if: ${{ always() && env.BENCH_ARTIFACTS == 'true' }}
         uses: actions/upload-artifact@v4
         with:
-          name: workspace-${{ inputs.tools }}-n${{ inputs.sources }}-r${{ inputs.repeats }}
+          name: workspace-${{ env.BENCH_TOOLS }}-n${{ env.BENCH_SOURCES }}-r${{ env.BENCH_REPEATS }}
           path: benchmark-results/
           if-no-files-found: warn
