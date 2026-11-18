@@ -26,6 +26,7 @@ satria clean             Remove build artifacts
 satria profile <ctx>     Measure operation costs (see: help profile)
 satria trace [opts] -- <args>  Trace file access via LD_PRELOAD (see: help trace)
 satria test <args>          Run unit tests via scripts/unit.sh (see: help test)
+satria bench [--workspace] [-f key=value ...]  Benchmark in C (see: help bench)
 satria -w                Build all projects in workspace (WsBuildfile)
 satria -w <name>         Build <name> and its dependencies
 satria -w <name> --with-cdeps  ...plus its cdeps providers (see: help workspace)
@@ -38,7 +39,7 @@ satria version           Show version (alias: satria --version)
 satria self-upgrade      Upgrade satria itself
 satria self-uninstall    Remove satria and global state (requires confirmation)
 
-Topics: build, profile, workspace, init, clean, release, compdb, ninja, install, watch, trace, adhoc
+Topics: build, profile, workspace, init, clean, release, compdb, ninja, install, watch, trace, adhoc, bench
 ---endhelp
 
 ---build
@@ -377,6 +378,86 @@ The repo root is found from the running binary (bin/../), so `satria test`
 works from any directory inside the repo. The exit code of unit.sh is the
 exit code of satria. Not available on Windows.
 ---endtest
+
+---bench
+Benchmark — C port of bench/compare.sh (single project) and bench/ws.sh
+(workspace), replacing the bash measurement path.
+
+  satria bench [--compare] [-f key=value ...]             single project
+  satria bench --workspace [--compare] [-f key=value ...] 3-project workspace
+
+This benchmark BUILDS satria: it measures overhead, shows the impact of a
+change, and detects regressions. It is not a claim that one tool is "faster"
+in general; competing tools have different features, so numbers only mean
+something within their scenario. `--compare` only selects the comparison
+table; `--workspace` selects the mode.
+
+Project generation, scenario mutation, artifact snapshots, prime copies,
+measurement, and compiler shims are all C — no bash. Processes are spawned
+directly (fork/exec), and `gcc`/`ld` are shimmed by the satria binary itself
+through symlinks in <out>/.wrap, so every compile/link is recorded as
+evidence (work.log), not just artifact timestamps.
+
+Single-project mode (default):
+  N chained sources with H headers. The same tree ships Buildfile, build.ninja,
+  Makefile, CMakeLists.txt, meson.build, xmake.lua, and Tupfile, so every tool
+  builds an equivalent project. Scenarios: cold (CMake/Meson include configure,
+  Ninja includes graph generation), noop, touch (header, same content), edit
+  (comment; satria may skip relink), editrel (new function; every tool must
+  relink), compdb (compile_commands.json; bear does a full clean build).
+
+  A gcc-floor row is measured for edit and editrel: gcc -c one file + direct
+  link, no build tool. This is the real work floor, so satria's no-relink edit
+  result is not mistaken for a link comparison; for editrel the floor is shown
+  as the honest baseline.
+
+Workspace mode (--workspace):
+  rupamod (.rp archive) · core · bade (embed + depends_on, circular library).
+  Scenarios: cold, noop, leaf, bade, mod, touch, hedit, sel (-w core),
+  dep (-w bade), libtouch, libhdr, rel (tar+sha256, satria-only).
+
+Keys -f (both modes):
+  tools=...               satria, cmake/cninja, ninja, make, bear, meson,
+                          xmake, tup. Default: all; tools missing from PATH
+                          are skipped with a message. --workspace only
+                          supports satria and cmake.
+  source=80               number of sources per project (.c)
+  header=20               number of chained headers per project
+  runs=5                  repetitions per scenario (median)
+  scenario=all            single: cold,noop,touch,edit,editrel,compdb
+                          (+gcc-floor automatically for edit/editrel)
+                          workspace: cold,noop,leaf,bade,mod,touch,hedit,
+                          sel,dep,libtouch,libhdr,rel (comma-separated subset)
+  warmup=true             build+gate once per tool, then restore prime
+  trace=false             syscall profiling (strace -c; skipped under proot)
+  artifact=true           write results.csv, view.csv, work.log
+  keep=false              keep project/workspace after the run
+  rolling=true            alternate tool order per repetition (ABBA)
+  bin=a,b                 satria A/B binaries (unique labels)
+  jobs=N                  parallel jobs (default: CPU core count)
+  compiler=gcc            `compiler =` value in Buildfile
+  satria="args"           extra arguments for satria
+  out=DIR                 working directory (default: bench.tmp)
+
+Keys -f (workspace only):
+  module=40               number of .rp files in rupamod
+
+Every run is validated against the expected work (obj/arc/lib/bin/cc), plus a
+runtime check of the built binary (and release checksums for rel). The compdb
+scenario validates that compile_commands.json exists and is non-empty.
+
+Examples:
+  satria bench -f tools=satria,cmake -f source=40 -f header=10 -f runs=3
+  satria bench -f tools=ninja,make,bear,meson,xmake,satria -f scenario=editrel
+  satria bench -f tools=satria,cmake -f scenario=compdb
+  satria bench --workspace --compare -f tools=cmake,satria -f source=10 \
+    -f header=10 -f module=10 -f scenario=all -f warmup=false -f trace=false \
+    -f artifact=true -f keep=true -f rolling=true -f bin=a,b
+
+Exit code 0 when every run matches expectations; 1 when a run failed or is
+"Not in accordance". The old bash scripts (bench/ws.sh, bench/compare.sh)
+remain as historical references, not the measured path.
+---endbench
 
 ---adhoc
 Ad-hoc compile (design/compile.md) — no Buildfile lifecycle, no .satria

@@ -38,6 +38,7 @@ Dokumen desain satria.
 | [trace.md](trace.md) | `satria trace`, sinkronisasi `tracer.src` |
 | [profile.md](profile.md) | `satria profile <context>` (archive, embed, library, binary, project, workspace) |
 | [bench_ws_output.md](bench_ws_output.md) | Format keluaran bench workspace |
+| [bench_c.md](bench_c.md) | Benchmark workspace di C (`satria bench`) |
 
 ### Artefak
 

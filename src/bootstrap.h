@@ -28,7 +28,8 @@ typedef enum {
   CMD_WATCH, /* pantau build background (design/background.md §3) */
   CMD_INTERACTIVE_INIT,
   CMD_TEST,
-  CMD_ADHOC /* design/compile.md: compile/link ad-hoc (-o/-b/-F), tanpa state */
+  CMD_ADHOC, /* design/compile.md: compile/link ad-hoc (-o/-b/-F), tanpa state */
+  CMD_BENCH /* `satria bench ...`: benchmark workspace (design/bench_c.md) */
 } Command;
 
 typedef struct {
@@ -79,6 +80,10 @@ typedef struct {
   // scripts/unit.sh, tanpa porting; argv milik caller, tanpa strdup)
   int test_argc;
   const char **test_argv;
+
+  /* Bench specific (`satria bench ...` — sisa argumen diteruskan utuh) */
+  int bench_argc;
+  const char **bench_argv;
 
   // Konversi Ninja/Make (-xf / -xcf)
   const char *conv_file;

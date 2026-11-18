@@ -1,7 +1,9 @@
 # Mutator dan runner skenario.
 # mutator: <run#> <tool>
-mut_leaf() { (cd "$WS" && printf '\n/* leaf %s-%s */\n' "$2" "$1" >> core/src/r1.c); }
-mut_bade() { (cd "$WS" && printf '\n/* bade %s-%s */\n' "$2" "$1" >> bade/src/k1.c); }
+# Perubahan BODY (fungsi baru, nama unik per run+tool): objek berubah isi,
+# sehingga semua tool wajib rebuild. Komentar saja tidak mengubah objek.
+mut_leaf() { (cd "$WS" && printf '\nint bench_leaf_%s_%s(void) { return %s; }\n' "$1" "${2//[^a-zA-Z0-9]/_}" "$1" >> core/src/r1.c); }
+mut_bade() { (cd "$WS" && printf '\nint bench_bade_%s_%s(void) { return %s; }\n' "$1" "${2//[^a-zA-Z0-9]/_}" "$1" >> bade/src/k1.c); }
 mut_mod() { (cd "$WS" && printf '\n# edit %s-%s\n' "$2" "$1" >> rupamod/m1.rp); }
 mut_sel() {
   mut_leaf "$@"

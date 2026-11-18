@@ -340,6 +340,15 @@ int bootstrapParse(int argc, const char *argv[], Bootstrap *bs) {
         brokeAtProfile = true;
         break;
       }
+      /* `bench` berdiri sendiri: seluruh opsi -f/--compare milik benchmark,
+         bukan opsi global satria (-f di sini bukan Buildfile). */
+      if (strcmp(a, "bench") == 0) {
+        bs->cmd = CMD_BENCH;
+        bs->bench_argv = argv + i + 1;
+        bs->bench_argc = argc - i - 1;
+        brokeAtProfile = true;
+        break;
+      }
     }
   }
 

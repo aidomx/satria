@@ -41,13 +41,11 @@ expect_check() { # <tool> <scen> <obj> <arc> <lib> <bin> <cc>
       exp_chk cc "$c" "$EXP_CC"
       ;;
     leaf | bade)
-      # Satu TU berubah. Satria memperbarui object+library lalu hanya binary
-      # konsumen yang menautkan arsip library berubah yang relink (edit core ->
-      # bade, edit bade -> rupa); binary proyek itu sendiri tidak relink karena
-      # object sumbernya identik secara isi. CMake+Ninja relink kedua binary
-      # karena keduanya memakai group archive static yang sama.
-      EXP_OBJ=1 EXP_ARC=0 EXP_LIB=2 EXP_CC=1
-      if [ "$k" = cmake ]; then EXP_BIN=2; else EXP_BIN=1; fi
+      # Satu TU berubah (perubahan BODY: fungsi baru, objek berubah isi).
+      # Satria dan CMake+Ninja sama-sama relink kedua binary (bade dan rupa),
+      # karena keduanya menautkan library core/bade yang berubah. Komentar saja
+      # tidak mengubah objek, jadi mutasi di scen.sh memakai perubahan body.
+      EXP_OBJ=1 EXP_ARC=0 EXP_LIB=2 EXP_BIN=2 EXP_CC=1
       exp_chk obj "$o" "$EXP_OBJ"
       exp_chk arc "$a" "$EXP_ARC"
       exp_chk lib "$l" "$EXP_LIB"
@@ -98,10 +96,11 @@ expect_check() { # <tool> <scen> <obj> <arc> <lib> <bin> <cc>
       exp_chk cc "$c" "$EXP_CC"
       ;;
     sel)
-      # Cakupan disamakan: satria -w core hanya membangun object/library core
-      # (tanpa relink binary), dan CMake dibatasi --target core_static
-      # core_shared — output yang sama. Edit bade di luar cakupan KEDUA tool.
-      EXP_ARC=0 EXP_OBJ=1 EXP_LIB=2 EXP_BIN=0 EXP_CC=1
+      # Cakupan NYATA tiap tool (tidak disamakan): `satria -w core` membangun
+      # library core DAN binary core (rupa); CMake hanya --target core_static
+      # core_shared (tanpa binary rupa). Edit bade di luar cakupan KEDUA tool.
+      EXP_ARC=0 EXP_OBJ=1 EXP_LIB=2 EXP_CC=1
+      if [ "$k" = cmake ]; then EXP_BIN=0; else EXP_BIN=1; fi
       exp_chk obj "$o" "$EXP_OBJ"
       exp_chk arc "$a" "$EXP_ARC"
       exp_chk lib "$l" "$EXP_LIB"

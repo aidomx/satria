@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "bootstrap.h"
+#include "bench/bench.h"
 #include "adhoc.h" /* CMD_ADHOC: mode ad-hoc -o/-b/-F (design/compile.md) */
 #include "background.h"
 #include "config.h" /* cliDevSet: --dev (fase pack/release membaca flag ini) */
@@ -138,6 +139,12 @@ int satriaRun(int argc, const char *argv[]) {
   if (bs.cmd == CMD_TRACE) {
     bootstrapCleanup(&bs);
     return cmdTrace(bs.trace_argv, bs.trace_argc, argv[0]);
+  }
+
+  /* satria bench ... — benchmark workspace di C (design/bench_c.md). */
+  if (bs.cmd == CMD_BENCH) {
+    bootstrapCleanup(&bs);
+    return cmdBench(bs.bench_argv, bs.bench_argc);
   }
 
   /* satria test <args unit.sh…> — delegasi penuh ke scripts/unit.sh. */
@@ -278,7 +285,8 @@ int satriaRun(int argc, const char *argv[]) {
     rc = 2;
     break;
 
-  case CMD_WATCH: /* `satria watch` — pantau build background satu-proyek (§3) */
+
+  case CMD_WATCH: /* `satria watch` — pantau build background satu-proyek (§3) */
     rc = bgWatch(false, bs.watch_full);
     break;
 
