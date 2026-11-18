@@ -1,3 +1,10 @@
+# v0.6.2
+- cc0a8df chore: CI bench pakai bin/satria bench + versi v0.6.2 + release note
+- 85186d1 fix: bench workspace — prime snapshot selalu dipakai, state terisolasi per run
+- 3c14634 feat: benchmark di C — satria bench [--workspace] [-f key=value]
+- 80058d3 fix: serialisasi bahasa workspace di startup.state (SATRIA-STARTUP-3)
+- 0565bd1 perf: peringatan divergensi selektif hanya bila gerbang no-op meleset
+
 # v0.6.1
 - 1a2242c chore: Update release notes for fixed release.files and update the version to v0.6.1
 - 708cbd2 chore: synchronize to support multiline release.files, and increase the cache level
