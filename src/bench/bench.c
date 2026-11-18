@@ -1204,8 +1204,12 @@ int cmdBench(const char *const argv[], int argc) {
       b.haveStrace = true;
   }
 
-  /* prime (warmup) */
-  if (b.warmup) {
+  /* prime (warmup) — mode workspace SELALU prime: restore snapshot per
+     skenario satu-satunya cara menjamin mutasi skenario terisolasi (leaf
+     lalu sel menambah fungsi bernama sama; tanpa restore, definisi ganda
+     membuat build gagal dan semua skenario berikutnya GAGAL). Flag warmup
+     hanya relevan di mode single. */
+  if (b.warmup || b.workspace) {
     printf("\n[Prime]\n");
     for (int i = 0; i < b.ntools; i++) {
       BenchTool *t = &b.tools[i];
@@ -1229,13 +1233,18 @@ int cmdBench(const char *const argv[], int argc) {
   }
 
   /* Tanpa warmup dan tanpa `cold`, skenario incremental butuh state build
-     awal yang tidak dihitung (sama seperti prime_tool di compare.sh). */
-  if (!b.workspace && !b.warmup && !benchHaveScenario(&b, "cold")) {
-    for (int i = 0; i < b.ntools; i++)
-      if (!benchSetupSingle(&b, &b.tools[i])) {
-        b.tools[i].primeFail = true;
-        printf("  ✗ %-8s setup awal gagal (lihat %s)\n", b.tools[i].label, b.errlog);
-      }
+     awal yang tidak dihitung (sama seperti prime_tool di compare.sh).
+     gcc-floor tidak ikut skenario cold — state-nya harus dibangun di sini
+     apa pun skenarionya, bila tidak edit/editrel me-link tanpa object
+     dasar dan selalu gagal. */
+  if (!b.workspace && !b.warmup) {
+    if (!benchHaveScenario(&b, "cold")) {
+      for (int i = 0; i < b.ntools; i++)
+        if (!benchSetupSingle(&b, &b.tools[i])) {
+          b.tools[i].primeFail = true;
+          printf("  ✗ %-8s setup awal gagal (lihat %s)\n", b.tools[i].label, b.errlog);
+        }
+    }
     if (b.haveFloor && !benchSetupFloor(&b)) {
       b.floor.primeFail = true;
       printf("  ✗ %-8s setup awal gagal (lihat %s)\n", b.floor.label, b.errlog);
@@ -1398,7 +1407,10 @@ int cmdBench(const char *const argv[], int argc) {
             continue;
           }
 
-          if (b.warmup && t->primeOk) {
+          if (t->primeOk) {
+            /* Restore prime SETIAP run: setiap pengukuran mulai dari state
+               build bersih pasca-cold — kerja skenario deterministik antar
+               repetisi, dan mutasi skenario tidak menumpuk. */
             char snap[BENCH_PATH_LEN];
             benchPathCat(snap, sizeof(snap), b.primedir, "/");
             benchPathCat(snap, sizeof(snap), snap, t->label);
