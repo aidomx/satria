@@ -18,7 +18,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 
 #include "bench_internal.h"
 #include "../portability.h"
@@ -31,6 +30,8 @@ int cmdBench(const char *const argv[], int argc) {
 }
 int benchEmbedSource(const char *const argv[], int argc) { (void)argv; (void)argc; return 2; }
 #else
+
+#include <unistd.h>
 
 /* ---------- util kecil ---------- */
 

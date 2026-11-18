@@ -32,6 +32,14 @@ void benchDelta(const BenchSnap *before, const BenchSnap *after, BenchDelta *d) 
 #include <time.h>
 #include <unistd.h>
 
+/* struct stat macOS memakai st_*timespec; glibc memakai st_*tim.
+   Alias agar snapshot mtime/ctime portable (pola sama dengan port_fs.c). */
+#if defined(__APPLE__)
+#define st_atim st_atimespec
+#define st_mtim st_mtimespec
+#define st_ctim st_ctimespec
+#endif
+
 bool benchPathExists(const char *path) {
   struct stat st;
   return path && *path && stat(path, &st) == 0;
