@@ -1428,67 +1428,102 @@ int cmdBench(const char *const argv[], int argc) {
     }
   } /* akhir mode workspace */
 
-  /* strace (sekali per tool) */
+  /* strace (sekali per tool). Mode workspace menelusuri dua kondisi:
+     cold = build penuh pasca-reset, leaf = run inkremental pasca-mutasi —
+     profil kedua inilah yang menjelaskan denda post-mutasi (~2 s pada
+     10k file; jumlah kompilasi identik dengan cmake). cmake/meson wajib
+     configure dulu setelah reset, atau build dir tidak ada lagi. */
   if (b.haveStrace && benchHaveScenario(&b, "strace")) {
     printf("\n[Trace]\n");
     FILE *sf = fopen(b.syscsv, "wb");
     if (sf) fputs("tool,scenario,run,rank,percent,seconds,usecs_per_call,calls,errors,syscall\n", sf);
     for (int i = 0; i < b.ntools; i++) {
       BenchTool *t = &b.tools[i];
-      if (b.workspace) {
-        benchResetWorkspace(t->ws);
-      } else if (b.warmup && t->primeOk) {
-        char snap[BENCH_PATH_LEN];
-        benchPathCat(snap, sizeof(snap), b.primedir, "/");
-        benchPathCat(snap, sizeof(snap), snap, t->label);
-        benchCopyTree(snap, t->ws);
-      } else {
-        benchSetupSingle(&b, t);
-      }
-      char report[BENCH_PATH_LEN];
-      benchPathCat(report, sizeof(report), b.workdir,
-                   b.workspace ? "/workspace.strace." : "/single.strace.");
-      benchPathCat(report, sizeof(report), report, t->label);
-      benchPathCat(report, sizeof(report), report, ".txt");
-      int rc = benchTraceTool(&b, t, report);
-      if (rc != 0) {
-        printf("  ✗ %-8s strace GAGAL\n", t->label);
-        b.mismatchRuns++;
-        continue;
-      }
-      FILE *rf = fopen(report, "rb");
-      if (!rf) continue;
-      char line[1024];
-      long totalCalls = 0;
-      double totalSec = 0;
-      int rank = 0;
-      while (fgets(line, sizeof(line), rf)) {
-        /* Kolom strace -c: %time seconds usecs/call calls errors syscall.
-           Baris `total` kadang tidak punya kolom errors (tanda `-`), jadi
-           dipecah per token, bukan sscanf. */
-        char *tok[8];
-        int nt = 0;
-        char tmp[sizeof(line)];
-        copyStr(tmp, sizeof(tmp), line);
-        for (char *t2 = strtok(tmp, " \t\r\n"); t2 && nt < 8; t2 = strtok(NULL, " \t\r\n")) tok[nt++] = t2;
-        if (nt >= 4 && strcmp(tok[nt - 1], "total") == 0) {
-          totalSec = strtod(tok[1], NULL);
-          totalCalls = strtol(tok[3], NULL, 10);
+      static const char *const wscen[] = {"cold", "leaf"};
+      int nts = b.workspace ? 2 : 1;
+      for (int si = 0; si < nts; si++) {
+        const char *scenName = b.workspace ? wscen[si] : "strace";
+        if (b.workspace) {
+          if (strcmp(wscen[si], "cold") == 0) {
+            benchResetWorkspace(t->ws);
+            if (t->kind == BENCH_CMAKE || t->kind == BENCH_MESON) {
+              BenchArgv conf;
+              benchToolCommand(&b, t, BENCH_CMD_CONFIGURE, NULL, &conf);
+              int crc = 0;
+              benchRunArgv(t->ws, conf.argv, b.errlog, &crc, NULL);
+              if (crc != 0) {
+                printf("  ✗ %-8s strace cold GAGAL (configure rc=%d)\n", t->label, crc);
+                b.mismatchRuns++;
+                continue;
+              }
+            }
+          } else {
+            /* leaf: mulai dari prime bersih lalu mutasi leaf — persis
+               kondisi skenario terukur yang mengalami denda. */
+            char snap[BENCH_PATH_LEN];
+            benchPathCat(snap, sizeof(snap), b.primedir, "/");
+            benchPathCat(snap, sizeof(snap), snap, t->label);
+            benchCopyTree(snap, t->ws);
+            benchMutate(&b, "leaf", 1, t->label, t->ws);
+          }
+        } else if (b.warmup && t->primeOk) {
+          char snap[BENCH_PATH_LEN];
+          benchPathCat(snap, sizeof(snap), b.primedir, "/");
+          benchPathCat(snap, sizeof(snap), snap, t->label);
+          benchCopyTree(snap, t->ws);
+        } else {
+          benchSetupSingle(&b, t);
+        }
+        char report[BENCH_PATH_LEN];
+        benchPathCat(report, sizeof(report), b.workdir,
+                     b.workspace ? "/workspace.strace." : "/single.strace.");
+        benchPathCat(report, sizeof(report), report, t->label);
+        if (b.workspace) {
+          benchPathCat(report, sizeof(report), report, ".");
+          benchPathCat(report, sizeof(report), report, wscen[si]);
+        }
+        benchPathCat(report, sizeof(report), report, ".txt");
+        int rc = benchTraceTool(&b, t, report);
+        if (rc != 0) {
+          printf("  ✗ %-8s strace %-5s GAGAL\n", t->label, scenName);
+          b.mismatchRuns++;
           continue;
         }
-        if (rank >= 10 || nt < 6) continue;
-        if (tok[5][0] == '-' || !tok[5][0]) continue;
-        double pct = strtod(tok[0], NULL), sec = strtod(tok[1], NULL);
-        long usecs = strtol(tok[2], NULL, 10), calls = strtol(tok[3], NULL, 10);
-        long errs = strcmp(tok[4], "-") == 0 ? 0 : strtol(tok[4], NULL, 10);
-        if (calls <= 0) continue;
-        rank++;
-        if (sf)
-          fprintf(sf, "%s,strace,1,%d,%.2f,%.6f,%ld,%ld,%ld,%s\n", t->label, rank, pct, sec,
-                  usecs, calls, errs, tok[5]);
+        FILE *rf = fopen(report, "rb");
+        if (!rf) continue;
+        char line[1024];
+        long totalCalls = 0;
+        double totalSec = 0;
+        int rank = 0;
+        while (fgets(line, sizeof(line), rf)) {
+          /* Kolom strace -c: %time seconds usecs/call calls errors syscall.
+             Baris `total` kadang tidak punya kolom errors (tanda `-`), jadi
+             dipecah per token, bukan sscanf. */
+          char *tok[8];
+          int nt = 0;
+          char tmp[sizeof(line)];
+          copyStr(tmp, sizeof(tmp), line);
+          for (char *t2 = strtok(tmp, " \t\r\n"); t2 && nt < 8; t2 = strtok(NULL, " \t\r\n")) tok[nt++] = t2;
+          if (nt >= 4 && strcmp(tok[nt - 1], "total") == 0) {
+            totalSec = strtod(tok[1], NULL);
+            totalCalls = strtol(tok[3], NULL, 10);
+            continue;
+          }
+          if (rank >= 10 || nt < 6) continue;
+          if (tok[5][0] == '-' || !tok[5][0]) continue;
+          double pct = strtod(tok[0], NULL), sec = strtod(tok[1], NULL);
+          long usecs = strtol(tok[2], NULL, 10), calls = strtol(tok[3], NULL, 10);
+          long errs = strcmp(tok[4], "-") == 0 ? 0 : strtol(tok[4], NULL, 10);
+          if (calls <= 0) continue;
+          rank++;
+          if (sf)
+            fprintf(sf, "%s,%s,1,%d,%.2f,%.6f,%ld,%ld,%ld,%s\n", t->label, scenName, rank, pct,
+                    sec, usecs, calls, errs, tok[5]);
+        }
+        fclose(rf);
+        printf("  ✓ %-8s strace %-5s total=%.2fs calls=%ld\n", t->label, scenName, totalSec,
+               totalCalls);
       }
-      fclose(rf);
-      printf("  ✓ %-8s strace total=%.2fs calls=%ld\n", t->label, totalSec, totalCalls);
     }
     if (sf) fclose(sf);
   }
