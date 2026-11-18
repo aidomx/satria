@@ -28,7 +28,6 @@ int cmdBench(const char *const argv[], int argc) {
   fprintf(stderr, "bench: hanya tersedia di POSIX (fork/exec, symlink, strace)\n");
   return 2;
 }
-int benchEmbedSource(const char *const argv[], int argc) { (void)argv; (void)argc; return 2; }
 #else
 
 #include <unistd.h>
