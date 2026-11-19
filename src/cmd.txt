@@ -454,8 +454,9 @@ Examples:
   satria bench -f tools=ninja,make,bear,meson,xmake,satria -f scenario=editrel
   satria bench -f tools=satria,cmake -f scenario=compdb
   satria bench --workspace --compare -f tools=cmake,satria -f source=10 \
-    -f header=10 -f module=10 -f scenario=all -f warmup=false -f trace=false \
+    -f header=10 -f module=10 -f scenario=all -f warmup=false -f trace=true \
     -f artifact=true -f keep=true -f rolling=true -f bin=a,b
+  satria bench --workspace -f tools=satria -f trace=true -f strace=true
 
 Exit code 0 when every run matches expectations; 1 when a run failed or is
 "Not in accordance". The old bash scripts (bench/ws.sh, bench/compare.sh)

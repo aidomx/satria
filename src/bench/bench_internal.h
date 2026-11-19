@@ -70,7 +70,7 @@ typedef struct {
 typedef struct {
   /* opsi -f */
   int source, header, module, runs, jobs;
-  bool warmup, trace, artifacts, keep, rolling;
+  bool warmup, trace, strace, artifacts, keep, rolling;
   bool compare;
   bool workspace; /* --workspace: graf 3 proyek; default: satu proyek */
   char scenarios[256];
@@ -103,8 +103,9 @@ typedef struct {
 
   int mismatchRuns;
   int notAcc;
-  bool haveStrace;
-  char straceSkip[160];
+  bool traceReady;      /* backend trace tersedia dan siap dipakai */
+  bool satriaTrace;     /* default: `satria trace` (LD_PRELOAD), bukan strace */
+  char traceSkip[160];  /* alasan trace dilewati */
 } Bench;
 
 /* ==================== bench_ws.c: workspace & validasi ==================== */
@@ -164,7 +165,8 @@ typedef struct {
 
 void benchToolCommand(const Bench *b, const BenchTool *t, int mode, const char *ver, BenchArgv *out);
 bool benchFloorBuild(const Bench *b, const char *cwd, int *rc, double *ms);
-int benchTraceTool(const Bench *b, const BenchTool *t, const char *reportPath, bool follow);
+int benchTraceTool(const Bench *b, const BenchTool *t, const char *reportPath, bool follow,
+                   int mode);
 
 /* Mode generator embed (CMake carray): satria bench --embed-source <in> <out.c> <sym> */
 int benchEmbedSource(const char *const argv[], int argc);

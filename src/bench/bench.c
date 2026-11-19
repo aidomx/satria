@@ -5,7 +5,7 @@
  *   1. parse     : argv `-f key=value` -> Bench (tanpa menyentuh filesystem).
  *   2. prepare   : direktori kerja, shim gcc/ld, kandidat tool.
  *   3. execute   : skenario cold/noop/leaf/bade/mod/touch/hedit/sel/dep/
- *                  libtouch/libhdr/rel (+ strace opsional).
+ *                  libtouch/libhdr/rel (+ trace opsional).
  *   4. report    : median per skenario, validation log, success rate, artefak.
  *
  * Tidak ada bash: generator, mutator, snapshot artefak, penyalinan prime,
@@ -25,7 +25,7 @@
 #ifdef _WIN32
 int cmdBench(const char *const argv[], int argc) {
   (void)argv; (void)argc;
-  fprintf(stderr, "bench: hanya tersedia di POSIX (fork/exec, symlink, strace)\n");
+  fprintf(stderr, "bench: hanya tersedia di POSIX (fork/exec, symlink, LD_PRELOAD)\n");
   return 2;
 }
 #else
@@ -135,6 +135,7 @@ static void benchDefaults(Bench *b) {
   b->jobs = cpuCount();
   b->warmup = true;
   b->trace = false;
+  b->strace = false;
   b->artifacts = true;
   b->keep = false;
   b->rolling = true;
@@ -164,7 +165,10 @@ static void benchUsage(void) {
         "                          workspace: cold,noop,leaf,bade,mod,touch,hedit,\n"
         "                          sel,dep,libtouch,libhdr,rel\n"
         "  warmup=true             build+gate sekali per tool lalu pulihkan\n"
-        "  trace=false             syscall profiling (strace -c)\n"
+        "  trace=false             syscall profiling; default backend is\n"
+        "                          `satria trace` (no scenario=strace needed)\n"
+        "  strace=false            true = use external `strace -c` instead of\n"
+        "                          `satria trace` (requires trace=true)\n"
         "  artifact=true           tulis results/view/work log\n"
         "  keep=false              simpan workspace setelah selesai\n"
         "  rolling=true            urutan A/B bergantian per repetisi (abba)\n"
@@ -239,14 +243,15 @@ static bool benchApplyOpt(Bench *b, const char *kv, char *err, size_t errN) {
     if (strcmp(key, "runs") == 0) b->runs = (int)n;
     if (strcmp(key, "jobs") == 0) b->jobs = (int)n;
   } else if (strcmp(key, "warmup") == 0 || strcmp(key, "trace") == 0 ||
-             strcmp(key, "artifact") == 0 || strcmp(key, "keep") == 0 ||
-             strcmp(key, "rolling") == 0) {
+             strcmp(key, "strace") == 0 || strcmp(key, "artifact") == 0 ||
+             strcmp(key, "keep") == 0 || strcmp(key, "rolling") == 0) {
     if (!parseBool(val, &bv)) {
       snprintf(err, errN, "opsi '%s' harus true/false (nilai '%s')", key, val);
       return false;
     }
     if (strcmp(key, "warmup") == 0) b->warmup = bv;
     if (strcmp(key, "trace") == 0) b->trace = bv;
+    if (strcmp(key, "strace") == 0) b->strace = bv;
     if (strcmp(key, "artifact") == 0) b->artifacts = bv;
     if (strcmp(key, "keep") == 0) b->keep = bv;
     if (strcmp(key, "rolling") == 0) b->rolling = bv;
@@ -800,6 +805,81 @@ static void benchWriteCsv(const Bench *b) {
   }
 }
 
+/* ---------- parser log `satria trace` (backend default) ---------- */
+
+typedef struct {
+  char name[24];
+  long calls;
+  long errs;
+  double sec;
+} BenchTraceOp;
+
+static int benchTraceOpCmp(const void *a, const void *b) {
+  const BenchTraceOp *x = a, *y = b;
+  if (x->sec != y->sec) return x->sec < y->sec ? 1 : -1;
+  if (x->calls != y->calls) return x->calls < y->calls ? 1 : -1;
+  return strcmp(x->name, y->name);
+}
+
+/* Log satria trace = satu baris per akses (gaya strace, dengan durasi
+   `<detik>`). Hitung calls, error, dan waktu per op; tulis 10 op teratas
+   ke CSV. -1 bila log tidak terbaca. */
+static long benchParseSatriaTrace(const char *report, FILE *sf, const char *label,
+                                  const char *scen, double *totalSecOut) {
+  FILE *f = fopen(report, "rb");
+  if (!f) return -1;
+  BenchTraceOp ops[32];
+  int n = 0;
+  long calls = 0;
+  char line[4096];
+  while (fgets(line, sizeof(line), f)) {
+    char *lb = strchr(line, '(');
+    if (!lb || lb == line) continue;
+    calls++;
+    size_t olen = (size_t)(lb - line);
+    if (olen >= sizeof(ops[0].name)) olen = sizeof(ops[0].name) - 1;
+    int i;
+    for (i = 0; i < n; i++)
+      if (strlen(ops[i].name) == olen && memcmp(ops[i].name, line, olen) == 0) break;
+    if (i == n) {
+      if (n >= (int)(sizeof(ops) / sizeof(ops[0]))) continue;
+      memcpy(ops[n].name, line, olen);
+      ops[n].name[olen] = '\0';
+      ops[n].calls = 0;
+      ops[n].errs = 0;
+      ops[n].sec = 0;
+      i = n++;
+    }
+    ops[i].calls++;
+    char *rp = strchr(lb, ')');
+    if (rp) {
+      if (strstr(rp, " = -1 ")) ops[i].errs++;
+      const char *tm = strstr(rp, " <");
+      if (tm) ops[i].sec += strtod(tm + 2, NULL);
+    }
+  }
+  fclose(f);
+  if (calls == 0) {
+    if (totalSecOut) *totalSecOut = 0;
+    return 0;
+  }
+
+  double totalSec = 0;
+  for (int i = 0; i < n; i++) totalSec += ops[i].sec;
+  if (totalSecOut) *totalSecOut = totalSec;
+
+  qsort(ops, (size_t)n, sizeof(ops[0]), benchTraceOpCmp);
+  int rank = 0;
+  for (int i = 0; i < n && rank < 10; i++, rank++) {
+    double usec = ops[i].calls ? ops[i].sec * 1000000.0 / (double)ops[i].calls : 0.0;
+    if (sf)
+      fprintf(sf, "%s,%s,1,%d,%.2f,%.6f,%.2f,%ld,%ld,%s\n", label, scen, rank + 1,
+              totalSec > 0 ? ops[i].sec * 100.0 / totalSec : 0.0, ops[i].sec, usec,
+              ops[i].calls, ops[i].errs, ops[i].name);
+  }
+  return calls;
+}
+
 static long benchMedianFor(const Bench *b, const char *scen, const char *label, int *badOut) {
   long vals[256];
   int n = 0, bad = 0;
@@ -1193,15 +1273,29 @@ int cmdBench(const char *const argv[], int argc) {
     printf("  %-11s : %s\n", b.floor.label, b.floor.version[0] ? b.floor.version : "?");
   printf("  %-11s : %s\n", "gcc", verGcc[0] ? verGcc : "?");
 
-  /* strace */
-  b.haveStrace = false;
+  /* Profiling syscall. Default-nya `satria trace` (LD_PRELOAD) supaya tidak
+     bergantung pada ptrace/strace dan tetap jalan di proot. `strace=true`
+     memilih strace -c secara eksplisit; satria trace hanya bisa membungkus
+     tool satria, sedangkan strace bisa membungkus tool apa pun. */
+  b.traceReady = false;
+  b.satriaTrace = false;
   if (b.trace) {
-    if (getenv("PROOT") || getenv("PROOT_L2S_DIR"))
-      copyStr(b.straceSkip, sizeof(b.straceSkip), "proot terdeteksi");
-    else if (!probeAvailable("strace"))
-      copyStr(b.straceSkip, sizeof(b.straceSkip), "strace tidak tersedia");
-    else
-      b.haveStrace = true;
+    bool haveSatriaTool = false;
+    for (int i = 0; i < b.ntools; i++)
+      if (b.tools[i].kind == BENCH_SATRIA) haveSatriaTool = true;
+    if (b.strace) {
+      if (probeAvailable("strace")) {
+        b.traceReady = true;
+      } else {
+        copyStr(b.traceSkip, sizeof(b.traceSkip), "strace=true tetapi strace tidak tersedia");
+      }
+    } else if (haveSatriaTool) {
+      b.traceReady = true;
+      b.satriaTrace = true;
+    } else {
+      copyStr(b.traceSkip, sizeof(b.traceSkip),
+              "satria trace membutuhkan tool satria (atau set strace=true)");
+    }
   }
 
   /* prime (warmup) — mode workspace SELALU prime: restore snapshot per
@@ -1428,21 +1522,42 @@ int cmdBench(const char *const argv[], int argc) {
     }
   } /* akhir mode workspace */
 
-  /* strace (sekali per tool). Mode workspace menelusuri dua kondisi:
-     cold = build penuh pasca-reset, leaf = run inkremental pasca-mutasi —
-     profil kedua inilah yang menjelaskan denda post-mutasi (~2 s pada
-     10k file; jumlah kompilasi identik dengan cmake). cmake/meson wajib
+  /* Trace (sekali per tool). Mode workspace selalu menelusuri cold (baseline
+     build penuh pasca-reset), lalu skenario inkremental yang dipilih lewat
+     `scenario=`. Bila `scenario` kosong/`all`, cukup cold+leaf seperti dulu
+     agar trace tidak berlipat untuk semua skenario. cmake/meson wajib
      configure dulu setelah reset, atau build dir tidak ada lagi. */
-  if (b.haveStrace && benchHaveScenario(&b, "strace")) {
+  if (b.traceReady) {
     printf("\n[Trace]\n");
     FILE *sf = fopen(b.syscsv, "wb");
     if (sf) fputs("tool,scenario,run,rank,percent,seconds,usecs_per_call,calls,errors,syscall\n", sf);
     for (int i = 0; i < b.ntools; i++) {
       BenchTool *t = &b.tools[i];
-      static const char *const wscen[] = {"cold", "leaf"};
-      int nts = b.workspace ? 2 : 1;
+      static const char *const wscenAll[] = {"noop", "leaf", "bade", "mod", "touch", "hedit",
+                                             "sel", "dep", "libtouch", "libhdr"};
+      const char *wscen[12];
+      int nts = 0;
+      if (!b.workspace) {
+        wscen[nts++] = b.satriaTrace ? "trace" : "strace";
+      } else {
+        wscen[nts++] = "cold";
+        bool explicitList = b.scenarios[0] && strcmp(b.scenarios, "all") != 0;
+        if (!explicitList) {
+          wscen[nts++] = "leaf";
+        } else {
+          for (size_t k = 0; k < sizeof(wscenAll) / sizeof(wscenAll[0]) && nts < 12; k++)
+            if (benchHaveScenario(&b, wscenAll[k])) wscen[nts++] = wscenAll[k];
+        }
+      }
       for (int si = 0; si < nts; si++) {
-        const char *scenName = b.workspace ? wscen[si] : "strace";
+        const char *scenName = wscen[si];
+        /* satria trace hanya bisa membungkus proses satria sendiri, bukan
+           cmake/tool lain. strace tidak punya batasan ini. */
+        if (b.satriaTrace && t->kind != BENCH_SATRIA) {
+          printf("  - %-8s trace %-5s dilewati (satria trace hanya untuk tool satria)\n",
+                 t->label, scenName);
+          continue;
+        }
         if (b.workspace) {
           if (strcmp(wscen[si], "cold") == 0) {
             benchResetWorkspace(t->ws);
@@ -1458,13 +1573,13 @@ int cmdBench(const char *const argv[], int argc) {
               }
             }
           } else {
-            /* leaf: mulai dari prime bersih lalu mutasi leaf — persis
-               kondisi skenario terukur yang mengalami denda. */
+            /* Skenario inkremental: mulai dari prime bersih lalu mutasi
+               sesuai skenario — persis kondisi terukur yang mengalami denda. */
             char snap[BENCH_PATH_LEN];
             benchPathCat(snap, sizeof(snap), b.primedir, "/");
             benchPathCat(snap, sizeof(snap), snap, t->label);
             benchCopyTree(snap, t->ws);
-            benchMutate(&b, "leaf", 1, t->label, t->ws);
+            benchMutate(&b, wscen[si], 1, t->label, t->ws);
           }
         } else if (b.warmup && t->primeOk) {
           char snap[BENCH_PATH_LEN];
@@ -1487,10 +1602,25 @@ int cmdBench(const char *const argv[], int argc) {
            mendominasi profil anak membuat biaya walk satria sendiri
            tak terlihat. Cold tetap -f (biaya build penuh). */
         bool follow = !(b.workspace && strcmp(wscen[si], "leaf") == 0);
-        int rc = benchTraceTool(&b, t, report, follow);
+        int tmode = BENCH_CMD_FULL;
+        if (strcmp(wscen[si], "sel") == 0) tmode = BENCH_CMD_SEL;
+        else if (strcmp(wscen[si], "dep") == 0) tmode = BENCH_CMD_DEP;
+        int rc = benchTraceTool(&b, t, report, follow, tmode);
         if (rc != 0) {
-          printf("  ✗ %-8s strace %-5s GAGAL\n", t->label, scenName);
+          printf("  ✗ %-8s trace %-5s GAGAL\n", t->label, scenName);
           b.mismatchRuns++;
+          continue;
+        }
+        if (b.satriaTrace) {
+          double totalSec = 0;
+          long calls = benchParseSatriaTrace(report, sf, t->label, scenName, &totalSec);
+          if (calls < 0) {
+            printf("  ✗ %-8s trace %-5s GAGAL (log tidak terbaca)\n", t->label, scenName);
+            b.mismatchRuns++;
+          } else {
+            printf("  ✓ %-8s trace %-5s total=%.2fs calls=%ld (satria trace)\n",
+                   t->label, scenName, totalSec, calls);
+          }
           continue;
         }
         FILE *rf = fopen(report, "rb");
@@ -1525,7 +1655,7 @@ int cmdBench(const char *const argv[], int argc) {
                     sec, usecs, calls, errs, tok[5]);
         }
         fclose(rf);
-        printf("  ✓ %-8s strace %-5s total=%.2fs calls=%ld\n", t->label, scenName, totalSec,
+        printf("  ✓ %-8s trace %-5s total=%.2fs calls=%ld\n", t->label, scenName, totalSec,
                totalCalls);
       }
     }
@@ -1576,10 +1706,12 @@ int cmdBench(const char *const argv[], int argc) {
     if (total) printf("  %-11s : %d/%d scenarios passed\n", b.floor.label, ok, total);
   }
   if (b.trace) {
-    if (b.haveStrace)
-      printf("  strace   : diukur\n");
+    if (b.traceReady)
+      printf("  %-8s : %s\n", "trace",
+             b.satriaTrace ? "satria trace (LD_PRELOAD, default)" : "strace -c");
     else
-      printf("  strace   : dilewati (%s)\n", b.straceSkip[0] ? b.straceSkip : "tidak tersedia");
+      printf("  %-8s : dilewati (%s)\n", "trace",
+             b.traceSkip[0] ? b.traceSkip : "tidak tersedia");
   }
 
   benchWriteCsv(&b);
@@ -1588,7 +1720,7 @@ int cmdBench(const char *const argv[], int argc) {
     printf("  hasil lengkap : %s\n", b.csv);
     printf("  view data     : %s\n", b.viewcsv);
     printf("  bukti kerja   : %s\n", b.worklog);
-    if (b.haveStrace && benchPathExists(b.syscsv)) printf("  syscall detail: %s\n", b.syscsv);
+    if (b.traceReady && benchPathExists(b.syscsv)) printf("  syscall detail: %s\n", b.syscsv);
     printf("  stderr tool   : %s\n", b.errlog);
   } else {
     fsRemoveFile(b.csv);

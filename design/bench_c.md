@@ -42,7 +42,7 @@ berbeda perilaku dengan tool asli). Porting ke C membuat satu binary menjadi:
    shim → spawn (fork/exec, tanpa shell) → snapshot → delta → runtime check →
    validasi harapan → rekam.
 4. **Report** — median per skenario, `[Detailed Validation Log]`, Success Rate,
-   artefak (`results.csv`, `view.csv`, `work.log`, `strace` bila aktif).
+   artefak (`results.csv`, `view.csv`, `work.log`, `trace` bila aktif).
 
 ## Pemetaan opsi bash → `-f`
 
@@ -61,7 +61,7 @@ berbeda perilaku dengan tool asli). Porting ke C membuat satu binary menjadi:
 | `-a` | `satria="args"` |
 | `-w` (audit) | `warmup` (prime + gate) |
 | `-artifacts` | `artifact` |
-| `-strace` | `trace` |
+| `-strace` | `trace` (default `satria trace`; `strace=true` memilih strace -c) |
 | `-O abba/grouped` | `rolling=true/false` |
 | (baru) | `bin=a,b` untuk A/B binary satria |
 
@@ -164,7 +164,16 @@ dan tidak ada object basi yang lolos (nilai header mengalir ke kedua `main`).
 
 ## Batasan
 
-- POSIX (fork/exec, symlink, strace). Windows belum didukung.
+- POSIX (fork/exec, symlink). Windows belum didukung.
+- Profiling `trace=true` memakai `satria trace` (LD_PRELOAD) sebagai default,
+  jadi tidak bergantung pada ptrace/strace dan tetap jalan di proot. Backend
+  ini hanya bisa membungkus tool satria; tool lain dilewati. `strace=true`
+  memilih `strace -c` secara eksplisit untuk tool apa pun.
+- `satria trace` mencatat durasi per panggilan (`<detik>`); CSV memuat total
+  detik, persen, dan us/call per op. `scenario=strace` tidak lagi diperlukan
+  untuk menjalankan bagian trace. Di workspace, trace memuat `cold` sebagai
+  baseline ditambah setiap skenario yang dipilih eksplisit; tanpa `scenario`
+  atau `scenario=all`, yang ditelusuri hanya `cold` dan `leaf`.
 - `BENCH_EMBED=ld` (eksperimen lama) tidak diporting; jalur yang diukur adalah
   codegen carray, sama untuk satria dan CMake.
 - Progress bar interaktif diganti baris per run; laporan tetap memuat median,
