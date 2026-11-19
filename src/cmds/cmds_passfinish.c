@@ -141,10 +141,18 @@ int cmdsBuildPassFinish(CmdsPassTail *t) {
 
   bool phaseObjectsChanged = false;
   bool phaseObjectVerdict = compiled == 0 && wsPhaseObjectChangeGet(&phaseObjectsChanged);
-  bool linkNeeded = !fsFileExists(target) || linkConfigChanged || sourceSetChanged || objectsChanged ||
+  bool linkNeeded = linkConfigChanged || sourceSetChanged || objectsChanged ||
                     (phaseObjectVerdict && phaseObjectsChanged);
+  /* Satu stat untuk ada/tidak (file, bukan direktori) + mtime target:
+     pola fsFileExists lalu fsMTimeNs membayar dua stat untuk path yang sama
+     pada jalur no-op/leaf yang paling sering. */
+  int64_t targetMtime = -1;
   if (!linkNeeded) {
-    int64_t targetMtime = fsMTimeNs(target);
+    bool targetIsDir = false;
+    if (!fsStatDirMTimeNs(target, &targetIsDir, &targetMtime) || targetIsDir)
+      linkNeeded = true;
+  }
+  if (!linkNeeded) {
     if (targetMtime < 0) {
       linkNeeded = true;
     } else {
