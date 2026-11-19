@@ -311,11 +311,17 @@ static bool benchBumpDefine(const char *path, const char *key) {
   return benchWriteFile(path, out);
 }
 
+/* Label dipakai sebagai bagian nama fungsi C, jadi hanya [A-Za-z0-9_] yang
+   boleh lolos; karakter lain (mis. '-' pada label A/B `satria-2`) jadi '_'. */
 static void benchSanitizeLabel(const char *label, char *out, size_t n) {
   size_t j = 0;
+  if (n == 0) return;
+  if (label[0] >= '0' && label[0] <= '9' && j + 1 < n) out[j++] = '_';
   for (size_t i = 0; label[i] && j + 1 < n; i++) {
     char c = label[i];
-    out[j++] = (c == '/' || c == ' ' || c == ':') ? '_' : c;
+    bool ok = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+              (c >= '0' && c <= '9') || c == '_';
+    out[j++] = ok ? c : '_';
   }
   out[j] = '\0';
 }
