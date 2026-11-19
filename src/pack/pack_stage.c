@@ -23,7 +23,11 @@ bool packEntryParts(const char *entry, char *src, size_t srcN, char *dst, size_t
 }
 
 bool packResolveSource(const char *src, char *out, size_t n) {
-  if (fsFileExists(src) || fsDirExists(src)) {
+  /* Satu stat: file atau direktori sama-sama diterima. Pola
+     fsFileExists || fsDirExists membayar stat kedua saat path tidak ada. */
+  bool isDir = false;
+  int64_t m = -1;
+  if (fsStatDirMTimeNs(src, &isDir, &m)) {
     copyStr(out, n, src);
     return true;
   }
