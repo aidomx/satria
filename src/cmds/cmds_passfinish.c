@@ -229,18 +229,57 @@ int cmdsBuildPassFinish(CmdsPassTail *t) {
     return 0;
   }
 
+  /* Executable ditautkan lewat arsip statis proyek bila ada. Daftar object
+     langsung membuat ld membuka setiap object satu per satu; pada proyek
+     besar itu jauh lebih mahal daripada membaca arsip berindeks. Arsip
+     dibangun lebih dulu di sini karena pada single-project fase library
+     normalnya berjalan SESUDAH link. Source yang di-exclude dari library
+     (mis. main.c) tetap ditautkan sebagai object langsung. --whole-archive
+     mempertahankan semantik lama: semua TU ikut, termasuk constructor yang
+     tidak dirujuk simbol lain. */
+  bool useStaticArchive = false;
+  bool libraryBuilt = false;
+  char staticLib[SATRIA_MAX_PATH * 2] = {0};
+  if (c.libRequested && c.libStatic && !compilerIsMSVC(&c)) {
+    cmdsLibStaticPath(&c, staticLib, sizeof(staticLib));
+    if (!cmdsBuildLibraryEx(&c, &srcs, true)) {
+      free(inc);
+      free(wf);
+      depsFree(deps);
+      statPlanFree(&plan);
+      return 1;
+    }
+    useStaticArchive = true;
+    libraryBuilt = true;
+  }
+
   size_t n = strlen(c.cc) + strlen(c.outBinaryDir) + strlen(c.outBinaryName) + 256;
   for (int i = 0; i < srcs.count; i++)
     if (objectPathFor(&c, srcs.items[i], obj, sizeof(obj))) n += strlen(obj) + 2;
   for (int i = 0; i < c.libraries.count; i++)
     n += strlen(c.libraries.items[i]) + 8;
+  if (useStaticArchive) n += strlen(staticLib) + 64;
 
   char *cmd = malloc(n);
   strcpy(cmd, c.cc);
   for (int i = 0; i < srcs.count; i++) {
+    /* Objek yang sudah ada di arsip tidak diulang: --whole-archive di bawah
+       yang memasukkannya. Hanya source ber-exclude yang butuh object langsung. */
+    if (useStaticArchive && !excludedSource(&c, srcs.items[i])) continue;
     if (!objectPathFor(&c, srcs.items[i], obj, sizeof(obj))) continue;
     strcat(cmd, " ");
     strcat(cmd, obj);
+  }
+  if (useStaticArchive) {
+#ifdef __APPLE__
+    strcat(cmd, " -Wl,-all_load ");
+    strcat(cmd, staticLib);
+    strcat(cmd, " -Wl,-noall_load");
+#else
+    strcat(cmd, " -Wl,--whole-archive ");
+    strcat(cmd, staticLib);
+    strcat(cmd, " -Wl,--no-whole-archive");
+#endif
   }
   if (compilerIsMSVC(&c)) {
     /* MSVC: object dikumpulkan dulu, opsi linker setelah token /link.
@@ -364,8 +403,10 @@ int cmdsBuildPassFinish(CmdsPassTail *t) {
     return 1;
   }
 
-  /* Library statis/shared dari object yang sama — object tidak dihapus. */
-  if (!cmdsBuildLibraryEx(&c, &srcs, true)) {
+  /* Library statis/shared dari object yang sama — object tidak dihapus.
+     Bila arsip sudah dibangun sebelum link, pemanggilan ini hanya mencatat
+     artefak yang up-to-date. */
+  if (!libraryBuilt && !cmdsBuildLibraryEx(&c, &srcs, true)) {
     statPlanFree(&plan);
     return 1;
   }
