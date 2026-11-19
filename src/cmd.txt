@@ -219,7 +219,11 @@ satria init              Create a minimal Buildfile (just `use project`)
 satria init -p           Interactive scaffold: project name, language
                        (c/cpp), std, compiler, flags, include/,
                        workspace membership, depends_on. Enter accepts
-                       the default; the scaffold builds out of the box.
+                       the default. A summary is shown before writing; on
+                       a terminal the result is built and run automatically.
+  --here               Put a single-project scaffold in the current dir
+                       instead of <name>/ (workspace keeps project folders).
+  --no-run             Skip the automatic build+run after scaffold.
 satria init -w           Write a workspace template (WsBuildfile)
 
 init never overwrites existing files: any existing target aborts
@@ -355,7 +359,8 @@ Child processes (gcc, ld, ar) inherit the tracer, so their accesses are
 included; the summary is not filtered by process.
 
 Deviations from real strace: stat shows the path only (no struct dump),
-fopen/opendir print `= ok` instead of a pointer, and no per-call timing.
+fopen/opendir print `= ok` instead of a pointer, and timing measures the
+interposed libc call (not libc-internal work or every kernel syscall).
 
 Not supported on Windows (uses LD_PRELOAD/dlsym).
 ---endtrace
@@ -432,7 +437,12 @@ Keys -f (both modes):
                           workspace: cold,noop,leaf,bade,mod,touch,hedit,
                           sel,dep,libtouch,libhdr,rel (comma-separated subset)
   warmup=true             build+gate once per tool, then restore prime
-  trace=false             syscall profiling (strace -c; skipped under proot)
+  trace=false             syscall profiling; the default backend is
+                          `satria trace` (no scenario=strace needed).
+                          Workspace: cold + explicitly selected scenarios
+                          (default cold,leaf)
+  strace=false            true = use external `strace -c` instead of
+                          `satria trace` (requires trace=true)
   artifact=true           write results.csv, view.csv, work.log
   keep=false              keep project/workspace after the run
   rolling=true            alternate tool order per repetition (ABBA)
