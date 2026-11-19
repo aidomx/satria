@@ -51,6 +51,15 @@ static int g_aD = 0, g_aH = 0, g_aHHashed = 0, g_aDSkip = 0;
 static double g_aInMs = 0, g_aDSCheckMs = 0, g_aOutMs = 0;
 static int g_aIn = 0, g_aDSCheck = 0, g_aOut = 0;
 
+/* Jam hanya dipanggil saat SATRIA_PROFILE aktif (lihat komentar blok di atas):
+   dua clock_gettime per stat di jalur terpanas save-walk sebelumnya dibayar
+   setiap run tanpa manfaat. profOn() di-cache sekali per proses. */
+static bool saveProfOn(void) {
+  static int on = -1;
+  if (on < 0) on = profOn() ? 1 : 0;
+  return on == 1;
+}
+
 /* Entri header (H) dari sources.cache SEBELUMNYA — daftar gabungan seluruh
    file .d pada save terakhir. Disalin ulang agar object yang .d-nya TIDAK
    berubah tidak perlu dibuka lagi (audit 30/10: 10.003 fopen+read .d per
@@ -129,9 +138,10 @@ static void wsPrevHLoad(void) {
 static bool wsCacheInputStamp(const char *path, long long *mtimeNs, long long *size) {
 #if defined(_WIN32)
   struct stat sb;
-  double t0 = portMonoMs();
+  bool pf = saveProfOn();
+  double t0 = pf ? portMonoMs() : 0;
   bool ok = stat(path, &sb) == 0;
-  g_aInMs += portMonoMs() - t0;
+  if (pf) g_aInMs += portMonoMs() - t0;
   g_aIn++;
   if (!ok) return false;
   *mtimeNs = wsCacheStampNs(path, &sb);
@@ -140,9 +150,10 @@ static bool wsCacheInputStamp(const char *path, long long *mtimeNs, long long *s
 #else
   int64_t m = -1;
   long long s = -1;
-  double t0 = portMonoMs();
+  bool pf = saveProfOn();
+  double t0 = pf ? portMonoMs() : 0;
   bool ok = cmdsStatCached(path, &m, &s);
-  g_aInMs += portMonoMs() - t0;
+  if (pf) g_aInMs += portMonoMs() - t0;
   g_aIn++;
   if (!ok) return false;
   *mtimeNs = (long long)m;
@@ -171,9 +182,10 @@ static bool wsCacheAddSt(FILE *pf, CsStore *st, uint64_t proj, const char *path,
       sb = *known;
       okO = true;
     } else {
-      double t0 = portMonoMs();
+      bool pf = saveProfOn();
+      double t0 = pf ? portMonoMs() : 0;
       okO = stat(path, &sb) == 0;
-      g_aOutMs += portMonoMs() - t0;
+      if (pf) g_aOutMs += portMonoMs() - t0;
       g_aOut++;
     }
     if (!okO) return false; /* output: stat segar, jangan memo */
@@ -237,7 +249,8 @@ static void wsCacheDirOf(const char *path, char *out, size_t n) {
 /* Dependensi header dari file .d (hasil -MMD): setiap token sesudah ':' dicatat
    sebagai entri H, divalidasi seperti sumber. 0 = .d tak ada, -1 = gagal. */
 static int wsCacheAddDepFile(FILE *pf, CsStore *st, uint64_t proj, const char *dfile) {
-  double t0 = portMonoMs();
+  bool dprof = saveProfOn();
+  double t0 = dprof ? portMonoMs() : 0;
   FILE *f = fopen(dfile, "rb");
   if (!f) return errno == ENOENT ? 0 : -1;
   fseek(f, 0, SEEK_END);
@@ -254,7 +267,7 @@ static int wsCacheAddDepFile(FILE *pf, CsStore *st, uint64_t proj, const char *d
   }
   size_t got = fread(buf, 1, (size_t)n, f);
   fclose(f);
-  g_aDRead += portMonoMs() - t0;
+  if (dprof) g_aDRead += portMonoMs() - t0;
   g_aD++;
   buf[got] = '\0';
   for (size_t i = 0; i + 1 < got; i++) /* sambung baris: backslash+newline -> spasi */
@@ -273,10 +286,11 @@ static int wsCacheAddDepFile(FILE *pf, CsStore *st, uint64_t proj, const char *d
     CsEntry probe;
     if (csGet(st, proj, csHash(tok), &probe)) continue; /* sudah tercatat */
     g_aH++;
-    double ts0 = portMonoMs();
+    bool hprof = saveProfOn();
+    double ts0 = hprof ? portMonoMs() : 0;
     long long hm = 0, hsz = 0;
     bool hok = wsCacheInputStamp(tok, &hm, &hsz);
-    g_aHStat += portMonoMs() - ts0;
+    if (hprof) g_aHStat += portMonoMs() - ts0;
     if (!hok) {
       ok = false;
       break;
@@ -295,9 +309,9 @@ static int wsCacheAddDepFile(FILE *pf, CsStore *st, uint64_t proj, const char *d
         prev.size == e.size && e.time < g_prevFpMtime) {
       e.content = prev.content; /* metadata cocok & tidak racy: isi tidak berubah */
     } else {
-      double th0 = portMonoMs();
+      double th0 = hprof ? portMonoMs() : 0;
       e.content = wsStartupHash(tok);
-      g_aHHash += portMonoMs() - th0;
+      if (hprof) g_aHHash += portMonoMs() - th0;
       g_aHHashed++;
     }
     if (!e.content) {
@@ -372,9 +386,10 @@ static bool wsCacheAddObjectTree(FILE *pf, CsStore *st, uint64_t proj,
         break;
       }
     } else if (compiled) {
-      double td0 = portMonoMs();
+      bool sprof = saveProfOn();
+      double td0 = sprof ? portMonoMs() : 0;
       dstat = stat(dfile, &dst) == 0;
-      g_aDSCheckMs += portMonoMs() - td0;
+      if (sprof) g_aDSCheckMs += portMonoMs() - td0;
       g_aDSCheck++;
       /* Object dan .d-nya sendiri dicatat sebagai output ('O'). Noop memvalidasi
          stat-nya: object/.d yang hilang (build/ dihapus sebagian) membuat catatan
