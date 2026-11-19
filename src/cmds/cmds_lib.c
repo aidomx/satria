@@ -340,27 +340,52 @@ static bool copyFileBytes(const char *from, const char *to) {
  * Return false bila stage tak bisa dibuat padahal dibutuhkan — pemanggil
  * membatalkan fase library dengan pesan ini.
  */
+/* Pembanding untuk dedup path dan pengelompokan basename (lihat pemakainya). */
+typedef struct { const char *p; int i; } DedupKey_;
+typedef struct { const char *b; int i; } BaseKey_;
+int cmpDedup(const void *a, const void *b) {
+  const DedupKey_ *x = a, *y = b;
+  int c = strcmp(x->p, y->p);
+  if (c) return c;
+  return (x->i > y->i) - (x->i < y->i);
+}
+int cmpBase(const void *a, const void *b) {
+  const BaseKey_ *x = a, *y = b;
+  int c = strcmp(x->b, y->b);
+  if (c) return c;
+  return (x->i > y->i) - (x->i < y->i);
+}
+
 static bool objsStageCollisions(const Config *c, List *objs, char *stageDir, size_t stageCap) {
   /* 1) Tandai object dengan basename yang muncul lebih dari sekali. */
   bool *dup = calloc((size_t)objs->count, sizeof(bool));
   if (!dup) return false;
   bool any = false;
-  for (int i = 0; i < objs->count; i++) {
-    const char *bi = strrchr(objs->items[i], '/');
-    const char *bj = strrchr(objs->items[i], '\\');
-    if (bj > bi) bi = bj;
-    if (!bi) bi = objs->items[i] - 1;
-    for (int j = 0; j < objs->count && !dup[i]; j++) {
-      if (j == i) continue;
-      const char *b2 = strrchr(objs->items[j], '/');
-      const char *b3 = strrchr(objs->items[j], '\\');
-      if (b3 > b2) b2 = b3;
-      if (!b2) b2 = objs->items[j] - 1;
-      if (strcmp(bi + 1, b2 + 1) == 0) {
-        dup[i] = true;
+  /* Urutkan indeks menurut basename, lalu tandai setiap run berbasename sama
+     (panjang >= 2). Setara dengan pemindaian O(N^2) lama, O(N log N). */
+  if (objs->count > 1) {
+    typedef struct { const char *b; int i; } BaseKey;
+    BaseKey *bk = malloc(sizeof(BaseKey) * (size_t)objs->count);
+    if (!bk) { free(dup); return false; }
+    for (int i = 0; i < objs->count; i++) {
+      const char *bi = strrchr(objs->items[i], '/');
+      const char *bj = strrchr(objs->items[i], '\\');
+      if (bj > bi) bi = bj;
+      bk[i].b = bi ? bi + 1 : objs->items[i];
+      bk[i].i = i;
+    }
+    int cmpBase(const void *a, const void *b);
+    qsort(bk, (size_t)objs->count, sizeof(BaseKey), cmpBase);
+    for (int i = 0; i < objs->count;) {
+      int j = i + 1;
+      while (j < objs->count && strcmp(bk[i].b, bk[j].b) == 0) j++;
+      if (j - i >= 2) {
+        for (int k = i; k < j; k++) dup[bk[k].i] = true;
         any = true;
       }
+      i = j;
     }
+    free(bk);
   }
   if (!any) {
     free(dup);
@@ -613,13 +638,28 @@ bool cmdsBuildLibraryEx(const Config *c, const List *srcs, bool linkPathLibs) {
     /* sources bisa tumpang tindih (dir induk + dir anak terdaftar dua kali):
        object yang sama JANGAN dimasukkan dua kali — `ar rcs a.o a.o`
        menghasilkan dua anggota bernama sama. */
-    bool dupPath = false;
-    for (int j = 0; j < objs.count; j++)
-      if (strcmp(objs.items[j], obj) == 0) {
-        dupPath = true;
-        break;
-      }
-    if (!dupPath) listAdd(&objs, obj);
+    listAdd(&objs, obj); /* dedup di bawah (O(N log N)) */
+  }
+
+  /* Dedup path object: sort (path, indeks) lalu buang salinan selain kemunculan
+     pertama. Urutan asli dipertahankan (isi arsip identik). O(N log N). */
+  if (objs.count > 1) {
+    typedef struct { const char *p; int i; } DedupKey;
+    DedupKey *dk = malloc(sizeof(DedupKey) * (size_t)objs.count);
+    bool *drop = calloc((size_t)objs.count, sizeof(bool));
+    if (dk && drop) {
+      for (int i = 0; i < objs.count; i++) { dk[i].p = objs.items[i]; dk[i].i = i; }
+      int cmpDedup(const void *a, const void *b);
+      qsort(dk, (size_t)objs.count, sizeof(DedupKey), cmpDedup);
+      for (int i = 1; i < objs.count; i++)
+        if (strcmp(dk[i - 1].p, dk[i].p) == 0) drop[dk[i].i] = true;
+      List uniq = {0};
+      for (int i = 0; i < objs.count; i++) if (!drop[i]) listAdd(&uniq, objs.items[i]);
+      listFree(&objs);
+      objs = uniq;
+    }
+    free(dk);
+    free(drop);
   }
 
   if (objs.count == 0) {
@@ -649,6 +689,12 @@ bool cmdsBuildLibraryEx(const Config *c, const List *srcs, bool linkPathLibs) {
 
   bool staticDone = true, sharedDone = true;
   char target[SATRIA_MAX_PATH * 2];
+  /* ar (static) dan cc -shared (shared) membaca object yang sama dan menulis
+     artefak berbeda: jalankan keduanya bersamaan. Maksimal dua proses; hasil
+     dilaporkan setelah keduanya selesai agar urutan laporan deterministik. */
+  char *staticCmd = NULL, *sharedCmd = NULL;
+  ProcHandle ph[2];
+  int nph = 0, staticSlot = -1, sharedSlot = -1;
 
   if (c->libStatic) {
     cmdsLibStaticPath(c, target, sizeof(target));
@@ -658,9 +704,7 @@ bool cmdsBuildLibraryEx(const Config *c, const List *srcs, bool linkPathLibs) {
     if (staticUpToDate && stageDir[0] && fsFileExists(target) &&
         !archiveMembersMatch(c, target, &objs))
       staticUpToDate = false;
-    if (staticUpToDate) {
-      buildReportAddLibrary(target, REP_CACHED, fsFileSize(target));
-    } else {
+    if (!staticUpToDate) {
       size_t n = 64;
       for (int i = 0; i < objs.count; i++)
         n += strlen(objs.items[i]) + 3;
@@ -676,85 +720,145 @@ bool cmdsBuildLibraryEx(const Config *c, const List *srcs, bool linkPathLibs) {
       /* Buang arsip lama agar isinya PERSIS objs: `ar rcs` hanya menimpa
          anggota bernama sama dan tidak menghapus anggota basi. */
       if (fsFileExists(target)) remove(target);
-      staticDone = runCmd(cmd);
-      if (staticDone) buildReportAddLibrary(target, REP_BUILT, fsFileSize(target));
-      if (!staticDone) fprintf(stderr, "satria: static library command: %s\n", cmd);
-      free(cmd);
-      if (!staticDone) fprintf(stderr, "satria: static library build failed\n");
+      staticCmd = cmd;
+      staticSlot = nph;
+      if (!procStartCapture(staticCmd, &ph[nph])) {
+        staticSlot = -1;
+        staticDone = false;
+        fprintf(stderr, "satria: static library command: %s\n", staticCmd);
+        fprintf(stderr, "satria: static library build failed\n");
+      } else {
+        nph++;
+      }
     }
   }
 
   if (c->libShared) {
     cmdsLibSharedPath(c, target, sizeof(target));
-    if (sharedUpToDate) {
-      buildReportAddLibrary(target, REP_CACHED, fsFileSize(target));
-      if (stageDir[0]) fsRemoveTree(stageDir);
-      listFree(&objs);
-      return staticDone; /* .so dilewati; hasil .a tetap dihormati */
-    }
-    size_t n = strlen(c->cc) + strlen(target) + 96;
-    for (int i = 0; i < objs.count; i++)
-      n += strlen(objs.items[i]) + 3;
-    for (int i = 0; i < c->libraries.count; i++)
-      n += strlen(c->libraries.items[i]) + 8;
-    char *cmd = malloc(n);
-    if (compilerIsMSVC(c)) {
-      snprintf(cmd, n, "cl /nologo /LD");
-      for (int i = 0; i < objs.count; i++) {
-        strcat(cmd, " ");
-        strcat(cmd, objs.items[i]);
-      }
-      strcat(cmd, " /link /nologo /INCREMENTAL:NO /OUT:");
-      strcat(cmd, target);
-      for (int i = 0; i < c->libraries.count; i++) {
-        const char *lib = c->libraries.items[i];
-        if (!linkPathLibs && (strchr(lib, '/') || strchr(lib, '\\'))) continue;
-        if (lib[0] == '-') lib++;
-        if (lib[0] == 'l') lib++;
-        strcat(cmd, " ");
-        strcat(cmd, lib);
-        strcat(cmd, ".lib");
-      }
-    } else {
-      /* Driver C (mis. compiler = gcc eksplisit) tetap harus bisa me-link
-         object C++: tambahkan -lstdc++ saat proyek berbahasa C++. */
-      snprintf(cmd, n, c->langCpp && !compilerIsCppDriver(c) ? "%s -shared -lstdc++"
-                                                             : "%s -shared",
-               c->cc);
-      for (int i = 0; i < objs.count; i++) {
-        strcat(cmd, " ");
-        strcat(cmd, objs.items[i]);
-      }
-      strcat(cmd, " -o ");
-      strcat(cmd, target);
-      for (int i = 0; i < c->libraries.count; i++) {
-        const char *lib = c->libraries.items[i];
-        /* Fase library workspace: artifact proyek lain dilewati (belum
-           tentu ada); simbol lintas diselesaikan saat link binary. */
-        if (!linkPathLibs && (strchr(lib, '/') || strchr(lib, '\\'))) continue;
-        strcat(cmd, " ");
-        /* Explicit workspace artifact paths (e.g. ../ruka/lib/libruka.a)
-           must be passed directly to the linker. Only logical/system
-           library names use -l. */
-        if (strchr(lib, '/') || strchr(lib, '\\')) {
+    if (!sharedUpToDate) {
+      size_t n = strlen(c->cc) + strlen(target) + 96;
+      for (int i = 0; i < objs.count; i++)
+        n += strlen(objs.items[i]) + 3;
+      for (int i = 0; i < c->libraries.count; i++)
+        n += strlen(c->libraries.items[i]) + 8;
+      char *cmd = malloc(n);
+      if (compilerIsMSVC(c)) {
+        snprintf(cmd, n, "cl /nologo /LD");
+        for (int i = 0; i < objs.count; i++) {
+          strcat(cmd, " ");
+          strcat(cmd, objs.items[i]);
+        }
+        strcat(cmd, " /link /nologo /INCREMENTAL:NO /OUT:");
+        strcat(cmd, target);
+        for (int i = 0; i < c->libraries.count; i++) {
+          const char *lib = c->libraries.items[i];
+          if (!linkPathLibs && (strchr(lib, '/') || strchr(lib, '\\'))) continue;
+          if (lib[0] == '-') lib++;
+          if (lib[0] == 'l') lib++;
+          strcat(cmd, " ");
           strcat(cmd, lib);
-        } else {
-          if (lib[0] == '-' || lib[0] == 'l')
-            strcat(cmd, "-");
-          else
-            strcat(cmd, "-l");
-          strcat(cmd, lib);
+          strcat(cmd, ".lib");
+        }
+      } else {
+        /* Driver C (mis. compiler = gcc eksplisit) tetap harus bisa me-link
+           object C++: tambahkan -lstdc++ saat proyek berbahasa C++. */
+        snprintf(cmd, n, c->langCpp && !compilerIsCppDriver(c) ? "%s -shared -lstdc++"
+                                                               : "%s -shared",
+                 c->cc);
+        for (int i = 0; i < objs.count; i++) {
+          strcat(cmd, " ");
+          strcat(cmd, objs.items[i]);
+        }
+        strcat(cmd, " -o ");
+        strcat(cmd, target);
+        for (int i = 0; i < c->libraries.count; i++) {
+          const char *lib = c->libraries.items[i];
+          /* Fase library workspace: artifact proyek lain dilewati (belum
+             tentu ada); simbol lintas diselesaikan saat link binary. */
+          if (!linkPathLibs && (strchr(lib, '/') || strchr(lib, '\\'))) continue;
+          strcat(cmd, " ");
+          /* Explicit workspace artifact paths (e.g. ../ruka/lib/libruka.a)
+             must be passed directly to the linker. Only logical/system
+             library names use -l. */
+          if (strchr(lib, '/') || strchr(lib, '\\')) {
+            strcat(cmd, lib);
+          } else {
+            if (lib[0] == '-' || lib[0] == 'l')
+              strcat(cmd, "-");
+            else
+              strcat(cmd, "-l");
+            strcat(cmd, lib);
+          }
         }
       }
+      sharedCmd = cmd;
+      sharedSlot = nph;
+      if (!procStartCapture(sharedCmd, &ph[nph])) {
+        sharedSlot = -1;
+        sharedDone = false;
+        fprintf(stderr, "satria: shared library command: %s\n", sharedCmd);
+        fprintf(stderr, "satria: shared library build failed\n");
+      } else {
+        nph++;
+      }
     }
-    sharedDone = runCmd(cmd);
-    if (sharedDone) buildReportAddLibrary(target, REP_BUILT, fsFileSize(target));
-    if (!sharedDone) fprintf(stderr, "satria: shared library command: %s\n", cmd);
-    free(cmd);
-    if (!sharedDone) fprintf(stderr, "satria: shared library build failed\n");
+  }
+
+  /* Tunggu semua proses library (maks 2). Jika satu gagal start, handle itu
+     tidak masuk `ph`; hasilnya sudah dicatat sebagai gagal di atas. */
+  while (nph > 0) {
+    bool any = false;
+    for (int i = 0; i < nph; i++)
+      if (!ph[i].finished) any = true;
+    if (!any) break;
+    ProcHandle *fin = NULL;
+    if (procWaitAny(ph, nph, &fin) < 0) break;
+  }
+  for (int i = 0; i < nph; i++)
+    if (!ph[i].finished) {
+      procStopAll(ph, nph);
+      break;
+    }
+
+  /* Emit output setelah kedua proses selesai: urutan static lalu shared,
+     tidak tergantung siapa yang finish lebih dulu. */
+  if (staticSlot >= 0) {
+    staticDone = ph[staticSlot].ok;
+    cmdsEmitCapture(&ph[staticSlot], staticDone);
+    if (!staticDone) {
+      fprintf(stderr, "satria: static library command: %s\n", staticCmd);
+      fprintf(stderr, "satria: static library build failed\n");
+    }
+  }
+  if (sharedSlot >= 0) {
+    sharedDone = ph[sharedSlot].ok;
+    cmdsEmitCapture(&ph[sharedSlot], sharedDone);
+    if (!sharedDone) {
+      fprintf(stderr, "satria: shared library command: %s\n", sharedCmd);
+      fprintf(stderr, "satria: shared library build failed\n");
+    }
+  }
+
+  /* Laporan artefak dalam urutan tetap (static lalu shared), baik cached
+     maupun built. */
+  if (c->libStatic) {
+    cmdsLibStaticPath(c, target, sizeof(target));
+    if (staticUpToDate)
+      buildReportAddLibrary(target, REP_CACHED, fsFileSize(target));
+    else if (staticDone)
+      buildReportAddLibrary(target, REP_BUILT, fsFileSize(target));
+  }
+  if (c->libShared) {
+    cmdsLibSharedPath(c, target, sizeof(target));
+    if (sharedUpToDate)
+      buildReportAddLibrary(target, REP_CACHED, fsFileSize(target));
+    else if (sharedDone)
+      buildReportAddLibrary(target, REP_BUILT, fsFileSize(target));
   }
 
   if (stageDir[0]) fsRemoveTree(stageDir);
+  free(staticCmd);
+  free(sharedCmd);
   listFree(&objs);
   return staticDone && sharedDone;
 }
