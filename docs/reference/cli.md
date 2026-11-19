@@ -27,16 +27,20 @@ Create a project Buildfile — for a standard project this is just `use project`
 ## Interactive init
 
 ```bash
-satria init -p
+satria init -p [--here] [--no-run]
 ```
 
 Interactive scaffold. Enter accepts the default at every question; the
 scaffold is written into a new project folder, so it can be run from
-anywhere:
+anywhere. Before writing, a summary of the answers is shown for
+confirmation. On a terminal, the scaffold is then built and run
+automatically; `--no-run` skips that step. `--here` puts a single-project
+scaffold in the current directory instead of `<name>/` (a workspace still
+keeps its project folders):
 
 | Question | Default (Enter) |
 |---|---|
-| `Project name?` | random name (`satria-xxxxxx`) — the name is always the scaffold folder |
+| `Project name?` | random name (`satria-xxxxxx`) — also the scaffold folder, unless `--here` is used |
 | `language?` | `c` — answering `cpp` scaffolds `src/main.cpp` (iostream) and writes `std = c++17` |
 | `std?` | none written — convention (`gnu11`, or `c++17` for cpp) |
 | `compiler?` | none written — auto-detect |
@@ -59,9 +63,10 @@ The scaffold builds and runs out of the box:
 
 A workspace scaffold writes `WsBuildfile` (`projects = ...`, optional
 `<p>.depends_on = <p>` lines) plus a `src/main.c` per member — no per-project
-Buildfiles; satria synthesizes them. `init -p` never overwrites: if any target
-file already exists, it aborts before writing anything. Ctrl+C or EOF on a
-question cancels the scaffold.
+Buildfiles; satria synthesizes them. After a workspace build, the run step
+offers the primary project or another member by number. `init -p` never
+overwrites: if any target file already exists, it aborts before writing
+anything. Ctrl+C or EOF on a question cancels the scaffold.
 
 ## Initialize workspace
 

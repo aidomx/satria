@@ -376,7 +376,25 @@ static bool writeNew(const char *path, const char *content) {
   return true;
 }
 
-int cmdInteractiveInit(void) {
+/* Gabung `dir` (boleh kosong untuk --here) dengan path relatif. */
+static void initPath(char *out, size_t n, const char *dir, const char *rel) {
+  if (dir && *dir)
+    snprintf(out, n, "%s/%s", dir, rel);
+  else
+    copyStr(out, n, rel);
+}
+
+/* Build+run otomatis hanya untuk sesi interaktif sungguhan. Pipe/CI tetap
+   mendapat scaffold tanpa efek build yang tak diminta. */
+static bool initAutoRunTTY(void) {
+#ifdef _WIN32
+  return termIsTTY() && _isatty(_fileno(stdin)) != 0;
+#else
+  return termIsTTY() && isatty(0) == 1;
+#endif
+}
+
+int cmdInteractiveInit(bool here, bool noRun, int jobs) {
   char line[512];
   char name[64];
   char stdv[64] = {0}, compv[192] = {0}, flagsv[512] = {0};
@@ -432,6 +450,12 @@ int cmdInteractiveInit(void) {
     char *v = trim(line);
     wantWs = (v[0] == 'y' || v[0] == 'Y');
   }
+
+  /* --here hanya meratakan single-project. Workspace tetap butuh folder
+     proyek di dalam root ini agar model WsBuildfile tetap valid. */
+  bool flat = here && !wantWs;
+  const char *projDir = flat ? "" : name;
+  bool autoRun = !noRun && initAutoRunTTY();
 
   /* Daftar proyek workspace: proyek utama + anggota tambahan. */
   char names[16][64];
@@ -501,12 +525,15 @@ int cmdInteractiveInit(void) {
      membatalkan scaffold - tidak ada yang ditimpa, tidak ada parsial. */
   {
     const char *srcName = langCpp ? "main.cpp" : "main.c";
+    char srcRel[64], hdrRel[96];
     char p[SATRIA_MAX_PATH * 2];
     char conflictPath[SATRIA_MAX_PATH * 2] = "";
-    snprintf(p, sizeof(p), "%s/src/%s", name, srcName);
+    snprintf(srcRel, sizeof(srcRel), "src/%s", srcName);
+    initPath(p, sizeof(p), projDir, srcRel);
     if (fsFileExists(p)) copyStr(conflictPath, sizeof(conflictPath), p);
     if (!conflictPath[0] && wantInclude) {
-      snprintf(p, sizeof(p), "%s/include/%s.h", name, name);
+      snprintf(hdrRel, sizeof(hdrRel), "include/%s.h", name);
+      initPath(p, sizeof(p), projDir, hdrRel);
       if (fsFileExists(p)) copyStr(conflictPath, sizeof(conflictPath), p);
     }
     for (int i = 1; i < nn && !conflictPath[0]; i++) {
@@ -522,7 +549,7 @@ int cmdInteractiveInit(void) {
         else if (fsFileExists(WORKSPACE_FILENAME_LEGACY))
           copyStr(conflictPath, sizeof(conflictPath), WORKSPACE_FILENAME_LEGACY);
       } else {
-        snprintf(p, sizeof(p), "%s/Buildfile", name);
+        initPath(p, sizeof(p), flat ? "" : name, "Buildfile");
         if (fsFileExists(p)) copyStr(conflictPath, sizeof(conflictPath), p);
       }
     }
@@ -545,6 +572,12 @@ int cmdInteractiveInit(void) {
      tetap jalur C++ walau tree belum berisi .cpp; `use project` telanjang
      (C) berarti walk mengabaikan .cpp nyasar. */
   strcat(body, langCpp ? "use project cpp\n" : "use project\n");
+  /* --here: folder kerja (cwd) belum tentu bernama sama dengan nama proyek;
+     patok binaryName agar `bin/<nama>` yang dijalankan benar. */
+  if (flat) {
+    snprintf(tmp, sizeof(tmp), "\noutput.binaryName = %s\n", name);
+    strcat(body, tmp);
+  }
   if (stdv[0]) {
     snprintf(tmp, sizeof(tmp), "\nstd = %s\n", stdv);
     strcat(body, tmp);
@@ -605,26 +638,58 @@ int cmdInteractiveInit(void) {
     }
   }
 
+  /* Ringkasan + konfirmasi SEBELUM file apa pun ditulis. */
+  printf("\n> Summary\n");
+  printf("  Project   : %s\n", name);
+  printf("  Location  : %s\n", wantWs ? "." : (flat ? "." : name));
+  printf("  Mode      : %s\n", wantWs ? "workspace" : "single project");
+  if (stdv[0])
+    printf("  Language  : %s (std %s)\n", langCpp ? "c++" : "c", stdv);
+  else
+    printf("  Language  : %s\n", langCpp ? "c++" : "c");
+  if (compv[0]) printf("  Compiler  : %s\n", compv);
+  if (flagsv[0]) printf("  Flags     : %s\n", flagsv);
+  printf("  Include   : %s\n", wantInclude ? "yes" : "no");
+  if (wantWs) {
+    printf("  Projects  : ");
+    for (int i = 0; i < nn; i++) printf("%s%s", i ? ", " : "", names[i]);
+    printf("\n");
+    if (depA[0]) printf("  Depends   : %s -> %s\n", depA, depB);
+  }
+  printf("  Auto      : %s\n",
+         noRun ? "off (--no-run)" : (autoRun ? "build + run" : "off (non-interactive)"));
+  if (!askPrompt("Create? [Y/n] ", line, sizeof(line))) goto eof;
+  {
+    char *v = trim(line);
+    if (v[0] == 'n' || v[0] == 'N') {
+      printf("> Cancelled : tidak ada file yang ditulis\n");
+      return 0;
+    }
+  }
+
   /* Scaffold. */
   printf("\n");
   {
     char psrc[SATRIA_MAX_PATH * 2], pb[SATRIA_MAX_PATH * 2], phdr[SATRIA_MAX_PATH * 2];
-    mkdirs(name);
-    snprintf(psrc, sizeof(psrc), "%s/src", name);
+    char srcRel[64], hdrRel[96];
+    snprintf(srcRel, sizeof(srcRel), "src/%s", langCpp ? "main.cpp" : "main.c");
+    snprintf(hdrRel, sizeof(hdrRel), "include/%s.h", name);
+    if (projDir[0]) mkdirs(projDir);
+    initPath(psrc, sizeof(psrc), projDir, "src");
     mkdirs(psrc);
     if (wantInclude) {
-      snprintf(phdr, sizeof(phdr), "%s/include", name);
+      initPath(phdr, sizeof(phdr), projDir, "include");
       mkdirs(phdr);
     }
 
     if (!wantWs) {
-      snprintf(pb, sizeof(pb), "%s/Buildfile", name);
+      initPath(pb, sizeof(pb), flat ? "" : name, "Buildfile");
       if (!writeNew(pb, body)) return 1;
     }
-    snprintf(psrc, sizeof(psrc), "%s/src/%s", name, langCpp ? "main.cpp" : "main.c");
+    initPath(psrc, sizeof(psrc), projDir, srcRel);
     if (!writeNew(psrc, mainc)) return 1;
     if (wantInclude) {
-      snprintf(phdr, sizeof(phdr), "%s/include/%s.h", name, name);
+      initPath(phdr, sizeof(phdr), projDir, hdrRel);
       if (!writeNew(phdr, hdr)) return 1;
     }
 
@@ -648,12 +713,113 @@ int cmdInteractiveInit(void) {
 
     if (wantWs) {
       if (!writeNew(WORKSPACE_FILENAME, ws)) return 1;
-      printf("\n> Next      : satria -w\n");
-    } else {
-      printf("\n> Next      : cd %s && satria\n", name);
     }
   }
-  return 0;
+
+  if (!autoRun) {
+    if (wantWs)
+      printf("\n> Next      : satria -w\n");
+    else if (flat)
+      printf("\n> Next      : satria\n");
+    else
+      printf("\n> Next      : cd %s && satria\n", name);
+    return 0;
+  }
+
+  /* Auto build+run. Scaffold sudah selesai; kegagalan build/run dilaporkan
+     dengan perintah retry dan menjadi exit code command ini. */
+  int brc = 0;
+  bool runFailed = false;
+  char bin[SATRIA_MAX_PATH];
+  if (wantWs) {
+    printf("\n> Build     : workspace\n");
+    fflush(stdout);
+    brc = workspaceRun("build", jobs, NULL, NULL, false);
+    if (brc == 0) {
+      const char *runName = names[0];
+      if (nn > 1) {
+        printf("> Run       : pilih proyek [enter = %s", names[0]);
+        for (int i = 1; i < nn; i++) printf(", %d = %s", i + 1, names[i]);
+        printf(", n = skip] ");
+        fflush(stdout);
+        if (!fgets(line, sizeof(line), stdin))
+          runName = NULL;
+        else {
+          char *v = trim(line);
+          if (v[0] == 'n' || v[0] == 'N')
+            runName = NULL;
+          else if (v[0]) {
+            int pick = atoi(v);
+            if (pick >= 1 && pick <= nn)
+              runName = names[pick - 1];
+            else
+              printf("> Run       : pilihan '%s' tidak dikenal, pakai %s\n", v, names[0]);
+          }
+        }
+      }
+      if (runName) {
+#ifdef _WIN32
+        snprintf(bin, sizeof(bin), "bin\\%s.exe", runName);
+#else
+        snprintf(bin, sizeof(bin), "bin/%s", runName);
+#endif
+        printf("> Run       : %s\n", bin);
+        fflush(stdout);
+        if (!procRun(bin)) {
+          fprintf(stderr, "satria: run %s gagal (exit != 0)\n", bin);
+          runFailed = true;
+          brc = 1;
+        }
+      }
+    }
+  } else {
+    char cwd[SATRIA_MAX_PATH];
+    bool haveCwd = fsGetCwd(cwd, sizeof(cwd));
+    bool entered = true;
+    if (!flat) {
+      if (!fsSetCwd(name)) {
+        fprintf(stderr, "satria: cannot enter '%s'\n", name);
+        entered = false;
+        brc = 1;
+      }
+    }
+    if (entered) {
+      printf("\n> Build     : project\n");
+      fflush(stdout);
+      brc = cmdBuild(jobs, "Buildfile");
+      if (brc == 0) {
+#ifdef _WIN32
+        snprintf(bin, sizeof(bin), "bin\\%s.exe", name);
+#else
+        snprintf(bin, sizeof(bin), "bin/%s", name);
+#endif
+        printf("> Run       : %s\n", bin);
+        fflush(stdout);
+        if (!procRun(bin)) {
+          fprintf(stderr, "satria: run %s gagal (exit != 0)\n", bin);
+          runFailed = true;
+          brc = 1;
+        }
+      }
+    }
+    if (haveCwd) fsSetCwd(cwd);
+  }
+
+  if (brc != 0) {
+    if (runFailed) {
+      if (wantWs || flat)
+        printf("> Retry run : %s\n", bin);
+      else
+        printf("> Retry run : cd %s && %s\n", name, bin);
+    } else if (wantWs) {
+      printf("> Retry     : satria -w\n");
+    } else if (flat) {
+      printf("> Retry     : satria\n");
+    } else {
+      printf("> Retry     : cd %s && satria\n", name);
+    }
+  }
+  return brc;
 
 eof:
   fprintf(stderr, "\nsatria: init dibatalkan (EOF)\n");

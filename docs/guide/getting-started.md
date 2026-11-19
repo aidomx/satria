@@ -48,8 +48,10 @@ satria init -p
 ```
 
 Enter accepts the default at every question (a random name for an empty
-answer). It scaffolds a new project folder that builds and runs
-immediately; see [CLI](../reference/cli.md) for the full question list.
+answer). It shows a summary before writing, then builds and runs the
+result when stdin/stdout are terminals; use `--no-run` to skip that step.
+`--here` scaffolds a single project in the current directory instead of a
+new folder. See [CLI](../reference/cli.md) for the full question list.
 
 For a workspace:
 

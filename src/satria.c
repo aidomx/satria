@@ -79,6 +79,12 @@ int satriaRun(int argc, const char *argv[]) {
   int rc = bootstrapParse(argc, argv, &bs);
   if (rc != 0) return bootstrapCleanup(&bs), rc;
 
+  if ((bs.init_here || bs.init_no_run) && !(bs.cmd == CMD_INIT && bs.interactive)) {
+    fprintf(stderr, "satria: --here/--no-run hanya berlaku untuk 'satria init -p'\n");
+    bootstrapCleanup(&bs);
+    return 2;
+  }
+
   /* `--dev`: nyalakan flag global sebelum command mana pun berjalan —
      fase pack/release membacanya lewat cliDevActive() (config.h). Konflik
      dengan release eksplisit divalidasi di bawah (mode workspace). */
@@ -166,8 +172,9 @@ int satriaRun(int argc, const char *argv[]) {
        sebelum template cmdInitWorkspace. */
     if (bs.cmd == CMD_INIT) {
       if (bs.interactive) {
+        int irc = cmdInteractiveInit(bs.init_here, bs.init_no_run, bs.jobs);
         bootstrapCleanup(&bs);
-        return cmdInteractiveInit();
+        return irc;
       }
       int irc = cmdInitWorkspace(bs.have_f ? bs.buildfile : WORKSPACE_FILENAME);
       bootstrapCleanup(&bs);
@@ -254,7 +261,8 @@ int satriaRun(int argc, const char *argv[]) {
     break;
 
   case CMD_INIT:
-    rc = bs.interactive ? cmdInteractiveInit() : cmdInit(bs.buildfile);
+    rc = bs.interactive ? cmdInteractiveInit(bs.init_here, bs.init_no_run, bs.jobs)
+                        : cmdInit(bs.buildfile);
     break;
 
   case CMD_CLEAN:

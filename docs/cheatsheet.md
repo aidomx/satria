@@ -20,14 +20,18 @@ satria -f FILE
 ```bash
 satria init
 satria init -p
+satria init -p --here
+satria init -p --no-run
 satria init -w
 ```
 
 - `init` → Buildfile project minimal.
-- `init -p` → interactive scaffold.
+- `init -p` → interactive scaffold; di terminal langsung build+run.
+- `init -p --here` → scaffold single-project di direktori saat ini.
+- `init -p --no-run` → scaffold tanpa build+run otomatis.
 - `init -w` → `WsBuildfile` workspace.
 
-`init -p` tidak pernah overwrite: jika target sudah ada, proses dibatalkan sebelum menulis.
+`init -p` tidak pernah overwrite: jika target sudah ada, proses dibatalkan sebelum menulis. Ringkasan jawaban dikonfirmasi sebelum file dibuat.
 
 ### Jobs
 

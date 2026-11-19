@@ -144,6 +144,17 @@ int bootstrapParse(int argc, const char *argv[], Bootstrap *bs) {
       continue;
     }
 
+    /* Opsi init -p. Divalidasi di satria.c agar tidak menjadi no-op diam-diam
+       pada command lain. */
+    if (strcmp(a, "--here") == 0) {
+      bs->init_here = true;
+      continue;
+    }
+    if (strcmp(a, "--no-run") == 0) {
+      bs->init_no_run = true;
+      continue;
+    }
+
     /* -g compdb: hasilkan compile_commands.json tanpa build (query-only). */
     if (strcmp(a, "-g") == 0) {
       if (i + 1 >= argc || !argv[i + 1][0] || argv[i + 1][0] == '-') {

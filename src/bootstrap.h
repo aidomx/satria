@@ -58,6 +58,8 @@ typedef struct {
   // Flags
   bool want_workspace;  // -w
   bool interactive;     // init -p
+  bool init_here;       // init -p --here: scaffold di direktori kerja
+  bool init_no_run;     // init -p --no-run: tanpa build+run otomatis
   bool generate_compdb; // -g compdb
   bool watch_full;      // `satria watch --full`: stream background.log
   bool dev;             // `--dev`: abaikan release.* (WsBuildfile) / pack.* (Buildfile)

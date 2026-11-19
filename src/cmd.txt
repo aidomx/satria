@@ -20,7 +20,8 @@ Satria - A simple builder for you
                        tanpa tarball/deb/checksum
 
 satria init              Create a minimal Buildfile (use project)
-satria init -p           Interactive scaffold (name, language, workspace)
+satria init -p [--here] [--no-run]
+                          Interactive scaffold (name, language, workspace)
 satria init -w           Create WsBuildfile (workspace template)
 satria clean             Remove build artifacts
 satria profile <ctx>     Measure operation costs (see: help profile)
