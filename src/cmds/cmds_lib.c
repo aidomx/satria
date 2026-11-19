@@ -743,21 +743,16 @@ bool cmdsBuildLibraryEx(const Config *c, const List *srcs, bool linkPathLibs) {
         n += strlen(c->libraries.items[i]) + 8;
       char *cmd = malloc(n);
       if (compilerIsMSVC(c)) {
-        snprintf(cmd, n, "cl /nologo /LD");
-        for (int i = 0; i < objs.count; i++) {
-          strcat(cmd, " ");
-          strcat(cmd, objs.items[i]);
-        }
-        strcat(cmd, " /link /nologo /INCREMENTAL:NO /OUT:");
-        strcat(cmd, target);
+        char *p = cmd;
+        p += sprintf(p, "cl /nologo /LD");
+        for (int i = 0; i < objs.count; i++) p += sprintf(p, " %s", objs.items[i]);
+        p += sprintf(p, " /link /nologo /INCREMENTAL:NO /OUT:%s", target);
         for (int i = 0; i < c->libraries.count; i++) {
           const char *lib = c->libraries.items[i];
           if (!linkPathLibs && (strchr(lib, '/') || strchr(lib, '\\'))) continue;
           if (lib[0] == '-') lib++;
           if (lib[0] == 'l') lib++;
-          strcat(cmd, " ");
-          strcat(cmd, lib);
-          strcat(cmd, ".lib");
+          p += sprintf(p, " %s.lib", lib);
         }
       } else {
         /* Driver C (mis. compiler = gcc eksplisit) tetap harus bisa me-link
