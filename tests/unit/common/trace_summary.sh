@@ -32,7 +32,7 @@ check "baris gaya-strace" "$(grep -cE '^[a-z_0-9]+\(.+\) = ' "$W/t.log" || true)
 total_log=$(wc -l < "$W/t.log" | tr -d ' ')
 total_sat=$(grep '^> trace   : [0-9]* akses' "$W/trace.txt" | sed 's/^> trace   : \([0-9]*\) akses.*/\1/')
 check "total akses = wc -l log" "$total_sat" "$total_log"
-top_manual=$(awk '
+top_manual_line=$(awk '
 {
   i = index($0, "("); if (i <= 1) next
   op = substr($0, 1, i - 1)
@@ -45,8 +45,20 @@ top_manual=$(awk '
     if (r > 1) p = substr(rest2, 1, r - 1)
   }
   print op "\t" p
-}' "$W/t.log" | sort | uniq -c | sort -rn | head -1 | awk '{print $1}')
-top_sat=$(grep -A1 '^  top ' "$W/trace.txt" | tail -1 | awk '{print $1}')
+}' "$W/t.log" | sort | uniq -c | sort -rn | head -1)
+top_manual=$(printf '%s\n' "$top_manual_line" | awk '{print $1}')
+# Key = op<TAB>path (kolom sesudah hitungan), persis seperti di log.
+top_manual_key=$(printf '%s\n' "$top_manual_line" | sed 's/^ *[0-9][0-9]* //')
+# Ringkasan mengurutkan "top" menurut total waktu (design/trace.md), bukan
+# hitungan; cari baris dengan key yang sama, bukan asumsi baris pertama.
+top_sat=$(awk -v want="$top_manual_key" '
+  /^  top [0-9]+  :/ { intop = 1; next }
+  intop {
+    if ($0 !~ /^  +[0-9]+ /) { intop = 0; next }
+    cnt = $1; op = $6; path = $7
+    for (i = 8; i <= NF; i++) path = path " " $i
+    if (op "\t" path == want) { print cnt; exit }
+  }' "$W/trace.txt")
 check "hitungan teratas = key op+path sort|uniq -c" "$top_sat" "$top_manual"
 # 4) --raw memutar isi log setelah ringkasan
 "$SAT" -j${UNIT_JOBS:-2} trace --raw --out "$W/t2.log" -- -w core > "$W/trace2.txt" 2>&1
