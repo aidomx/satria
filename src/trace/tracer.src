@@ -11,6 +11,7 @@
 #include <sys/syscall.h>
 #include <dirent.h>
 #include <pthread.h>
+#include <time.h>
 
 /* Tracer gaya-strace: satu baris per panggilan,
    <op>(<args>) = <hasil>.
@@ -21,6 +22,14 @@
 
 static int logfd = -1;
 static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+
+/* Waktu monotonic untuk durasi satu panggilan (gaya strace -T). clock_gettime
+   tidak di-hook, jadi aman dipanggil dari wrapper mana pun. */
+static long long traceNowNs(void) {
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0;
+    return (long long)ts.tv_sec * 1000000000LL + ts.tv_nsec;
+}
 
 /* tambahkan s ke ujung out (potong diam bila tak muat) */
 static void apnd(char *out, size_t cap, const char *s) {
@@ -134,14 +143,16 @@ static void fmtResult(char *out, size_t cap, long ret, int se, int fdlike) {
     else snprintf(out, cap, " = -1 errno=%d (%s)", se, strerror(se));
 }
 
-/* tulis satu baris: fn(pre"path"post) = hasil. pre/post kosong boleh. */
-static void logline(const char *fn, const char *pre, const char *path, const char *post, long ret, int se, int fdlike) {
+/* tulis satu baris: fn(pre"path"post) = hasil <durasi detik>. */
+static void logline(const char *fn, const char *pre, const char *path, const char *post,
+                    long ret, int se, int fdlike, long long dtNs) {
     if (logfd < 0) return;
     char buf[4096];
-    char res[192];
+    char res[192], tim[40];
     fmtResult(res, sizeof res, ret, se, fdlike);
-    int n = snprintf(buf, sizeof(buf) - 2, "%s(\"%s\"%s%s)%s", fn,
-                     path ? path : "(null)", pre ? pre : "", post ? post : "", res);
+    snprintf(tim, sizeof tim, " <%.6f>", (double)dtNs / 1000000000.0);
+    int n = snprintf(buf, sizeof(buf) - 2, "%s(\"%s\"%s%s)%s%s", fn,
+                     path ? path : "(null)", pre ? pre : "", post ? post : "", res, tim);
     if (n <= 0) return;
     if (n >= (int)sizeof(buf) - 1) n = (int)sizeof(buf) - 2; /* dipotong: tetap ditutup \n */
     buf[n] = '\n';
@@ -179,13 +190,15 @@ int open(const char *path, int flags, ...) {
     mode_t mode = va_arg(ap, mode_t); va_end(ap);
     REAL(open);
     errno = 0;
+    long long t0 = traceNowNs();
     int r = real_open(path, flags, mode);
     int se = errno;
+    long long dt = traceNowNs() - t0;
     char post[96];
     post[0] = 0;
     apnd(post, sizeof post, ", ");
     fmtOpenFlags(post, sizeof post, flags, 1, mode);
-    logline("open", "", path, post, r, se, 1);
+    logline("open", "", path, post, r, se, 1, dt);
     return r;
 }
 
@@ -194,13 +207,15 @@ int open64(const char *path, int flags, ...) {
     mode_t mode = va_arg(ap, mode_t); va_end(ap);
     REAL(open64);
     errno = 0;
+    long long t0 = traceNowNs();
     int r = real_open64(path, flags, mode);
     int se = errno;
+    long long dt = traceNowNs() - t0;
     char post[96];
     post[0] = 0;
     apnd(post, sizeof post, ", ");
     fmtOpenFlags(post, sizeof post, flags, 1, mode);
-    logline("open64", "", path, post, r, se, 1);
+    logline("open64", "", path, post, r, se, 1, dt);
     return r;
 }
 
@@ -209,42 +224,48 @@ int openat(int dirfd, const char *path, int flags, ...) {
     mode_t mode = va_arg(ap, mode_t); va_end(ap);
     REAL(openat);
     errno = 0;
+    long long t0 = traceNowNs();
     int r = real_openat(dirfd, path, flags, mode);
     int se = errno;
+    long long dt = traceNowNs() - t0;
     char pre[24], post[96];
     atPre(pre, sizeof pre, dirfd);
     post[0] = 0;
     apnd(post, sizeof post, ", ");
     fmtOpenFlags(post, sizeof post, flags, 1, mode);
-    logline("openat", pre, path, post, r, se, 1);
+    logline("openat", pre, path, post, r, se, 1, dt);
     return r;
 }
 
 FILE *fopen(const char *path, const char *mode) {
     REAL(fopen);
     errno = 0;
+    long long t0 = traceNowNs();
     FILE *r = real_fopen(path, mode);
     int se = errno;
+    long long dt = traceNowNs() - t0;
     char post[64];
     post[0] = 0;
     apnd(post, sizeof post, ", \"");
     apnd(post, sizeof post, mode ? mode : "<null>");
     apnd(post, sizeof post, "\"");
-    logline("fopen", "", path, post, r ? 0 : -1, se, 0);
+    logline("fopen", "", path, post, r ? 0 : -1, se, 0, dt);
     return r;
 }
 
 FILE *fopen64(const char *path, const char *mode) {
     REAL(fopen64);
     errno = 0;
+    long long t0 = traceNowNs();
     FILE *r = real_fopen64(path, mode);
     int se = errno;
+    long long dt = traceNowNs() - t0;
     char post[64];
     post[0] = 0;
     apnd(post, sizeof post, ", \"");
     apnd(post, sizeof post, mode ? mode : "<null>");
     apnd(post, sizeof post, "\"");
-    logline("fopen64", "", path, post, r ? 0 : -1, se, 0);
+    logline("fopen64", "", path, post, r ? 0 : -1, se, 0, dt);
     return r;
 }
 
@@ -252,35 +273,43 @@ FILE *fopen64(const char *path, const char *mode) {
 int stat(const char *path, struct stat *st) {
     REAL(stat);
     errno = 0;
+    long long t0 = traceNowNs();
     int r = real_stat(path, st);
     int se = errno;
-    logline("stat", "", path, "", r, se, 1);
+    long long dt = traceNowNs() - t0;
+    logline("stat", "", path, "", r, se, 1, dt);
     return r;
 }
 
 int lstat(const char *path, struct stat *st) {
     REAL(lstat);
     errno = 0;
+    long long t0 = traceNowNs();
     int r = real_lstat(path, st);
     int se = errno;
-    logline("lstat", "", path, "", r, se, 1);
+    long long dt = traceNowNs() - t0;
+    logline("lstat", "", path, "", r, se, 1, dt);
     return r;
 }
 
 int stat64(const char *path, struct stat64 *st) {
     REAL(stat64);
     errno = 0;
+    long long t0 = traceNowNs();
     int r = real_stat64(path, st);
     int se = errno;
-    logline("stat64", "", path, "", r, se, 1);
+    long long dt = traceNowNs() - t0;
+    logline("stat64", "", path, "", r, se, 1, dt);
     return r;
 }
 
 int fstatat(int dirfd, const char *path, struct stat *st, int flags) {
     REAL(fstatat);
     errno = 0;
+    long long t0 = traceNowNs();
     int r = real_fstatat(dirfd, path, st, flags);
     int se = errno;
+    long long dt = traceNowNs() - t0;
     /* Isi struct tidak direkam (strace menampilkannya; deviation di dokumentasi):
        bendera at-lang tapi tetap di depan hasil. */
     char pre[24], post[96];
@@ -295,7 +324,7 @@ int fstatat(int dirfd, const char *path, struct stat *st, int flags) {
         post[0] = 0;
         apnd(post, sizeof post, tmp);
     }
-    logline("fstatat", pre, path, post, r, se, 1);
+    logline("fstatat", pre, path, post, r, se, 1, dt);
     return r;
 }
 
@@ -303,27 +332,33 @@ int fstatat(int dirfd, const char *path, struct stat *st, int flags) {
 int __xstat(int ver, const char *path, struct stat *st) {
     REAL(__xstat);
     errno = 0;
+    long long t0 = traceNowNs();
     int r = real___xstat(ver, path, st);
     int se = errno;
-    logline("__xstat", "", path, "", r, se, 1);
+    long long dt = traceNowNs() - t0;
+    logline("__xstat", "", path, "", r, se, 1, dt);
     return r;
 }
 
 int __xstat64(int ver, const char *path, struct stat64 *st) {
     REAL(__xstat64);
     errno = 0;
+    long long t0 = traceNowNs();
     int r = real___xstat64(ver, path, st);
     int se = errno;
-    logline("__xstat64", "", path, "", r, se, 1);
+    long long dt = traceNowNs() - t0;
+    logline("__xstat64", "", path, "", r, se, 1, dt);
     return r;
 }
 
 int __lxstat(int ver, const char *path, struct stat *st) {
     REAL(__lxstat);
     errno = 0;
+    long long t0 = traceNowNs();
     int r = real___lxstat(ver, path, st);
     int se = errno;
-    logline("__lxstat", "", path, "", r, se, 1);
+    long long dt = traceNowNs() - t0;
+    logline("__lxstat", "", path, "", r, se, 1, dt);
     return r;
 }
 
@@ -331,21 +366,25 @@ int __lxstat(int ver, const char *path, struct stat *st) {
 int access(const char *path, int mode) {
     REAL(access);
     errno = 0;
+    long long t0 = traceNowNs();
     int r = real_access(path, mode);
     int se = errno;
+    long long dt = traceNowNs() - t0;
     char post[48];
     post[0] = 0;
     apnd(post, sizeof post, ", ");
     fmtAccessFlags(post, sizeof post, mode);
-    logline("access", "", path, post, r, se, 1);
+    logline("access", "", path, post, r, se, 1, dt);
     return r;
 }
 
 int faccessat(int dirfd, const char *path, int mode, int flags) {
     REAL(faccessat);
     errno = 0;
+    long long t0 = traceNowNs();
     int r = real_faccessat(dirfd, path, mode, flags);
     int se = errno;
+    long long dt = traceNowNs() - t0;
     char pre[24], post[64];
     atPre(pre, sizeof pre, dirfd);
     post[0] = 0;
@@ -358,7 +397,7 @@ int faccessat(int dirfd, const char *path, int mode, int flags) {
         apnd(post, sizeof post, ", ");
         apnd(post, sizeof post, at);
     }
-    logline("faccessat", pre, path, post, r, se, 1);
+    logline("faccessat", pre, path, post, r, se, 1, dt);
     return r;
 }
 
@@ -366,20 +405,24 @@ int faccessat(int dirfd, const char *path, int mode, int flags) {
 ssize_t readlink(const char *path, char *buf, size_t sz) {
     REAL(readlink);
     errno = 0;
+    long long t0 = traceNowNs();
     ssize_t r = real_readlink(path, buf, sz);
     int se = errno;
-    logline("readlink", "", path, "", r, se, 1);
+    long long dt = traceNowNs() - t0;
+    logline("readlink", "", path, "", r, se, 1, dt);
     return r;
 }
 
 ssize_t readlinkat(int dirfd, const char *path, char *buf, size_t sz) {
     REAL(readlinkat);
     errno = 0;
+    long long t0 = traceNowNs();
     ssize_t r = real_readlinkat(dirfd, path, buf, sz);
     int se = errno;
+    long long dt = traceNowNs() - t0;
     char pre[24];
     atPre(pre, sizeof pre, dirfd);
-    logline("readlinkat", pre, path, "", r, se, 1);
+    logline("readlinkat", pre, path, "", r, se, 1, dt);
     return r;
 }
 
@@ -387,8 +430,10 @@ ssize_t readlinkat(int dirfd, const char *path, char *buf, size_t sz) {
 DIR *opendir(const char *path) {
     REAL(opendir);
     errno = 0;
+    long long t0 = traceNowNs();
     DIR *r = real_opendir(path);
     int se = errno;
-    logline("opendir", "", path, "", r ? 0 : -1, se, 0);
+    long long dt = traceNowNs() - t0;
+    logline("opendir", "", path, "", r ? 0 : -1, se, 0, dt);
     return r;
 }

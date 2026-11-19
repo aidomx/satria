@@ -329,14 +329,16 @@ Trace file access (POSIX, LD_PRELOAD)
 Runs satria with a tracer that logs each open/stat/access/... call of the
 process and its children, in strace-like form:
 
-  openat(AT_FDCWD, ".satria/opts.cache", O_RDONLY) = 5
-  openat(AT_FDCWD, "build/missing.h", O_RDONLY) = -1 ENOENT (No such file or directory)
+  openat(AT_FDCWD, ".satria/opts.cache", O_RDONLY) = 5 <0.000012>
+  openat(AT_FDCWD, "build/missing.h", O_RDONLY) = -1 ENOENT (No such file or directory) <0.000009>
 
-then prints a summary (total per op with error counts, like strace -c, plus
-the most frequent accesses). `--raw` also replays the full call stream.
+then prints a summary (total time, calls and error counts per op, like
+strace -c, plus the most expensive accesses). `--raw` also replays the full
+call stream. The trailing `<seconds>` is the duration of that call, following
+strace -T.
 
   satria trace -- -w core        Trace a workspace build of `core`
-  satria trace --top 50 -- -w    Show the 50 most frequent accesses
+  satria trace --top 50 -- -w    Show the 50 most expensive accesses
   satria trace --raw -- -w core  Stream + summary
 
 Options must come before the satria arguments. The first token that is not

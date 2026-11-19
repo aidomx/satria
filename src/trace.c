@@ -149,7 +149,8 @@ static bool ensureTracer(const char *soOpt, char *so, size_t cap) {
 
 typedef struct {
   size_t count;
-  size_t err; /* panggilan dengan hasil "= -1" dalam grup ini */
+  size_t err;    /* panggilan dengan hasil "= -1" dalam grup ini */
+  double sec;    /* total durasi panggilan dalam grup ini */
   const char *key;
 } Cnt;
 
@@ -164,6 +165,7 @@ static int cmpRec(const void *a, const void *b) {
 
 static int cmpCnt(const void *a, const void *b) {
   const Cnt *x = a, *y = b;
+  if (x->sec != y->sec) return x->sec < y->sec ? 1 : -1;
   if (x->count != y->count) return x->count < y->count ? 1 : -1;
   return strcmp(x->key, y->key);
 }
@@ -205,6 +207,10 @@ static void summarize(const char *logPath, int top) {
     char *rp = strchr(lb, ')');
     const char *neg = rp ? strstr(rp, " = -1 ") : NULL;
     bool fail = neg != NULL;
+    /* Durasi gaya strace -T: "... = 0 <0.000012>" sesudah hasil. */
+    double tsec = 0;
+    const char *tm = rp ? strstr(rp, " <") : NULL;
+    if (tm) tsec = strtod(tm + 2, NULL);
     size_t olen = (size_t)(lb - line);
     size_t plen = (size_t)(q2 - q1 - 1);
     if (n == cap) {
@@ -222,6 +228,7 @@ static void summarize(const char *logPath, int top) {
     k[olen + 1 + plen] = '\0';
     rs[n].count = 1;
     rs[n].err = fail ? 1 : 0;
+    rs[n].sec = tsec;
     rs[n].key = k;
     n++;
     if (fail) {
@@ -265,18 +272,25 @@ static void summarize(const char *logPath, int top) {
   /* Run-length: key sama berdampingan setelah diurutkan. */
   Cnt *cs = malloc(n * sizeof(Cnt));
   size_t m = 0;
+  double totalSec = 0;
   for (size_t i = 0; i < n;) {
     size_t j = i;
     while (j < n && strcmp(rs[j].key, rs[i].key) == 0) j++;
     cs[m].count = j - i;
     cs[m].key = rs[i].key;
     cs[m].err = 0;
-    for (size_t e = i; e < j; e++) cs[m].err += rs[e].err;
+    cs[m].sec = 0;
+    for (size_t e = i; e < j; e++) {
+      cs[m].err += rs[e].err;
+      cs[m].sec += rs[e].sec;
+    }
+    totalSec += cs[m].sec;
     m++;
     i = j;
   }
 
   printf("> trace   : %zu akses, %zu pola unik  (log: %s)\n", n, m, logPath);
+  printf("> trace   : total %.*f s\n", 6, totalSec);
   if (nerr > 0) {
     printf("> trace   : %zu gagal", nerr);
     for (size_t t = 0; t < net; t++)
@@ -290,13 +304,16 @@ static void summarize(const char *logPath, int top) {
     const char *t = strchr(cs[i].key, '\t');
     size_t olen = (size_t)(t - cs[i].key);
     size_t tot = 0, erh = 0, j = i;
+    double osec = 0;
     while (j < m && strncmp(cs[j].key, cs[i].key, olen) == 0 && cs[j].key[olen] == '\t') {
       tot += cs[j].count;
       erh += cs[j].err;
+      osec += cs[j].sec;
       j++;
     }
     printf("  %.*s %zu", (int)olen, cs[i].key, tot);
     if (erh) printf(" (err %zu)", erh);
+    printf(" (%.3f ms)", osec * 1000.0);
     i = j;
   }
   printf("\n");
@@ -306,7 +323,9 @@ static void summarize(const char *logPath, int top) {
   printf("  top %d  :\n", top);
   for (size_t i = 0; i < m && shown < top; i++, shown++) {
     const char *t = strchr(cs[i].key, '\t');
-    printf("  %7zu  %-8.*s %s\n", cs[i].count, (int)(t - cs[i].key), cs[i].key, t + 1);
+    double usec = cs[i].count ? cs[i].sec * 1000000.0 / (double)cs[i].count : 0.0;
+    printf("  %7zu  %9.3f ms  %9.2f us/call  %-8.*s %s\n", cs[i].count,
+           cs[i].sec * 1000.0, usec, (int)(t - cs[i].key), cs[i].key, t + 1);
   }
 
   for (size_t i = 0; i < n; i++) free((void *)rs[i].key);

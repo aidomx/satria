@@ -28,24 +28,28 @@ tracernya sendiri dan tidak membaca berkas luar.
 
 Hook (LD_PRELOAD, POSIX): open/open64/openat, fopen/fopen64,
 stat/lstat/stat64/fstatat (+ __xstat varian lama), access/faccessat,
-readlink/readlinkat, opendir. Setiap panggilan ditulis SATU baris gaya-strace:
+readlink/readlinkat, opendir. Setiap panggilan ditulis SATU baris gaya-strace,
+dengan durasi panggilan di ekor (pola strace -T):
 
-    <op>(<args>) = <hasil>
+    <op>(<args>) = <hasil> <detik>
 
 Contoh:
 
-    openat(AT_FDCWD, ".satria/opts.cache", O_RDONLY) = 5
-    openat(AT_FDCWD, "build/x.h", O_RDONLY|O_CREAT|O_TRUNC, 0644) = 3
-    stat(".satria/caches/fp.format") = 0
-    openat("/tmp/x", O_RDONLY) = -1 ENOENT (No such file or directory)
+    openat(AT_FDCWD, ".satria/opts.cache", O_RDONLY) = 5 <0.000012>
+    openat(AT_FDCWD, "build/x.h", O_RDONLY|O_CREAT|O_TRUNC, 0644) = 3 <0.000045>
+    stat(".satria/caches/fp.format") = 0 <0.000004>
+    openat("/tmp/x", O_RDONLY) = -1 ENOENT (No such file or directory) <0.000006>
 
 - Bendera didekode (`O_RDONLY|O_CREAT|O_TRUNC`, mode `0644`, akses `R_OK|X_OK`);
   bit asing dicetak hex. dirfd `*at` ditulis `AT_FDCWD` atau angka fd.
 - Hasil: `= <fd>` sukses (persis strace), `= ok` bila nilai balik bukan fd
   (fopen/opendir — modestring tetap ditulis), `= -1 ENAME (pesan strerror)`
   bila gagal.
+- Durasi diukur dengan `clock_gettime(CLOCK_MONOTONIC)` di sekitar panggilan
+  libc yang di-hook, dalam detik (enam desimal). Ini bukan total seluruh
+  syscall internal libc, tetapi cukup untuk membandingkan biaya per operasi.
 - Deviasi dari strace sungguhan: stat hanya menampilkan path (tanpa dump
-  struct), fopen/opendir mencetak `= ok`, dan tidak ada waktu per panggilan.
+  struct), dan fopen/opendir mencetak `= ok`.
 - Lokasi log: env `SATRIA_TRACE_LOG` (diset `satria trace`); fallback `/tmp/trace.log`.
 - Log ditulis lewat syscall `openat` langsung di constructor, supaya tidak
   rekursi ke hook sendiri.
@@ -63,13 +67,16 @@ header belum digenerate ulang.
 ## Ringkasan
 
 - Baris diparsing: op = teks sebelum `(`; path = antara pasangan kutip pertama;
-  gagal = hasil ` = -1 ` setelah `)`. Key = `op<TAB>path` (flags/hasil dibuang).
-  Diurutkan (qsort), lalu run-length: setara `sort | uniq -c`. Urutan teratas:
-  hitungan turun, lalu path naik.
-- Baris keempat mencetak total gagal + tally errno (gaya `strace -c` kolom errors).
+  gagal = hasil ` = -1 ` setelah `)`; durasi = angka di dalam `<...>` setelah
+  hasil. Key = `op<TAB>path` (flags/hasil dibuang). Diurutkan (qsort), lalu
+  run-length: setara `sort | uniq -c`.
+- Ringkasan mencetak total akses, total waktu, dan total gagal + tally errno
+  (gaya `strace -c` kolom errors).
 - Total per op dihitung dari run yang sama: setelah diurutkan, key dengan op
   yang sama berdampingan (prefix `op<TAB>`), sehingga tidak perlu map; kelompok
-  op dengan err>0 dicetak `(err N)`.
+  op dengan err>0 dicetak `(err N)` dan total waktunya dalam milidetik.
+- Daftar `top` diurutkan berdasarkan total waktu (bukan hanya hitungan), lalu
+  calls; setiap baris menampilkan calls, total ms, dan us/call.
 - `--raw` memutar isi log ke stdout sesudah ringkasan.
 - Exit code = exit code child (satria). Ringkasan tetap dicetak walau child gagal.
 
