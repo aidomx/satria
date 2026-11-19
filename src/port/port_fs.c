@@ -115,6 +115,14 @@ int64_t fsMTimeNs(const char *path) {
   return filetimeToNsSinceEpoch(&fad.ftLastWriteTime);
 }
 
+bool fsStatDirMTimeNs(const char *path, bool *isDir, int64_t *mtimeNs) {
+  WIN32_FILE_ATTRIBUTE_DATA fad;
+  if (!statInfo(path, &fad)) return false;
+  if (isDir) *isDir = (fad.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+  if (mtimeNs) *mtimeNs = filetimeToNsSinceEpoch(&fad.ftLastWriteTime);
+  return true;
+}
+
 long long fsFileSize(const char *path) {
   WIN32_FILE_ATTRIBUTE_DATA fad;
   if (!statInfo(path, &fad)) return -1;
@@ -320,6 +328,20 @@ int64_t fsMTimeNs(const char *path) {
 #else
   return (int64_t)st.st_mtim.tv_sec * 1000000000LL + st.st_mtim.tv_nsec;
 #endif
+}
+
+bool fsStatDirMTimeNs(const char *path, bool *isDir, int64_t *mtimeNs) {
+  struct stat st;
+  if (stat(path, &st) != 0) return false;
+  if (isDir) *isDir = S_ISDIR(st.st_mode);
+  if (mtimeNs) {
+#if defined(__APPLE__)
+    *mtimeNs = (int64_t)st.st_mtimespec.tv_sec * 1000000000LL + st.st_mtimespec.tv_nsec;
+#else
+    *mtimeNs = (int64_t)st.st_mtim.tv_sec * 1000000000LL + st.st_mtim.tv_nsec;
+#endif
+  }
+  return true;
 }
 
 long long fsFileSize(const char *path) {

@@ -114,10 +114,17 @@ int64_t packNewestInput(const Config *c) {
        binary tetap memicu kemasan ulang. */
     char eff[SATRIA_MAX_PATH * 2];
     if (!packResolveSource(src, eff, sizeof(eff))) continue;
-    if (fsFileExists(eff)) {
-      int64_t m = fsMTimeNs(eff);
+    /* Satu stat untuk tahu ada/tidak, file/direktori, dan mtime — pola WIP
+       fsMTimeNs-lalu-fsDirExists membayar stat kedua dan, bila direktori,
+       bisa melewati walk folder (dir mtime lebih baru dari isinya). */
+    bool isDir = false;
+    int64_t m = -1;
+    if (!fsStatDirMTimeNs(eff, &isDir, &m)) continue; /* tidak ada: diabaikan */
+    if (!isDir) {
       if (m > newest) newest = m;
-    } else if (fsDirExists(eff)) {
+      continue;
+    }
+    {
       /* folder: semua file di dalamnya + mtime folder itu sendiri.
          Mode workspace: daftar file dari cache walk (sources.cache, divalidasi mtime
          folder) dan mtime lewat memo, sehingga embed freshness ikut memakainya. */
@@ -139,8 +146,9 @@ int64_t packNewestInput(const Config *c) {
         if (m > newest) newest = m;
       }
       listFree(&files);
-      int64_t dm = wsModeActive() ? cmdsMTimeDecide(eff) : fsMTimeNs(eff);
-      if (dm > newest) newest = dm;
+      /* mtime folder sudah didapat dari stat pembuka — tidak perlu stat
+         ketiga (sebelumnya fsMTimeNs/cmdsMTimeDecide meminta ulang). */
+      if (m > newest) newest = m;
     }
     /* entri yang tidak ada diabaikan di sini; packRun melaporkannya. */
   }

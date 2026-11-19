@@ -150,6 +150,10 @@ bool fsFileExists(const char *path);
 bool fsDirExists(const char *path);
 time_t fsMTime(const char *path);    /* (time_t)-1 bila tidak ada */
 int64_t fsMTimeNs(const char *path); /* -1 bila tidak ada */
+/* mtime ns + jenis direktori dalam SATU stat: pengganti pola
+   `fsFileExists(x) ? fsMTimeNs(x) : fsDirExists(x)` yang membayar 2-3
+   syscall per path. false = path tidak ada. */
+bool fsStatDirMTimeNs(const char *path, bool *isDir, int64_t *mtimeNs);
 long long fsFileSize(const char *path);
 /* mtime ns + size dalam SATU stat (dipakai fastState validasi massal). */
 bool fsStampNsSize(const char *path, int64_t *mtimeNs, long long *size);
