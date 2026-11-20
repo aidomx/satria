@@ -155,13 +155,58 @@ bool wsCacheLoadMap(WsCacheMap *m) {
   if (!fsFileExists(WS_FP_FORMAT_MARK)) return false;
   FILE *f = fopen(WS_CACHE_SOURCES, "r");
   if (!f) return false;
-  char line[WS_PATH_LEN + 160]; /* format baru: +metadata (~76 kolom) */
-  bool ok = true;
+  /* Baca seluruh sources.cache sekali lalu belah baris di tempat: satu
+     alokasi + satu pass, bukan fgets/strlen per baris (30-40 ribu baris pada
+     workspace 5k; profil CPU no-op menunjukkan fungsi ini hotspot utama). */
+  const size_t hardMax = 64u * 1024 * 1024;
+  size_t cap = 256 * 1024, len = 0;
+  char *buf = malloc(cap + 1);
+  if (!buf) {
+    fclose(f);
+    return false;
+  }
+  for (;;) {
+    if (len == cap) {
+      if (cap >= hardMax) {
+        free(buf);
+        fclose(f);
+        return false;
+      }
+      size_t ncap = cap * 2 > hardMax ? hardMax : cap * 2;
+      char *nb = realloc(buf, ncap + 1);
+      if (!nb) {
+        free(buf);
+        fclose(f);
+        return false;
+      }
+      buf = nb;
+      cap = ncap;
+    }
+    size_t got = fread(buf + len, 1, cap - len, f);
+    len += got;
+    if (got == 0) break;
+  }
+  bool ok = !ferror(f);
+  fclose(f);
+  if (!ok) {
+    free(buf);
+    return false;
+  }
+  buf[len] = '\0';
   int metaAll = 1;
-  while (ok && fgets(line, sizeof(line), f)) {
-    size_t len = strlen(line);
-    if (len && line[len - 1] == '\n') line[--len] = '\0';
-    if (len == 0 || line[0] != 'P' || line[1] != ' ') continue;
+  char *p = buf, *end = buf + len;
+  while (ok && p < end) {
+    char *nl = memchr(p, '\n', (size_t)(end - p));
+    char *line = p;
+    if (nl) {
+      *nl = '\0';
+      p = nl + 1;
+    } else {
+      p = end;
+    }
+    size_t l = strlen(line);
+    if (l && line[l - 1] == '\r') line[--l] = '\0';
+    if (l < 2 || line[0] != 'P' || line[1] != ' ') continue;
     if (m->n == m->cap) {
       size_t nc = m->cap ? m->cap * 2 : 64;
       WsCachePath *nr = realloc(m->recs, nc * sizeof(WsCachePath));
@@ -180,7 +225,7 @@ bool wsCacheLoadMap(WsCacheMap *m) {
     if (!r->hasMeta) metaAll = 0;
     m->n++;
   }
-  fclose(f);
+  free(buf);
   if (ok) qsort(m->recs, m->n, sizeof(WsCachePath), wsCacheRecCmp);
   m->meta = ok && m->n > 0 && metaAll;
   return ok && m->n > 0;
