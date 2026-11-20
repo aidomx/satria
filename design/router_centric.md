@@ -80,8 +80,9 @@ satria: router-plan: fase binary: 2 rencana, 2 terverifikasi, 0 menyimpang
 ```
 
 Penyimpangan yang dilaporkan: proyek dieksekusi di luar rencana, fase tidak
-cocok, atau (saat rc == 0) proyek rencana tidak dieksekusi. Pilot ini **tidak
-mengubah** keputusan build maupun isi cache.
+cocok, atau (saat rc == 0) proyek rencana tidak dieksekusi. `wsPlanBegin`
+membuang penanda basi lebih dulu sehingga verifikasi tidak pernah memakai
+jejak run lama. Pilot ini **tidak mengubah** keputusan build maupun isi cache.
 
 ## 5. Tahap berikutnya
 

@@ -45,6 +45,13 @@ void wsPlanBegin(const WsModel *m, const WsWork *work, int n, bool libOnly) {
   if (!wsPlanOn()) return;
   (void)m;
   if (n > WS_MAX_PROJECTS) n = WS_MAX_PROJECTS;
+  /* Buang penanda basi dari run yang berhenti paksa: verifikasi tidak boleh
+     memakai penanda eksekusi lama. */
+  for (int i = 0; i < WS_MAX_PROJECTS; i++) {
+    char path[64];
+    wsPlanMarker(i, path, sizeof(path));
+    remove(path);
+  }
   for (int i = 0; i < n; i++) {
     snprintf(g_plan[i].name, sizeof(g_plan[i].name), "%s", work[i].name);
     g_plan[i].libOnly = libOnly;
