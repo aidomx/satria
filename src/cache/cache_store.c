@@ -3,6 +3,7 @@
 #include "cache_store.h"
 
 #include <errno.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -52,6 +53,19 @@ typedef struct CsNode {
   struct CsNode *next;
 } CsNode;
 
+/* Arena payload per store: payload entri (path, daftar header, token meta)
+   dialokasikan sekaligus per blok dan dibebaskan bersama store. Sebelumnya
+   tiap entri memakai strdup sendiri — pada cache 30 ribu baris itu puluhan
+   ribu malloc/free per open, hotspot CPU ketiga pada profil 5k. Payload hanya
+   valid selama store terbuka (kontrak csGet), jadi umur arena sama. */
+typedef struct CsArena {
+  struct CsArena *next;
+  size_t used, cap;
+  char data[];
+} CsArena;
+
+static char *arenaDup(CsStore *st, const char *src);
+
 /* Metadata grup P (design/startup.md §4): P <proj> <content> <time> <size>.
    Diisi pemanggil lewat csProjMetaSet (mis. stamp konfigurasi + daftar sumber
    per proyek) dan dipertahankan lintas load/commit. Baris P lama tanpa
@@ -70,7 +84,35 @@ struct CsStore {
   bool dirty;
   CsProjMeta *meta;
   size_t metaN, metaCap;
+  CsArena *arena; /* pemilik semua payload entri */
 };
+
+#define CS_ARENA_BLOCK (64u * 1024)
+
+static void *arenaAlloc(CsStore *st, size_t size) {
+  size_t align = sizeof(void *); /* cukup untuk CsNode/CsArena: pointer & int64 */
+  size_t len = (size + align - 1) & ~(align - 1);
+  if (!st->arena || st->arena->used + len > st->arena->cap) {
+    size_t cap = len > CS_ARENA_BLOCK ? len : CS_ARENA_BLOCK;
+    CsArena *a = malloc(sizeof(*a) + cap);
+    if (!a) return NULL;
+    a->next = st->arena;
+    a->used = 0;
+    a->cap = cap;
+    st->arena = a;
+  }
+  void *dst = st->arena->data + st->arena->used;
+  st->arena->used += len;
+  return dst;
+}
+
+static char *arenaDup(CsStore *st, const char *src) {
+  size_t len = strlen(src) + 1;
+  char *dst = arenaAlloc(st, len);
+  if (!dst) return NULL;
+  memcpy(dst, src, len);
+  return dst;
+}
 
 static CsProjMeta *metaFind(const CsStore *st, uint64_t proj) {
   for (size_t i = 0; i < st->metaN; i++)
@@ -150,24 +192,21 @@ static bool rehash(CsStore *st, size_t newCap) {
   return true;
 }
 
-/* Salin payload ke milik store (NULL/kosong -> NULL). */
-static bool ownPayload(CsEntry *dst, const char *src) {
+/* Salin payload ke arena milik store (NULL/kosong -> NULL). */
+static bool ownPayload(CsStore *st, CsEntry *dst, const char *src) {
   dst->payload = NULL;
   if (!src || !*src) return true;
-  dst->payload = strdup(src);
+  dst->payload = arenaDup(st, src);
   return dst->payload != NULL;
 }
 
 /* Sisipkan node baru (entri belum ada). Tumbuhkan tabel bila beban > 2. */
 static bool insertNew(CsStore *st, const CsEntry *e, CsOp op) {
   if (st->count + 1 > st->cap * 2 && !rehash(st, st->cap * 2)) return false;
-  CsNode *n = malloc(sizeof(CsNode));
+  CsNode *n = arenaAlloc(st, sizeof(CsNode));
   if (!n) return false;
   n->e = *e;
-  if (!ownPayload(&n->e, e->payload)) {
-    free(n);
-    return false;
-  }
+  if (!ownPayload(st, &n->e, e->payload)) return false;
   n->op = op;
   size_t b = bucketOf(st->cap, e->proj, e->file);
   n->next = st->buckets[b];
@@ -179,16 +218,13 @@ static bool insertNew(CsStore *st, const CsEntry *e, CsOp op) {
 static void freeStore(CsStore *st) {
   if (!st) return;
   free(st->meta);
-  for (size_t i = 0; st->buckets && i < st->cap; i++) {
-    CsNode *n = st->buckets[i];
-    while (n) {
-      CsNode *next = n->next;
-      free((void *)n->e.payload);
-      free(n);
-      n = next;
-    }
-  }
   free(st->buckets);
+  CsArena *a = st->arena;
+  while (a) {
+    CsArena *next = a->next;
+    free(a);
+    a = next;
+  }
   free(st);
 }
 
@@ -203,12 +239,26 @@ static bool parseHex(const char *s, uint64_t *out) {
 }
 
 static bool parseLL(const char *s, long long *out) {
-  if (!*s) return false;
-  char *end = NULL;
-  errno = 0;
-  long long v = strtoll(s, &end, 10);
-  if (errno != 0 || end == s || *end != '\0') return false;
-  *out = v;
+  const char *p = s;
+  bool neg = false;
+  if (*p == '-' || *p == '+') {
+    neg = *p == '-';
+    p++;
+  }
+  if (!*p) return false;
+  /* Parser desimal langsung: strtoll dipanggil >1 juta kali per run (kolom
+     time+size tiap entri) dan profil 5k menempatkannya di puncak setelah
+     arena payload. Semantik sama: hanya digit, tanda di depan, tolak luapan. */
+  unsigned long long v = 0;
+  unsigned long long limit = neg ? (unsigned long long)LLONG_MAX + 1ULL
+                                 : (unsigned long long)LLONG_MAX;
+  for (; *p; p++) {
+    unsigned d = (unsigned)(*p - '0');
+    if (d > 9) return false;
+    if (v > (limit - d) / 10ULL) return false;
+    v = v * 10ULL + d;
+  }
+  *out = neg ? (long long)(0ULL - v) : (long long)v;
   return true;
 }
 
@@ -364,10 +414,9 @@ bool csPut(CsStore *st, const CsEntry *e) {
     if (same) return true; /* nilai identik: tidak ada yang perlu ditulis ulang */
     char *dup = NULL;
     if (e->payload && *e->payload) {
-      dup = strdup(e->payload);
+      dup = arenaDup(st, e->payload);
       if (!dup) return false;
     }
-    free((void *)n->e.payload);
     n->e = *e;
     n->e.payload = dup;
     n->op = CS_PUT;
@@ -392,10 +441,9 @@ bool csPatch(CsStore *st, uint64_t proj, uint64_t file, const CsPatch *p) {
     if (!same) {
       char *dup = NULL;
       if (p->payload && *p->payload) {
-        dup = strdup(p->payload);
+        dup = arenaDup(st, p->payload);
         if (!dup) return false;
       }
-      free((void *)n->e.payload);
       n->e.payload = dup;
       changed = true;
     }
@@ -412,9 +460,7 @@ bool csDelete(CsStore *st, uint64_t proj, uint64_t file) {
   while (*link) {
     CsNode *n = *link;
     if (n->e.proj == proj && n->e.file == file) {
-      *link = n->next;
-      free((void *)n->e.payload);
-      free(n);
+      *link = n->next; /* node milik arena: tidak dibebaskan per entri */
       st->count--;
       st->dirty = true;
       return true;
