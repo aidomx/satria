@@ -212,54 +212,9 @@ static bool parseLL(const char *s, long long *out) {
   return true;
 }
 
-/* Baca satu baris ke buffer heap yang tumbuh — payload bisa puluhan KB
-   (mis. daftar header edges). Return: false = gagal/terlalu panjang;
-   *eof=true dan *out=NULL = sudah di akhir file; selain itu *out = baris
-   tanpa '\n' (milik pemanggil, free()). */
+/* Batas atas ukuran satu cache yang mau dimuat (payload entri bisa puluhan
+   KB — mis. daftar header edges — jadi buffer baris tidak boleh tetap kecil). */
 #define CS_LINE_HARD_MAX (16u * 1024 * 1024)
-static bool readLineGrow(FILE *fp, char **out, bool *eof) {
-  *out = NULL;
-  *eof = false;
-  size_t cap = 256, len = 0;
-  char *buf = malloc(cap);
-  if (!buf) return false;
-  for (;;) {
-    if (!fgets(buf + len, (int)(cap - len), fp)) {
-      if (ferror(fp)) {
-        free(buf);
-        return false;
-      }
-      if (len == 0) { /* EOF sejak awal */
-        free(buf);
-        *eof = true;
-        return true;
-      }
-      break; /* baris terakhir tanpa '\n' */
-    }
-    len += strlen(buf + len);
-    if (len > 0 && buf[len - 1] == '\n') {
-      len--;
-      if (len > 0 && buf[len - 1] == '\r') len--;
-      break;
-    }
-    if (feof(fp)) break;
-    if (cap >= CS_LINE_HARD_MAX) {
-      free(buf);
-      return false;
-    }
-    size_t ncap = cap * 2 > CS_LINE_HARD_MAX ? CS_LINE_HARD_MAX : cap * 2;
-    char *nb = realloc(buf, ncap);
-    if (!nb) {
-      free(buf);
-      return false;
-    }
-    buf = nb;
-    cap = ncap;
-  }
-  buf[len] = '\0';
-  *out = buf;
-  return true;
-}
 
 /* Parse satu baris entri/P. Return: false = file rusak, true = sah. */
 static bool parseLine(CsStore *st, const char *line, bool *haveP, uint64_t *curProj) {
@@ -309,17 +264,59 @@ static bool parseLine(CsStore *st, const char *line, bool *haveP, uint64_t *curP
 }
 
 static bool loadFile(CsStore *st, FILE *fp) {
+  /* Baca seluruh berkas sekali, lalu parse baris di tempat. Sebelumnya
+     readLineGrow mengalokasi/membebaskan satu buffer per baris; pada cache
+     30 ribu entri itu puluhan ribu malloc/free per open (profil CPU: csOpen
+     ~29% waktu satria pada run incremental 5k). Cache selalu muat di memori:
+     payload-nya sendiri sudah disalin ke store oleh insertNew. */
+  size_t cap = 64 * 1024, len = 0;
+  char *buf = malloc(cap + 1); /* +1: '\0' akhir tanpa perlu tumbuh lagi */
+  if (!buf) return false;
+  for (;;) {
+    if (len == cap) {
+      if (cap >= CS_LINE_HARD_MAX) {
+        free(buf);
+        return false;
+      }
+      size_t ncap = cap * 2 > CS_LINE_HARD_MAX ? CS_LINE_HARD_MAX : cap * 2;
+      char *nb = realloc(buf, ncap + 1);
+      if (!nb) {
+        free(buf);
+        return false;
+      }
+      buf = nb;
+      cap = ncap;
+    }
+    size_t got = fread(buf + len, 1, cap - len, fp);
+    len += got;
+    if (got == 0) break;
+  }
+  if (ferror(fp)) {
+    free(buf);
+    return false;
+  }
+  buf[len] = '\0';
+
   bool haveP = false;
   uint64_t curProj = 0;
-  for (;;) {
-    char *line = NULL;
-    bool eof = false;
-    if (!readLineGrow(fp, &line, &eof)) return false;
-    if (eof) break;
-    bool ok = parseLine(st, line, &haveP, &curProj);
-    free(line);
-    if (!ok) return false;
+  char *p = buf, *end = buf + len;
+  while (p < end) {
+    char *nl = memchr(p, '\n', (size_t)(end - p));
+    char *line = p;
+    if (nl) {
+      *nl = '\0';
+      p = nl + 1;
+    } else {
+      p = end;
+    }
+    size_t l = strlen(line);
+    if (l > 0 && line[l - 1] == '\r') line[l - 1] = '\0';
+    if (!parseLine(st, line, &haveP, &curProj)) {
+      free(buf);
+      return false;
+    }
   }
+  free(buf);
   return true;
 }
 
