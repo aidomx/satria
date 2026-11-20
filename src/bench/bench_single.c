@@ -225,6 +225,14 @@ void benchGenProject(Bench *b, BenchTool *t) {
   mkdirs(dir);
   mkdirs(ws);
 
+  /* Rantai include antar header dibatasi kedalamannya lewat modulo (CAP),
+     bukan linear h -> h-1: linear membuat kedalaman include == b->header,
+     dan compiler menolak begitu melewati -fmax-include-depth (default 200)
+     untuk b->header besar (mis. 1000+). Dengan wrap, setiap header tetap
+     meng-include header lain (h != dirinya sendiri bila header > 1), tapi
+     kedalaman rantai yang terbentuk tidak pernah melebihi CAP+1, berapa pun
+     b->header-nya. Jumlah file dan nilai v%d per header tidak berubah. */
+  const int BENCH_HEADER_CHAIN_CAP = 64;
   for (int h = 1; h <= b->header; h++) {
     char tail[32];
     snprintf(tail, sizeof(tail), "/include/h%d.h", h);
@@ -232,7 +240,17 @@ void benchGenProject(Bench *b, BenchTool *t) {
     FILE *f = fopen(path, "wb");
     if (!f) continue;
     fputs("#pragma once\n", f);
-    if (h > 1) fprintf(f, "#include \"h%d.h\"\n", h - 1);
+    if (h > 1) {
+      int prev;
+      if (h <= BENCH_HEADER_CHAIN_CAP) {
+        prev = h - 1;
+      } else {
+        /* (h - CAP - 1) bisa 0 saat h == CAP + 1; modulo lalu +1 menjaga
+           prev selalu di rentang [1, CAP], tidak pernah 0 atau negatif. */
+        prev = (h - BENCH_HEADER_CHAIN_CAP - 1) % BENCH_HEADER_CHAIN_CAP + 1;
+      }
+      fprintf(f, "#include \"h%d.h\"\n", prev);
+    }
     fprintf(f, "static const int v%d = %d;\n", h, h);
     fclose(f);
   }
