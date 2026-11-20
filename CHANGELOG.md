@@ -1,9 +1,43 @@
+# v0.6.4
+- d484148 chore: update to version 0.6.4
+- a124bf3 refactor(workspace): pisahkan rencana scheduler dari router opts.cache
+- dd14db7 docs(todos): catat uji ulang bench-compare headers=1000
+- b9f1c4c docs: simpan audit trace dan todo 19 Nov 2026
+- b6107bf fix(bench): batasi rantai include header agar CI headers besar tidak gagal
+- b0c9e63 fix(workspace): bersihkan penanda router-plan basi saat mulai
+- 9c8396f feat(workspace): pilot router plan read-only lewat SATRIA_ROUTER_PLAN
+- a0b2858 perf(cache): alokasi node/payload dari arena dan parser desimal langsung
+- 5be2b00 perf(ws): muat sources.cache sekali lalu belah baris di tempat
+- 8eb62be perf(router): memo presence grup cache lewat stempel file, bukan hash isi
+- c037fc0 perf(cache): baca berkas cache sekali lalu parse baris di tempat
+- cb4545c perf(pack): satu stat saat resolve sumber entri
+- 9923e75 perf(link): satu stat untuk target link (ada + mtime)
+- b32af77 test(trace): cocokkan hitungan per key pada ringkasan top
+- 3cbddb1 perf(lib): bangun perintah link MSVC dalam O(N)
+- 2ffa64c perf(save-walk): timer profil hanya saat SATRIA_PROFILE
+- c950178 perf(pack): satu stat untuk file/direktori via fsStatDirMTimeNs
+- 71c84c3 docs(cmd): init --here/--no-run, trace timing, bench strace flag
+- a5fa786 perf(link): link lewat static archive (--whole-archive)
+- 1dcbe79 perf(lib): parallel static+shared build, dedup O(N log N)
+- d4878f2 fix(bench): sanitizer A/B labels to valid C identifiers
+- c2168c2 feat(bench): satria trace becomes default backend, strace=true opt-in
+- d06f324 feat(trace): per-call duration in log and summary (strace -T)
+- 85d9c25 feat(init): summary+confirm, --here, --no-run, auto build+run
+- 97e2ded feat: trace leaf tanpa -f — hanya proses utama satria, bukan anak gcc
+- aa36efb fix: trace workspace — configure cmake dulu + telusuri skenario leaf
+
 # v0.6.2
+- 42b7a76 fix: hapus stub benchEmbedSource duplikat di bench.c (LNK2005 MSVC/MinGW)
+- 666055a fix: bench portable — unistd.h MSVC + st_*timespec macOS
+- 4511c41 ci: trigger push tag v* untuk bench + build; release GITHUB_TOKEN tidak memicu workflow lain
+- 619d925 chore: changelog v0.6.2
 - cc0a8df chore: CI bench pakai bin/satria bench + versi v0.6.2 + release note
 - 85186d1 fix: bench workspace — prime snapshot selalu dipakai, state terisolasi per run
 - 3c14634 feat: benchmark di C — satria bench [--workspace] [-f key=value]
 - 80058d3 fix: serialisasi bahasa workspace di startup.state (SATRIA-STARTUP-3)
 - 0565bd1 perf: peringatan divergensi selektif hanya bila gerbang no-op meleset
+- bfa4a8f chore: Adjust the leaf and blade expectations to align with the Satria's operating mechanism.
+- 1d84edb chore: update changelog v0.6.1
 
 # v0.6.1
 - 1a2242c chore: Update release notes for fixed release.files and update the version to v0.6.1
