@@ -11,12 +11,13 @@ problems/*
 !problems/02_11_2026_build_report_review.md
 !problems/15_10_2026_audit_v94_optimasi.md
 !problems/19_10_2026_startup.md
+!problems/19_11_2026_trace.md
 
 todos/*
 !todos/.gitkeep
 !todos/2_10_2026.md
 !todos/4_11_2026_optimizer.md
-
+!todos/19_11_2026.md
 
 dist
 tests/rupaws
