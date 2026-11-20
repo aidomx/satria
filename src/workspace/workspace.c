@@ -578,7 +578,9 @@ static int wsRunCore(const char *cmd, int jobs, const char *only, const char *re
        meng-embed); jalur serial (-j1 / SATRIA_WS_PAR=0) tetap bertingkat
        dependensi persis perilaku lama. Alasan & ukuran gain (gap
        hedit/libhdr bench/ws.sh) ada di komentar modul ws_batch.c. */
+    wsPlanBegin(&m, work, wcount, true);
     rc = wsRunBatch(&m, work, wcount, jobs, cmd, wsDir, true);
+    wsPlanEnd(rc);
     /* FASE 2 — binary pass: link binary setelah SEMUA library tersedia
        (cdeps bisa siklik — lihat catatan wsBuildWorklist). Proyek
        kemasan (output.binary = false) tuntas di fase library — Lewati
@@ -589,7 +591,9 @@ static int wsRunCore(const char *cmd, int jobs, const char *only, const char *re
       int bn = 0;
       for (int i = 0; i < wcount; i++)
         if (!wsProjectArchiveOnly(&m.projects[work[i].idx])) bin[bn++] = work[i];
+      wsPlanBegin(&m, bin, bn, false);
       rc = wsRunBatch(&m, bin, bn, jobs, cmd, wsDir, false);
+      wsPlanEnd(rc);
     }
   } else {
     /* clean: satu pass serial (binary pass), tanpa fase library. */

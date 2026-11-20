@@ -51,6 +51,11 @@ int wsRunProject(const WsModel *m, const char *name, const char *cmd, int jobs,
     return rc;
   }
 
+  /* Router plan (P4): verifikasi read-only bahwa proyek ini memang bagian
+     rencana fase yang sedang dieksekusi. Nilai kembali tidak mengubah
+     keputusan build. */
+  wsPlanAdmit(name, libOnly);
+
   /* Label fase: proyek kemasan (output.binary = false) fase 1-nya ARSIP.
      Format lama `| Project :` / `| Fase :` diganti blok `# Execution` +
      `> Nama` (design/build_report.md): fase library mencetak `> Nama` +
