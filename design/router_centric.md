@@ -1,67 +1,95 @@
 # Router-centric workspace (eksperimen P4)
 
 > Status: eksperimen. Pilot **read-only** sudah ada di kode:
-> `src/workspace/ws_plan.c`, aktif hanya dengan `SATRIA_ROUTER_PLAN=1`,
-> diuji oleh `tests/unit/common/router_plan.sh`. Dokumen ini menetapkan arah
+> `src/workspace/ws_plan.c`, aktif hanya dengan `SATRIA_WS_PLAN=1`,
+> diuji oleh `tests/unit/common/ws_plan.sh`. Dokumen ini menetapkan arah
 > dan batas migrasi; kode tetap sumber kebenaran.
 
-## 1. Masalah
+## 1. Siapa yang disebut "router"?
 
-Alur workspace saat ini:
+Istilah **router** sudah dipakai di `design/startup.md` §`opts.cache`: ia
+adalah lapisan keputusan cache berbasis `.satria/opts.cache`, bukan induk
+workspace dan bukan executor. Pekerjanya ada di:
+
+| Berkas | Peran |
+| --- | --- |
+| `src/cache/router.c` | validasi route (`optsRouterValidate`, `wsRouterValidate`), presence grup (`optsCacheHasGroup`), memo per proses |
+| `src/cache/opts_read.c` | membaca route + kontrak `opts.cache` <-> `sources.cache`; `optsStoreShared/Flush/Reload` |
+| `src/cache/opts_create.c` | membuat entri/route baru (`optsRouterRecord`, `wsRouterRecord`, `optsProjMetaStamp`) |
+| `src/cache/opts_update.c` | memperbarui route/stempel (PATCH) |
+| `src/cache/opts_delete.c` | menghapus entri/route |
+| `.satria/opts.cache` | state router: satu entri per proyek + route workspace |
+
+Router **tidak** mengompilasi, tidak menjadwalkan, dan tidak menulis objek.
+Ia memutuskan: no-op valid atau tidak, file cache mana yang dirujuk suatu
+proyek, dan grup entri proyek ada atau tidak.
+
+Aktor lain dalam alur workspace:
+
+| Aktor | Berkas utama | Tugas |
+| --- | --- | --- |
+| **Scheduler** | `src/workspace/workspace.c`, `ws_batch.c`, `src/runners/*` | needed, worklist, fase library/binary, fork/wait, urutan output |
+| **Executor** | `src/workspace/ws_exec.c` -> `wsRunProject` | menyusun Config, cek fast-state, kompilasi/link/arsip |
+| **Finish** | `src/cmds/cmds_passfinish.c`, `ws_cache_save.c`, `src/log/*` | simpan deps/lib/state, route sync, laporan, release |
+
+## 2. Masalah
+
+Alur saat ini:
 
 ```text
-router (induk) -> executor (anak fork / in-process) -> finish (induk)
+router (validasi awal) -> scheduler -> executor -> finish (menulis cache)
 ```
 
-Router memang sudah memutuskan *apa yang dibangun* (needed, worklist, gate
-no-op). Tetapi selama eksekusi, executor masih mengambil keputusan sendiri
-dan menyentuh state bersama secara independen:
+Router memang sudah dipanggil di awal (`optsRouterValidate` /
+`wsRouterValidate` lewat `cmdsFastStateValid`/`wsFastStateValid`), tetapi
+selama dan sesudah eksekusi keputusan serta penulisan state tersebar:
 
-- setiap anak membuka dan mem-parse ulang `deps.cache`, `lib.cache`,
-  `fingerprint.cache`, `opts.cache`, `sources.cache`;
-- setiap anak menulis ulang file cache bersama (hapus grup proyeknya, tulis
-  ulang seluruh file) lalu induk membuka/menulis file yang sama lagi;
-- keputusan fast-state diambil di anak, sedangkan gerbang no-op di induk;
-- sebagian hasil distaging (state/verdict/report), sebagian langsung ke
-  disk (deps/lib/fingerprint/opts) — dua model kepemilikan bercampur.
+- executor memanggil ulang router untuk menulis route (`optsRouterRecord`,
+  `wsRouterRecord`, `optsProjMetaStamp`, `wsOptsMetaSave`) dan menulis
+  `deps.cache`, `lib.cache`, `fingerprint.cache` sendiri; pada single-project,
+  validasi router (`optsRouterValidate`) juga dijalankan di dalam alur
+  eksekusi (`cmds_state.c`/`cmds_wsstate.c`), bukan diputuskan sekali di awal;
+- scheduler/induk menulis ulang file yang sama (`wsCacheSave`,
+  `csProjMetaStampFileN`, `optsSourcesRouteSync`);
+- anak-anak fork dapat menulis cache bersama secara bersamaan
+  (*last writer wins* untuk grup proyek lain).
 
-Konsekuensi terukur (profil CPU workspace 5k, Nov 2026):
+Akibat terukur (profil 5k, Nov 2026): `csOpen` 28x per run leaf dan
+`insertNew` >900 ribu entri — parse/tulis berulang karena setiap lapisan
+membaca dan memutuskan sendiri.
 
-- `csOpen` 28x per run leaf; `insertNew` >900 ribu entri diparse;
-- penulisan cache bersama oleh banyak anak: *last writer wins* untuk grup
-  proyek lain yang dibaca sebelum anak lain selesai;
-- biaya I/O/CPU validasi berulang muncul lagi di induk (save/stamp).
-
-## 2. Target
+## 3. Target
 
 ```text
-router -> executor -> router -> finish
+router -> scheduler/executor -> router -> finish
 ```
 
-- **Router** (induk) satu-satunya pemilik keputusan dan penulis state/cache.
-  Ia menyusun rencana eksplisit per fase, lalu memverifikasi hasilnya.
-- **Executor** hanya menjalankan rencana: kompilasi/link/arsip, tanpa
-  membaca/menulis cache bersama dan tanpa memutuskan target.
-- **Router (kedua)** membaca laporan executor (state/verdict/report staging),
-  memutuskan pembaruan cache/state, lalu menyerahkan ringkasan ke **finish**
-  yang hanya merender.
+1. **Router** memutuskan sebelum eksekusi: route valid/tidak, grup cache
+   ada/tidak, proyek boleh no-op atau harus dibangun.
+2. **Scheduler** menerjemahkan keputusan router menjadi rencana eksplisit.
+   **Executor** hanya menjalankan rencana: kompilasi/link/arsip, tanpa
+   memanggil router dan tanpa menulis cache bersama.
+3. **Router** kembali dipanggil setelah eksekusi untuk mencatat route,
+   metadata grup, dan sinkronisasi `sources` — satu penulis, sekali per run.
+4. **Finish** hanya merender laporan/release; tidak ada keputusan cache di
+   sana.
 
-## 3. Invarian migrasi
+## 4. Invarian migrasi
 
 1. **Zero semantic change** selama eksperimen: format cache, keputusan
    no-op, dan hasil build identik. Pilot default nonaktif.
-2. **Satu penulis** untuk setiap file cache pada satu waktu (induk).
-3. **Fallback** selalu tersedia: tanpa `SATRIA_ROUTER_PLAN`, perilaku lama
-   persis (tanpa file penanda, tanpa output tambahan).
+2. **Satu penulis** untuk setiap file cache pada satu waktu.
+3. **Fallback** selalu tersedia: tanpa env pilot, perilaku lama persis
+   (tanpa file penanda, tanpa output tambahan).
 4. **Kegagalan executor** tetap menghentikan peluncuran proyek berikutnya;
    rencana yang tidak sempat dieksekusi bukan pelanggaran bila rc != 0.
-5. Fork boleh mewarisi rencana (memori) — tidak perlu IPC baru untuk pilot.
+5. Fork boleh mewarisi rencana (memori); belum perlu IPC baru.
 
-## 4. Pilot fase 0 (sudah diimplementasikan)
+## 5. Pilot fase 0 (sudah diimplementasikan)
 
-Router menyusun rencana per fase sebelum `wsRunBatch`, executor mengaku
-"masuk rencana" dan menulis penanda `.satria/ws-plan-<idx>`, lalu router
-mencocokkan penanda dengan rencana setelah batch.
+Pilot ini **bukan** router. Ia berada di sisi scheduler: membuktikan bahwa
+scheduler hanya menjalankan proyek yang direncanakan, dan menyediakan tempat
+untuk membawa keputusan router pada fase berikutnya.
 
 API (`ws_internal.h`):
 
@@ -69,60 +97,74 @@ API (`ws_internal.h`):
 bool wsPlanActive(void);
 void wsPlanBegin(const WsModel *m, const WsWork *work, int n, bool libOnly);
 bool wsPlanAdmit(const char *name, bool libOnly); /* dipanggil executor */
-void wsPlanEnd(int rc);                            /* dipanggil router */
+void wsPlanEnd(int rc);                            /* dipanggil scheduler */
 ```
 
-Keluaran (`SATRIA_ROUTER_PLAN=1`, stderr):
+Keluaran (`SATRIA_WS_PLAN=1`, stderr):
 
 ```text
-satria: router-plan: fase library: 3 rencana, 3 terverifikasi, 0 menyimpang
-satria: router-plan: fase binary: 2 rencana, 2 terverifikasi, 0 menyimpang
+satria: ws-plan: fase library: 3 rencana, 3 terverifikasi, 0 menyimpang
+satria: ws-plan: fase binary: 2 rencana, 2 terverifikasi, 0 menyimpang
 ```
 
 Penyimpangan yang dilaporkan: proyek dieksekusi di luar rencana, fase tidak
 cocok, atau (saat rc == 0) proyek rencana tidak dieksekusi. `wsPlanBegin`
-membuang penanda basi lebih dulu sehingga verifikasi tidak pernah memakai
-jejak run lama. Pilot ini **tidak mengubah** keputusan build maupun isi cache.
+membuang penanda basi lebih dulu. Pilot ini **tidak mengubah** keputusan
+build maupun isi cache.
 
-## 5. Tahap berikutnya
+## 6. Tahap berikutnya
 
-### Fase 1 — rencana membawa keputusan
+### Fase 1 — rencana membawa keputusan router
 
-Router menghitung keputusan per proyek *sebelum* fork (fast-state valid,
-fase archive/library/binary, target output) memakai fungsi yang sama dengan
-executor. Executor mengonsumsi rencana dan memverifikasi keputusan router
-sama dengan hasil hitungnya sendiri. Bila berbeda: jatuh ke perilaku lama +
-peringatan. Belum ada perubahan penulisan.
+Sebelum batch, scheduler meminta router sekali per proyek: route ada/tidak,
+grup `deps`/`lib`/`fingerprint` ada/tidak, dan verdict fast-state. Hasilnya
+masuk rencana. Executor memakai verdict itu dan **tidak** memanggil
+`optsRouterValidate`/`wsRouterValidate` lagi. Bila verdict router berbeda
+dengan hitungan executor: jatuh ke perilaku lama + peringatan. Belum ada
+perubahan penulisan.
 
-### Fase 2 — stage-and-merge cache
+### Fase 2 — executor berhenti menulis
 
-Executor berhenti menulis `deps.cache`, `lib.cache`, `fingerprint.cache`,
-`opts.cache`. Ia menulis grup proyeknya ke file stage (format cache_store
-yang sama, satu grup). Router menggabungkan grup ke file kanonik sekali per
-fase, lalu menstamp metadata (`csProjMetaStampFileN`) — satu penulis, tanpa
-race, tanpa parse berulang di induk.
+Executor tidak lagi memanggil `optsRouterRecord`, `wsRouterRecord`,
+`optsProjMetaStamp`, `wsOptsMetaSave`, dan tidak menulis
+`deps/lib/fingerprint/opts.cache`. Ia men-stage hasil per proyek (format
+cache_store, satu grup). Router di induk menggabungkan grup, menstamp
+metadata (`csProjMetaStampFileN`), dan menyinkronkan route
+(`optsSourcesRouteSync`) sekali per run.
 
 ### Fase 3 — finish hanya merender
 
-Keputusan akhir (verdict link, artifact.cache, report.blob, release) pindah
-ke router pasca-eksekusi. `finish` tidak lagi membaca cache untuk memutuskan
-apa pun; ia hanya menampilkan ringkasan.
+Keputusan akhir (verdict link, `artifact.cache`, `report.blob`, release)
+pindah ke router pasca-eksekusi. `finish` tidak membaca cache untuk
+memutuskan apa pun; ia hanya menampilkan ringkasan.
 
-## 6. Kriteria penerimaan
+## 7. Kontrak pemanggilan (target)
 
-- `tests/unit/common/router_plan.sh` hijau (serial + fork, 0 menyimpang).
+| Operasi | Sekarang dipanggil oleh | Target |
+| --- | --- | --- |
+| `optsRouterValidate` | `cmds_state.c`/`cmds_wsstate.c` di dalam alur eksekusi | scheduler sebelum fork (fase 1) |
+| `wsRouterValidate` | `ws_cache_noop.c` (gerbang induk) | tetap induk; jadikan masukan rencana fase 1 |
+| `optsRouterRecord` / `wsRouterRecord` | `cmds_fast.c`/`cmds_wsstate.c` (anak) + `ws_cache_save.c` (induk) | router induk setelah batch (fase 2) |
+| `optsProjMetaStamp` / `wsOptsMetaSave` | `cmds_fast.c` + `ws_cache_save.c` | router induk (fase 2) |
+| `optsSourcesRouteSync` | `workspace.c` akhir run | tetap induk, tetapi sebagai bagian fase "router kedua" |
+| `csProjMetaStampFileN` | `ws_cache_save.c` | router induk (fase 2) |
+| tulis `deps/lib/fingerprint` | executor + induk | induk/merge stage (fase 2) |
+
+## 8. Kriteria penerimaan
+
+- `tests/unit/common/ws_plan.sh` hijau (serial + fork, 0 menyimpang).
 - Tanpa env: keluaran dan jumlah syscall tidak berubah.
 - Fase 2: setiap cache besar dibuka paling banyak sekali oleh induk per run
   (diverifikasi `strace -f -e openat` pada workspace 5k).
-- Benchmark CI (`Workspace Benchmark`) leaf/hedit/no-op tidak regresi;
-  target awal: gap leaf/hedit terhadap cmake menyusut karena parse cache
-  berulang hilang.
-- Unit `miniws` penuh tetap 371+ PASS.
+- Benchmark CI `Workspace Benchmark` leaf/hedit/no-op tidak regresi; target
+  awal: gap leaf/hedit terhadap cmake menyusut karena parse cache berulang
+  hilang.
+- Unit `miniws` penuh tetap hijau.
 
-## 7. Risiko & mitigasi
+## 9. Risiko & mitigasi
 
 | Risiko | Mitigasi |
-|---|---|
+| --- | --- |
 | Rencana basi karena anak lain menulis file | Fase 2 menghapus penulisan anak; fase 1 hanya verifikasi |
 | Fork mewarisi memo stat induk | Executor tetap `cmdsStatMemoReset()` seperti sekarang |
 | Kegagalan di tengah batch | `wsPlanEnd(rc != 0)` memaafkan proyek yang tak sempat jalan |

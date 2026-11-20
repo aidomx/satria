@@ -1,14 +1,15 @@
-/* ws_plan.c — Router plan (eksperimen P4, design/router_centric.md).
+/* ws_plan.c — Rencana scheduler workspace (eksperimen P4, design/router_centric.md).
 
-   Peran: induk workspace adalah ROUTER. Sebelum executor (wsRunBatch)
-   dijalankan, router menetapkan rencana eksplisit: proyek mana yang boleh
-   dieksekusi pada fase ini (library atau binary). Executor hanya boleh
-   menjalankan rencana itu; setiap eksekusi menulis penanda di .satria/ agar
-   router dapat MEMVERIFIKASI pasca-eksekusi bahwa yang berjalan persis
-   seperti rencana.
+   Catatan istilah: ROUTER adalah lapisan cache `src/cache/opt*.c`
+   (opts.cache), bukan file ini. File ini adalah rencana eksekusi milik
+   scheduler (induk workspace): proyek mana yang boleh dieksekusi pada fase
+   ini (library atau binary). Executor hanya menjalankan rencana itu; setiap
+   eksekusi menulis penanda di .satria/ agar scheduler dapat MEMVERIFIKASI
+   pasca-eksekusi bahwa yang berjalan persis seperti rencana. Fase 1 P4 akan
+   mengisi rencana ini dengan keputusan router (route/group/fast-state).
 
    Pilot ini read-only: keputusan build, cache, dan penulisan state tidak
-   berubah. Aktif hanya bila SATRIA_ROUTER_PLAN diset (bukan "0"). Tanpa env
+   berubah. Aktif hanya bila SATRIA_WS_PLAN diset (bukan "0"). Tanpa env
    itu seluruh fungsi menjadi no-op (satu getenv ter-cache per proses).
 */
 #include "ws_internal.h"
@@ -28,7 +29,7 @@ static int g_planEnv = -1; /* -1 belum dibaca, 0 off, 1 on */
 
 static bool wsPlanOn(void) {
   if (g_planEnv < 0) {
-    const char *v = getenv("SATRIA_ROUTER_PLAN");
+    const char *v = getenv("SATRIA_WS_PLAN");
     g_planEnv = (v && *v && strcmp(v, "0") != 0) ? 1 : 0;
   }
   return g_planEnv == 1;
@@ -72,11 +73,11 @@ bool wsPlanAdmit(const char *name, bool libOnly) {
     }
   const char *phase = libOnly ? "library" : "binary";
   if (idx < 0) {
-    fprintf(stderr, "satria: router-plan: %s di luar rencana fase %s\n", name, phase);
+    fprintf(stderr, "satria: ws-plan: %s di luar rencana fase %s\n", name, phase);
     return false;
   }
   if (g_plan[idx].libOnly != libOnly) {
-    fprintf(stderr, "satria: router-plan: %s dieksekusi fase %s, rencana fase %s\n",
+    fprintf(stderr, "satria: ws-plan: %s dieksekusi fase %s, rencana fase %s\n",
             name, phase, g_plan[idx].libOnly ? "library" : "binary");
     return false;
   }
@@ -102,7 +103,7 @@ void wsPlanEnd(int rc) {
     FILE *f = fopen(path, "r");
     if (!f) {
       if (rc == 0) {
-        fprintf(stderr, "satria: router-plan: %s tidak dieksekusi (rencana %s)\n",
+        fprintf(stderr, "satria: ws-plan: %s tidak dieksekusi (rencana %s)\n",
                 g_plan[i].name, g_plan[i].libOnly ? "library" : "binary");
         bad++;
       }
@@ -113,7 +114,7 @@ void wsPlanEnd(int rc) {
     remove(path);
     char want = g_plan[i].libOnly ? 'L' : 'B';
     if (c != want) {
-      fprintf(stderr, "satria: router-plan: penanda %s tidak cocok (0x%02x != %c)\n",
+      fprintf(stderr, "satria: ws-plan: penanda %s tidak cocok (0x%02x != %c)\n",
               g_plan[i].name, c, want);
       bad++;
     } else {
@@ -121,7 +122,7 @@ void wsPlanEnd(int rc) {
     }
   }
   const char *phase = g_plan[0].libOnly ? "library" : "binary";
-  fprintf(stderr, "satria: router-plan: fase %s: %d rencana, %d terverifikasi, %d menyimpang\n",
+  fprintf(stderr, "satria: ws-plan: fase %s: %d rencana, %d terverifikasi, %d menyimpang\n",
           phase, g_planN, ok, bad);
   g_planN = 0;
 }

@@ -51,7 +51,7 @@ int wsRunProject(const WsModel *m, const char *name, const char *cmd, int jobs,
     return rc;
   }
 
-  /* Router plan (P4): verifikasi read-only bahwa proyek ini memang bagian
+  /* Rencana scheduler (P4): verifikasi read-only bahwa proyek ini memang bagian
      rencana fase yang sedang dieksekusi. Nilai kembali tidak mengubah
      keputusan build. */
   wsPlanAdmit(name, libOnly);
