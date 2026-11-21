@@ -4,6 +4,7 @@
  * Definisi & semantik lihat cmds_internal.h.
  */
 #include "cmds_internal.h"
+#include "../prof/prof.h" /* DIAG sementara: sub-fase save */
 #include "../log/report_blob.h"
 #include "../cache/artifact.h"
 #include "../cache/state_blob.h"
@@ -400,6 +401,7 @@ void cmdsFastStateSave(const Config *c, const List *srcs, const char *target,
     const char *d = c->headerInternal.items[i];
     if (d && *d && d[0] != '-' && strcmp(d, ".") != 0) fastCollectTree(d, &paths);
   }
+  profMark("save-collect"); /* DIAG sementara */
   /* Direktori di atas hanya discovery kasar. Lengkapi dengan closure header
      aktual tiap translation unit agar include relatif seperti ../shared.h,
      computed include, dan header transitif di luar root tetap membatalkan
@@ -422,6 +424,7 @@ void cmdsFastStateSave(const Config *c, const List *srcs, const char *target,
       SAVE_BAIL("depsNew gagal");
     }
   }
+  profMark("save-closure"); /* DIAG sementara */
   /* Include file inputs that are not necessarily inside source/header roots. */
   fastStampAdd(&paths, bf);
   fastStampAdd(&paths, ".satria-version");
@@ -507,6 +510,7 @@ void cmdsFastStateSave(const Config *c, const List *srcs, const char *target,
     listFree(&paths);
     SAVE_BAIL("path tidak aman (spasi/terlalu panjang)");
   }
+  profMark("save-stamp"); /* DIAG sementara: stat + hash isi seluruh input */
   listFree(&paths);
   /* Fase library: simpan ke caches/lib.cache (design/startup.md §3) —
      entri meta + stamp per proyek, bukan file per fase. */
@@ -578,6 +582,7 @@ void cmdsFastStateSave(const Config *c, const List *srcs, const char *target,
             ok ? "diserialisasi" : "GAGAL serialize", used, count);
   bool putOk = ok && fastSnapPut(buf, used);
   if (snapDbg()) fprintf(stderr, "satria: save: fastSnapPut=%d\n", (int)putOk);
+  profMark("save-put"); /* DIAG sementara */
   if (putOk && optsRouterRecord(c, libOnly)) {
     /* Grup P (§4) seragam — lihat catatan di cabang lib di atas. */
     uint64_t content = fastProjStamp(bf, srcs);
@@ -586,6 +591,7 @@ void cmdsFastStateSave(const Config *c, const List *srcs, const char *target,
     csProjMetaStamp(cmdsCacheProjAddr(), content, t);
     csProjMetaStampFile(BUILD_FP_CACHE, cmdsCacheProjAddr(), content, t); /* P seragam: fingerprint.cache */
   }
+  profMark("save-router"); /* DIAG sementara */
   free(buf);
 }
 
