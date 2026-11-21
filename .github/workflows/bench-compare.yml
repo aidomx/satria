@@ -64,14 +64,21 @@ jobs:
         run: |
           set -e
           W=/tmp/pb/bench.tmp/satria
+          SAT="$GITHUB_WORKSPACE/bin/satria"
           cd "$W"
-          for i in 1 2 3 4 5; do
+          for i in $(seq 1 8); do
             printf '\nint probe_%d(void){return %d;}\n' "$i" "$i" >> src/t1.c
-            /usr/bin/time -f "wall=%e user=%U sys=%S" \
-              "$GITHUB_WORKSPACE/bin/satria" >/tmp/pb/out$i.log 2>/tmp/pb/err$i.log
-            echo "=== run $i"
-            grep -E "^wall=" /tmp/pb/err$i.log || true
-            sed -n '/> Profile/,$p' /tmp/pb/err$i.log | head -28
+            python3 - "$SAT" "$i" <<'PY'
+          import subprocess, sys, time
+          sat, i = sys.argv[1], sys.argv[2]
+          err = open("/tmp/pb/err%s.log" % i, "wb")
+          t = time.perf_counter()
+          r = subprocess.run([sat], stdout=subprocess.DEVNULL, stderr=err)
+          ms = (time.perf_counter() - t) * 1000.0
+          err.close()
+          print("=== run %s wall_ms=%.1f rc=%d" % (i, ms, r.returncode))
+          PY
+            sed -n '/> Profile/,$p' "/tmp/pb/err$i.log" | sed 's/^/    /'
           done
 
       - name: Upload profile logs

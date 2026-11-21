@@ -71,6 +71,7 @@ int satriaRun(int argc, const char *argv[]) {
   int packageStatus = 0;
   if (packageCliRun(argc, argv, &packageStatus)) return packageStatus;
   profInit(); /* profil fase aktif bila SATRIA_PROFILE=1 (stderr, tanpa syscall) */
+  profMark("main-start"); /* DIAG sementara: ukur prefiks startup vs fase build */
   /* Simpan argv (untuk spawn child background) & baca penanda SATRIA_BG_CHILD
      (design/background.md §2) — harus SEBELUM bootstrapApply yang bisa chdir -f. */
   bgNoteArgv(argc, argv);
@@ -312,5 +313,6 @@ int satriaRun(int argc, const char *argv[]) {
 
 done:
   bootstrapCleanup(&bs);
+  if (profOn()) profReport(); /* DIAG sementara: blok ekor setelah laporan build */
   return rc;
 }

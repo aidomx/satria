@@ -443,11 +443,15 @@ int cmdsBuildPassFinish(CmdsPassTail *t) {
   }
   profReport();
 
+  /* DIAG sementara: pisahkan biaya ekor yang dulu tak terukur. */
+  profMark("tail");
   /* Lihat catatan jalur up-to-date: fase binary workspace tidak mengulang
      hitungan fase library. */
   if (!wsModeActive()) buildReportProjectCounts(compiled, skipped, warnings);
   buildReportAddBinary(target, REP_LINKED, fsFileSize(target));
+  profMark("report");
   if (!fastSaved && !wsModeActive()) cmdsFastStateSave(&c, &srcs, target, buildfilePath, false);
+  profMark("fast-save");
   statPlanFree(&plan);
   return 0;
 }
