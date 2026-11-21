@@ -44,6 +44,8 @@ bool buildReportActive(void);
 
 /* Set toolchain efektif sekali per build (mis. "gcc -Wall ... -std=gnu11"). */
 void buildReportSetToolchain(const char *cmd);
+/* Catat core aktif + jobs efektif untuk baris "Cores" pada header. */
+void buildReportSetCores(int jobs);
 /* Set status CompDB (dan catatan pendukung, boleh NULL). */
 void buildReportSetCompdb(RepCompdb st, const char *note);
 

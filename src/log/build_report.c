@@ -15,6 +15,7 @@
 #include "build_report.h"
 #include "../startup.h" /* startupShown: pemisah startup -> Build Report */
 #include "../util.h" /* List, listAdd, listFree, copyStr, nowSeconds, SATRIA_MAX_PATH */
+#include "../portability.h" /* cpuCount: baris Cores pada header */
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -46,6 +47,8 @@ static struct {
   bool execOpened;    /* heading # Execution sudah dicetak */
   double t0;
   char toolchain[512];
+  int cores, jobs;
+  bool hasCores;
   RepCompdb compdb;
   char compdbNote[256];
   bool hasCompdbNote;
@@ -165,6 +168,15 @@ void buildReportStaging(bool on) {
 void buildReportSetToolchain(const char *cmd) {
   if (!R.active) return;
   if (cmd && *cmd) copyStr(R.toolchain, sizeof(R.toolchain), cmd);
+}
+
+void buildReportSetCores(int jobs) {
+  if (!R.active) return;
+  int n = cpuCount();
+  if (n < 1) n = 1;
+  R.cores = n;
+  R.jobs = jobs > 0 ? jobs : n;
+  R.hasCores = true;
 }
 
 void buildReportSetCompdb(RepCompdb st, const char *note) {
@@ -444,6 +456,9 @@ void buildReportRenderHeader(void) {
   printf("Build Report\n");
   printf("------------\n");
   printf("%-12s: %s\n", "Toolchain", R.toolchain[0] ? R.toolchain : "-");
+  if (R.hasCores)
+    printf("%-12s: %d core%s (jobs %d)\n", "Cores", R.cores,
+           R.cores == 1 ? "" : "s", R.jobs);
   printf("%-12s: %s\n", "CompDB", compdbText());
   if (R.hasFingerprint) printf("%-12s: %s\n", "Fingerprint", R.fingerprint);
   if (R.hasHeaderNote) printf("! %s\n", R.headerNote);
