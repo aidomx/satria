@@ -1,11 +1,12 @@
+# Artifacts from the Satria build
 bin
 build
 .cache
 compile_commands.json
+dist
 .satria
-shared
-slog.sh
 
+# Problem that has been resolved
 problems/*
 !.gitkeep
 !problems/02_11_2026_build_report_review.md
@@ -13,24 +14,35 @@ problems/*
 !problems/19_10_2026_startup.md
 !problems/19_11_2026_trace.md
 
+# List of completed tasks
 todos/*
 !todos/.gitkeep
 !todos/2_10_2026.md
 !todos/4_11_2026_optimizer.md
 !todos/19_11_2026.md
 
-dist
-tests/rupaws
-trash
+# Archive storage
+archives/*
+!.gitkeep
+!RELEASE_NOTE*.md
+
+# Temporary file
 *.orig
 *.bak
 *.plist
 *.tmp
+*.tmp.*/
 *.log
 
+# Syntax highlighting for Buildfile
 editor/*
 !*.zip
 
 # lockfile npm liar (repo ini bukan paket npm); aturan artefak fixture ada di tests/.gitignore
 package-lock.json
-ws.tmp.*/
+
+# Limit of test units that cannot be pushed
+tests/rupaws
+
+# CHANGELOG.md generator
+slog.sh
