@@ -333,6 +333,158 @@ static bool wsCacheDirEntriesMatch(const WsCacheMap *m, const char *path) {
   return ok;
 }
 
+/* Output build/ (.o/.d) divalidasi lewat daftar direktori, bukan stat per
+   file: pada workspace 5k, dua direktori build berisi ~20k output dan stat
+   per path adalah biaya dominan P-fast (terutama di PRoot). readdir sudah
+   memberi nama tanpa syscall tambahan; file yang hilang tetap terdeteksi.
+   Output di luar build/ (bin/lib/arsip) tetap distat karena jumlahnya kecil
+   dan menjadi artefak akhir. */
+static int wsCacheOutPtrCmp(const void *a, const void *b) {
+  const WsCachePath *x = *(const WsCachePath *const *)a;
+  const WsCachePath *y = *(const WsCachePath *const *)b;
+  return strcmp(x->path, y->path);
+}
+static int wsCacheStrPtrCmp(const void *a, const void *b) {
+  const char *x = *(const char *const *)a;
+  const char *y = *(const char *const *)b;
+  return strcmp(x, y);
+}
+static size_t wsCacheDirLen(const char *path) {
+  const char *slash = strrchr(path, '/');
+  return slash ? (size_t)(slash - path) : 0;
+}
+/* Semua output build/ dalam grup direktori yang sama harus ada. Daftar
+   readdir diurutkan sekali lalu ditelusuri dengan bsearch. */
+static bool wsCacheBuildOutsPresent(WsCachePath **outs, size_t n) {
+  qsort(outs, n, sizeof(*outs), wsCacheOutPtrCmp);
+  size_t i = 0;
+  while (i < n) {
+    size_t dlen = wsCacheDirLen(outs[i]->path);
+    size_t j = i + 1;
+    while (j < n && wsCacheDirLen(outs[j]->path) == dlen &&
+           strncmp(outs[j]->path, outs[i]->path, dlen) == 0)
+      j++;
+    char dir[WS_PATH_LEN];
+    int dn = dlen ? snprintf(dir, sizeof(dir), "%.*s", (int)dlen, outs[i]->path)
+                  : snprintf(dir, sizeof(dir), ".");
+    if (dn < 0 || (size_t)dn >= sizeof(dir)) return false;
+    List files = {0};
+    fsListDir(dir, NULL, &files);
+    listSort(&files);
+    if (files.count == 0) {
+      listFree(&files);
+      return false;
+    }
+    for (size_t k = i; k < j; k++) {
+      const char *path = outs[k]->path;
+      if (!bsearch(&path, files.items, files.count, sizeof(char *), wsCacheStrPtrCmp)) {
+        listFree(&files);
+        return false;
+      }
+    }
+    listFree(&files);
+    i = j;
+  }
+  return true;
+}
+
+/* Stat metadata untuk satu path P. Hasilnya dipakai fase pemeriksaan P-fast;
+   pada POSIX pengisian dilakukan beberapa child sekaligus karena biaya stat
+   per file (khususnya di PRoot) mendominasi no-op 5k source. */
+typedef struct {
+  long long time, size;
+  int ok;
+} WsCacheStat;
+
+static void wsCacheStatOne(const WsCachePath *r, WsCacheStat *out) {
+  struct stat sb;
+  if (stat(r->path, &sb) != 0) {
+    out->ok = 0;
+    return;
+  }
+  out->time = wsCacheStampNs(r->path, &sb);
+  out->size = (long long)sb.st_size;
+  out->ok = 1;
+}
+
+#ifndef _WIN32
+/* Bagi daftar path ke beberapa child; tiap child menulis array WsCacheStat
+   untuk irisannya ke pipe. Parent membaca per pipe lalu waitpid. Gagal apa pun
+   -> caller mengisi ulang secara serial (hasil paralel diabaikan). */
+static bool wsCachePreStatFork(WsCachePath **paths, size_t n, WsCacheStat *res) {
+  if (n < 128) return false;
+  int workers = cpuCount();
+  if (workers < 2) return false;
+  if (workers > 8) workers = 8;
+  if ((size_t)workers > n) workers = (int)n;
+  int pfd[8][2], made = 0;
+  pid_t pid[8];
+  size_t start[8], count[8];
+  for (int w = 0; w < workers; w++) {
+    if (pipe(pfd[w]) != 0) break;
+    size_t s = n * (size_t)w / (size_t)workers;
+    size_t e = n * (size_t)(w + 1) / (size_t)workers;
+    pid_t p = fork();
+    if (p < 0) {
+      close(pfd[w][0]);
+      close(pfd[w][1]);
+      break;
+    }
+    if (p == 0) {
+      close(pfd[w][0]);
+      size_t bytes = (e - s) * sizeof(WsCacheStat);
+      WsCacheStat *local = bytes ? malloc(bytes) : NULL;
+      if (local) {
+        for (size_t i = s; i < e; i++) wsCacheStatOne(paths[i], &local[i - s]);
+        size_t off = 0;
+        while (off < bytes) {
+          ssize_t wr = write(pfd[w][1], (char *)local + off, bytes - off);
+          if (wr > 0) {
+            off += (size_t)wr;
+            continue;
+          }
+          if (wr < 0 && errno == EINTR) continue;
+          break;
+        }
+        free(local);
+      }
+      _exit(0);
+    }
+    close(pfd[w][1]);
+    pid[w] = p;
+    start[w] = s;
+    count[w] = e - s;
+    made++;
+  }
+  bool ok = made == workers;
+  for (int w = 0; w < made; w++) {
+    size_t bytes = count[w] * sizeof(WsCacheStat);
+    size_t base = start[w] * sizeof(WsCacheStat), off = 0;
+    while (off < bytes) {
+      ssize_t rd = read(pfd[w][0], (char *)res + base + off, bytes - off);
+      if (rd > 0) {
+        off += (size_t)rd;
+        continue;
+      }
+      if (rd < 0 && errno == EINTR) continue;
+      break;
+    }
+    close(pfd[w][0]);
+    int st = 0;
+    while (waitpid(pid[w], &st, 0) < 0 && errno == EINTR) {}
+    if (off != bytes || !WIFEXITED(st) || WEXITSTATUS(st) != 0) ok = false;
+  }
+  return ok;
+}
+#endif
+
+static void wsCachePreStat(WsCachePath **paths, size_t n, WsCacheStat *res) {
+#ifndef _WIN32
+  if (wsCachePreStatFork(paths, n, res)) return;
+#endif
+  for (size_t i = 0; i < n; i++) wsCacheStatOne(paths[i], &res[i]);
+}
+
 /* ===== Fast path metadata P (design/startup.md §4) =====
    Metadata cocok -> no-op tanpa fingerprint.cache. Bila hanya time/size yang
    berubah, hash file tersebut: konten sama berarti cukup menyegarkan metadata
@@ -343,13 +495,52 @@ static bool wsCacheDirEntriesMatch(const WsCacheMap *m, const char *path) {
         jadi walk fingerprint.cache penuh dilewati (audit 30/10, kandidat 3). */
 static int wsCachePFast(WsCacheMap *m, long long srcMtime) {
   if (!m->meta || m->n == 0) return -1;
+  size_t outN = 0;
+  for (size_t i = 0; i < m->n; i++)
+    if (m->recs[i].type == 'O' && strncmp(m->recs[i].path, "build/", 6) == 0) outN++;
+  if (outN) {
+    WsCachePath **outs = malloc(outN * sizeof(*outs));
+    if (!outs) return -1;
+    size_t k = 0;
+    for (size_t i = 0; i < m->n; i++)
+      if (m->recs[i].type == 'O' && strncmp(m->recs[i].path, "build/", 6) == 0)
+        outs[k++] = &m->recs[i];
+    bool present = wsCacheBuildOutsPresent(outs, outN);
+    free(outs);
+    if (!present) return -1;
+  }
+  /* Stat semua entri non-output-build lebih dulu; di POSIX dibagi ke beberapa
+     child. Hasil per entri dipakai loop di bawah, jadi jalur yang berubah
+     tidak membayar stat dua kali. */
+  size_t checkN = m->n - outN;
+  WsCachePath **check = NULL;
+  WsCacheStat *stats = NULL;
+  if (checkN) {
+    check = malloc(checkN * sizeof(*check));
+    stats = malloc(checkN * sizeof(*stats));
+    if (!check || !stats) {
+      free(check);
+      free(stats);
+      return -1;
+    }
+    size_t k = 0;
+    for (size_t i = 0; i < m->n; i++) {
+      WsCachePath *r = &m->recs[i];
+      if (r->type == 'O' && strncmp(r->path, "build/", 6) == 0) continue;
+      check[k++] = r;
+    }
+    wsCachePreStat(check, checkN, stats);
+  }
+  int ret = -1;
   bool metadataChanged = false;
+  size_t ci = 0;
   for (size_t i = 0; i < m->n; i++) {
     WsCachePath *r = &m->recs[i];
-    struct stat sb;
-    if (stat(r->path, &sb) != 0) return -1;
-    long long now = wsCacheStampNs(r->path, &sb);
-    long long size = (long long)sb.st_size;
+    if (r->type == 'O' && strncmp(r->path, "build/", 6) == 0) continue;
+    WsCacheStat *sr = &stats[ci++];
+    if (!sr->ok) goto out;
+    long long now = sr->time;
+    long long size = sr->size;
 #if !defined(_WIN32)
     /* Isi memo stat (audit 30/10 — kandidat save-walk): path input ini distat
        ulang oleh induk saat menulis fingerprint.cache. Epoch memo ==
@@ -357,22 +548,20 @@ static int wsCachePFast(WsCacheMap *m, long long srcMtime) {
        Direktori ('D') TIDAK dicatat: mtime berubah saat build menulis file
        ke dalamnya, dan anak yang menulis melupakannya di memorinya sendiri
        (salinan fork) — memo induk tetap basi.
-       Output 'O' di bawah build/ TETAP dicatat (audit 4/11 item 1): dipakai
-       save-walk HANYA untuk proyek tanpa kompilasi run ini (.o/.d pasti tak
-       tersentuh); proyek yang kompilasi memakai stamp segar. Output di luar
-       build/ (bin/lib) tidak dicatat: konsultan memo lain (deps/wsstate)
-       bisa membaca jalur itu setelah fase penulisnya selesai di anak lain. */
-    if (r->type != 'D' && !(r->type == 'O' && strncmp(r->path, "build/", 6) == 0))
-      cmdsStatMemoPut(r->path, now, size);
+       Output 'O' di bawah build/ tidak masuk daftar stat (divalidasi lewat
+       readdir); output di luar build/ (bin/lib) tidak dicatat: konsultan memo
+       lain (deps/wsstate) bisa membaca jalur itu setelah fase penulisnya
+       selesai di anak lain. */
+    if (r->type != 'D') cmdsStatMemoPut(r->path, now, size);
 #endif
     /* Direktori tidak memiliki hash konten. Jika mtime berubah, validasi
        daftar entri langsung; jika tetap identik, hanya metadata waktunya yang
        perlu disegarkan. Penambahan/penghapusan/rename membuat fast path miss. */
     if (r->type == 'D') {
       if (now == r->time && r->time < srcMtime) continue;
-      if (!wsCacheDirEntriesMatch(m, r->path)) return -1;
+      if (!wsCacheDirEntriesMatch(m, r->path)) goto out;
       struct stat after;
-      if (stat(r->path, &after) != 0 || wsCacheStampNs(r->path, &after) != now) return -1;
+      if (stat(r->path, &after) != 0 || wsCacheStampNs(r->path, &after) != now) goto out;
       if (r->time != now) {
         r->time = now;
         metadataChanged = true;
@@ -383,7 +572,7 @@ static int wsCachePFast(WsCacheMap *m, long long srcMtime) {
     /* Mtime/ukuran berubah atau timestamp tampak racy. Ukuran sama saja tidak
        membuktikan konten sama, jadi hash wajib sebelum metadata diperbarui. */
     uint64_t h = wsStartupHash(r->path);
-    if (!h) return -1;
+    if (!h) goto out;
     if (h != r->content) {
       /* Isi berbeda: vonis miss pasti — jalur penuh (wsCacheVisit) membandingkan
          hash dengan entri fingerprint yang sama dan juga menyatakan miss.
@@ -391,12 +580,13 @@ static int wsCachePFast(WsCacheMap *m, long long srcMtime) {
          (kandidat 5). Baris P tanpa hash tercatat (content=0) tetap tidak
          pasti -> jatuh ke jalur penuh seperti sebelumnya. */
       if (r->content) wsGateStaleMark(r->path);
-      return -2;
+      ret = -2;
+      goto out;
     }
     /* Cegah menerima file yang berubah saat hash sedang dibaca. */
     struct stat after;
     if (stat(r->path, &after) != 0 || wsCacheStampNs(r->path, &after) != now ||
-        (long long)after.st_size != size) return -1;
+        (long long)after.st_size != size) goto out;
     if (r->time != now || r->size != size) {
       r->time = now;
       r->size = size;
@@ -407,20 +597,25 @@ static int wsCachePFast(WsCacheMap *m, long long srcMtime) {
     /* Hash sudah memverifikasi semua file yang metadata-nya berubah. PATCH
        fingerprint dahulu, lalu tulis ulang P dan sinkronkan router. */
     CsStore *store = csOpen(WS_CACHE_FP);
-    if (!store) return -1;
+    if (!store) goto out;
     WsCachePRefresh refresh = {m, store, true, false};
     bool walked = csForEach(store, wsCachePRefreshEntry, &refresh);
     bool committed = walked && refresh.ok && refresh.patched && csCommit(store);
     csClose(store);
     if (wsCacheTrace()) fprintf(stderr, "satria cache: PATCH %s\n", committed ? "committed" : "failed");
-    if (!committed) return -1;
+    if (!committed) goto out;
     bool changed = false;
-    if (!wsCachePRewrite(m, &changed)) return -1;
-    if (changed && !optsSourcesRouteSync()) return -1;
+    if (!wsCachePRewrite(m, &changed)) goto out;
+    if (changed && !optsSourcesRouteSync()) goto out;
     if (wsCacheTrace()) fprintf(stderr, "satria cache: P metadata %s\n", changed ? "refreshed" : "unchanged");
-    return 0;
+    ret = 0;
+  } else {
+    ret = 1;
   }
-  return 1;
+out:
+  free(check);
+  free(stats);
+  return ret;
 }
 
 /* ===== Penyegaran metadata P (jalur penuh) =====

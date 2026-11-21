@@ -70,6 +70,19 @@ run.build as recover
   out.matches "Cache valid *:"
 @end
 
+# Output build/ divalidasi lewat daftar direktori: file yang hilang tetap
+# membatalkan no-op dan harus dibuat ulang.
+file.delete build/core/core.o
+run.build as missingobj
+@response missingobj
+  out.not-contains "Nothing to build"
+  file.exists build/core/core.o
+@end
+run.build as recoverobj
+@response recoverobj
+  out.matches "Cache valid *:"
+@end
+
 time.tick
 file.append WsBuildfile "# x"
 run.build as wsfresh
