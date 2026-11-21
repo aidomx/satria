@@ -219,14 +219,19 @@ int wsRelease(WsModel *m, int jobs, const char *wsDir);
 void wsRouterDrop(void);
 bool wsRouterRecord(void);
 bool wsRouterValidate(void);
-int wsRunBatch(const WsModel *m, const WsWork *batch, int n, int jobs, const char *cmd, const char *wsDir, bool libOnly);
-int wsRunProject(const WsModel *m, const char *name, const char *cmd, int jobs, bool libOnly);
+int wsRunBatch(const WsModel *m, const WsWork *batch, int n, int jobs, const char *cmd,
+               const char *wsDir, bool libOnly, bool compileOnly);
+/* compileOnly: jalankan pass compile lalu buang tail tanpa link. */
+int wsRunProject(const WsModel *m, const char *name, const char *cmd, int jobs, bool libOnly,
+                 bool compileOnly);
 /* Rencana scheduler (eksperimen P4, design/router_centric.md): induk +
    verifikasi read-only pasca-eksekusi. Nonaktif tanpa SATRIA_WS_PLAN. */
 bool wsPlanActive(void);
 void wsPlanBegin(const WsModel *m, const WsWork *work, int n, bool libOnly);
 bool wsPlanAdmit(const char *name, bool libOnly);
 void wsPlanEnd(int rc);
+int wsPlanFastConsume(const char *name, bool libOnly); /* 1 hit, 0 miss, -1 fallback */
+void wsPlanNoteBuilt(const char *name);
 bool wsSplitKV(char *line, char *key, size_t kn, char **val);
 uint64_t wsStartupHash(const char *path);
 bool wsStartupLoad(WsModel *m, const char *wsFile, const char *wsName, const char *cacheFile);

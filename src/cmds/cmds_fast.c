@@ -13,6 +13,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifndef _WIN32
+#include <errno.h>
+#include <unistd.h>
+#include <sys/wait.h>
+#endif
 
 #include "../background.h"
 #include "../cache/cache_store.h"
@@ -92,6 +97,100 @@ uint64_t fastStateHash(const char *path) {
 /* Pemapilan fastStateHash untuk validator workspace/lib (cmds_wsstate.c):
    bukti sentuh di jalur incremental lama memakai hash yang sama. */
 uint64_t cmdsStateFileHash(const char *path) { return fastStateHash(path); }
+
+/* Satu entri hasil stamp fast-state; layout tetap agar aman menyeberang pipe. */
+typedef struct {
+  int64_t mtime;
+  long long size;
+  uint64_t content;
+  int isDir;
+} FastStampWire;
+
+static void fastStampOne(const char *path, FastStampWire *w) {
+  w->mtime = -1;
+  w->size = 0;
+  w->content = 0;
+  w->isDir = 0;
+  int64_t mt = 0;
+  long long sz = 0;
+  bool isDir = false;
+  if (!fsStampNsSizeKind(path, &mt, &sz, &isDir)) return;
+  w->mtime = mt;
+  w->size = sz;
+  w->isDir = isDir ? 1 : 0;
+  if (!w->isDir) w->content = fastStateHash(path);
+}
+
+#ifndef _WIN32
+/* Hash isi file adalah biaya dominan save fast-state di proyek besar (proot:
+   ~2.100 file -> beberapa detik). Bagi path ke maksimal 8 child; gagal
+   fork/pipe -> seluruh irisan diulang serial oleh pemanggil. */
+static bool fastStampFork(const List *paths, FastStampWire *out) {
+  int workers = cpuCount();
+  if (workers < 2) return false;
+  if (workers > 8) workers = 8;
+  if ((size_t)workers > (size_t)paths->count) workers = paths->count;
+  int pfd[8][2], made = 0;
+  pid_t pid[8];
+  size_t start[8], count[8];
+  for (int w = 0; w < workers; w++) {
+    if (pipe(pfd[w]) != 0) break;
+    size_t s = (size_t)paths->count * (size_t)w / (size_t)workers;
+    size_t e = (size_t)paths->count * (size_t)(w + 1) / (size_t)workers;
+    pid_t p = fork();
+    if (p < 0) {
+      close(pfd[w][0]);
+      close(pfd[w][1]);
+      break;
+    }
+    if (p == 0) {
+      close(pfd[w][0]);
+      size_t n = e - s, bytes = n * sizeof(*out);
+      FastStampWire *local = bytes ? malloc(bytes) : NULL;
+      if (local) {
+        for (size_t i = 0; i < n; i++)
+          fastStampOne(paths->items[s + i], &local[i]);
+        size_t off = 0;
+        while (off < bytes) {
+          ssize_t wr = write(pfd[w][1], (char *)local + off, bytes - off);
+          if (wr > 0) {
+            off += (size_t)wr;
+            continue;
+          }
+          if (wr < 0 && errno == EINTR) continue;
+          break;
+        }
+        free(local);
+      }
+      _exit(0);
+    }
+    close(pfd[w][1]);
+    pid[w] = p;
+    start[w] = s;
+    count[w] = e - s;
+    made++;
+  }
+  bool ok = made == workers;
+  for (int w = 0; w < made; w++) {
+    size_t bytes = count[w] * sizeof(*out);
+    size_t base = start[w] * sizeof(*out), off = 0;
+    while (off < bytes) {
+      ssize_t rd = read(pfd[w][0], (char *)out + base + off, bytes - off);
+      if (rd > 0) {
+        off += (size_t)rd;
+        continue;
+      }
+      if (rd < 0 && errno == EINTR) continue;
+      break;
+    }
+    close(pfd[w][0]);
+    int st = 0;
+    while (waitpid(pid[w], &st, 0) < 0 && errno == EINTR) {}
+    if (off != bytes || !WIFEXITED(st) || WEXITSTATUS(st) != 0) ok = false;
+  }
+  return ok;
+}
+#endif
 
 /*
  * Pemindai state berbasis buffer (dipakai baik oleh jalur mmap maupun
@@ -486,22 +585,42 @@ void cmdsFastStateSave(const Config *c, const List *srcs, const char *target,
       safePaths = false;
       break;
     }
-    /* Satu stat per path: mtime + ukuran sekaligus (fsStampNsSize). */
-    int64_t mt = 0;
-    long long sz = 0;
-    if (!fsStampNsSize(path, &mt, &sz)) {
-      mt = -1;
-      sz = 0;
-    }
-    stamps[count].kind = mt < 0 ? 'M' : (fsDirExists(path) ? 'D' : 'F');
-    snprintf(stamps[count].path, sizeof(stamps[count].path), "%s", path);
-    stamps[count].mtime = mt;
-    stamps[count].size = stamps[count].kind == 'F' ? sz : 0;
-    /* Hash isi file F: bukti sentuh pada validasi berikutnya (PATCH tanpa
-       rebuild). Gagal hash -> 0 -> sentuh diperlakukan sebagai perubahan. */
-    stamps[count].content = stamps[count].kind == 'F' ? fastStateHash(path) : 0;
     count++;
   }
+  FastStampWire *wire = NULL;
+  bool wireParallel = false;
+  if (safePaths && paths.count > 0) {
+    wire = calloc((size_t)paths.count, sizeof(*wire));
+    if (wire) {
+#ifndef _WIN32
+      if (paths.count >= 256 && !envOff("SATRIA_FASTSAVE_PAR"))
+        wireParallel = fastStampFork(&paths, wire);
+#endif
+      if (!wireParallel)
+        for (int i = 0; i < paths.count; i++) fastStampOne(paths.items[i], &wire[i]);
+    }
+  }
+  if (safePaths) {
+    int idx = 0;
+    for (int i = 0; i < paths.count; i++) {
+      const char *path = paths.items[i];
+      FastStampWire w;
+      if (wire)
+        w = wire[i];
+      else
+        fastStampOne(path, &w);
+      stamps[idx].kind = w.mtime < 0 ? 'M' : (w.isDir ? 'D' : 'F');
+      snprintf(stamps[idx].path, sizeof(stamps[idx].path), "%s", path);
+      stamps[idx].mtime = w.mtime;
+      stamps[idx].size = stamps[idx].kind == 'F' ? w.size : 0;
+      /* Hash isi file F: bukti sentuh pada validasi berikutnya (PATCH tanpa
+         rebuild). Gagal hash -> 0 -> sentuh diperlakukan sebagai perubahan. */
+      stamps[idx].content = stamps[idx].kind == 'F' ? w.content : 0;
+      idx++;
+    }
+    count = idx;
+  }
+  free(wire);
   if (!safePaths) {
     free(stamps);
     listFree(&paths);

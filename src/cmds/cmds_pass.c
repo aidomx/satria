@@ -1,7 +1,8 @@
 /*
- * cmds_pass — isi pass build satu proyek (koleksi, fingerprint, decide,
- * compile). Ekor pass (libOnly/link/state/summary) diserahkan ke
- * cmds_passfinish.c lewat CmdsPassTail.
+ * cmds_pass — pass compile satu proyek (koleksi, fingerprint, decide,
+ * compile). Proyek binary mengembalikan CmdsPassTail ke pemanggil untuk
+ * pass link terpisah (cmdsLinkPass); fase library dan ekor state/summary
+ * ditangani cmds_passfinish.c.
  * Dipisah dari commands.c (audit refactor: berkas kandidat >600 baris).
  */
 #include "../commands.h"
@@ -117,12 +118,13 @@ static void wsPruneOrphanSources(const Config *c, const List *srcs) {
 }
 
 /*
- * cmdsBuildPassRun — isi pass build satu proyek (fase library / fase
- * binary): koleksi source, fingerprint, decide, compile, embed, library,
- * link, state. TANPA loadConfig & TANPA chdir — pemanggil sudah
+ * cmdsBuildPassCompile — pass compile satu proyek (fase library / fase
+ * binary): koleksi source, fingerprint, decide, compile, embed. Link TIDAK
+ * dijalankan di sini: proyek binary mengembalikan CmdsPassTail untuk
+ * cmdsLinkPass. TANPA loadConfig & TANPA chdir — pemanggil sudah
  * menyiapkan Config (path selaras cwd) dan cwd yang benar:
  *   - single project : cmdBuildEx (cwd = root proyek lewat fsSetCwd)
- *   - workspace      : wsCmdBuild (cwd = root workspace, tidak pernah
+ *   - workspace      : wsRunProject (cwd = root workspace, tidak pernah
  *                      chdir; cmdBuildEx TIDAK dipanggil — design/
  *                      workspace_v1.md §Pemisahan Jalur Build)
  * Config by-value: body hanya membaca field-nya (list dibagi, tak dimutasi).
@@ -152,7 +154,9 @@ static void buildSavePartial(DepCache *deps, Config *c, const List *pending, con
   cmdsFingerprintSave(&partial, false);
 }
 
-int cmdsBuildPassRun(int jobs, Config c, const char *buildfilePath, bool libOnly) {
+int cmdsBuildPassCompile(int jobs, Config c, const char *buildfilePath, bool libOnly,
+                         CmdsPassTail **tailOut) {
+  if (tailOut) *tailOut = NULL;
   /* Proyek kemasan (output.binary = false): SEBELUM koleksi source —
      proyek kemasan sah tidak punya satu .c pun. Dua varian:
        pack.*    -> pengemasan artefak (tar.gz/deb/checksum);
@@ -262,7 +266,7 @@ int cmdsBuildPassRun(int jobs, Config c, const char *buildfilePath, bool libOnly
   StatPlan plan;
   statPlanInit(&plan);
   if (!fastTail) statPlanBuild(&plan, &c, &srcs);
-  profMark("collect+plan");
+  profMark("plan");
 
   if (srcs.count == 0) {
     fprintf(stderr, "satria: tidak ada source .c/.cpp di sources — proyek standar memakai folder "
@@ -567,28 +571,64 @@ int cmdsBuildPassRun(int jobs, Config c, const char *buildfilePath, bool libOnly
   profMark("objhash");
 
 
-  /* Serahkan ekor pass (libOnly/link/state/summary) ke cmds_passfinish.c:
-     seluruh state di bawah ini berpindah lewat konteks (CmdsPassTail,
-     tipe di cmds_internal.h); fungsi ini tidak menyentuhnya lagi. */
-  CmdsPassTail t = {0};
-  t.c = c;
-  t.buildfilePath = buildfilePath;
-  t.libOnly = libOnly;
-  t.srcs = srcs;
-  t.plan = plan;
-  t.deps = deps;
-  t.pending = pending;
-  t.inc = inc;
-  t.wf = wf;
-  memcpy(t.obj, obj, sizeof(t.obj));
-  t.currentFp = currentFp;
-  t.compiled = compiled;
-  t.skipped = skipped;
-  t.warnings = warnings;
-  t.objectsChanged = objectsChanged;
-  t.sourceSetChanged = sourceSetChanged;
-  t.linkConfigChanged = linkConfigChanged;
-  t.maxObjM = maxObjM;
-  t.anyObjMissing = anyObjMissing;
-  return cmdsBuildPassFinish(&t);
+  /* Serahkan ekor pass ke fase berikutnya lewat konteks heap. Fase library
+     selesai di sini; proyek binary mengembalikan tail agar pass link berjalan
+     sebagai langkah terpisah (bukan bagian dari pass compile). */
+  CmdsPassTail *t = calloc(1, sizeof(*t));
+  if (!t) {
+    free(inc);
+    free(wf);
+    depsFree(deps);
+    statPlanFree(&plan);
+    listFree(&srcs);
+    listFree(&pending);
+    return 1;
+  }
+  t->c = c;
+  t->buildfilePath = buildfilePath;
+  t->libOnly = libOnly;
+  t->srcs = srcs;
+  t->plan = plan;
+  t->deps = deps;
+  t->pending = pending;
+  t->inc = inc;
+  t->wf = wf;
+  memcpy(t->obj, obj, sizeof(t->obj));
+  t->currentFp = currentFp;
+  t->compiled = compiled;
+  t->skipped = skipped;
+  t->warnings = warnings;
+  t->objectsChanged = objectsChanged;
+  t->sourceSetChanged = sourceSetChanged;
+  t->linkConfigChanged = linkConfigChanged;
+  t->maxObjM = maxObjM;
+  t->anyObjMissing = anyObjMissing;
+  if (libOnly) {
+    int rc = cmdsBuildPassFinish(t);
+    free(t);
+    return rc;
+  }
+  if (tailOut) {
+    *tailOut = t;
+    return 0;
+  }
+  return cmdsLinkPass(t); /* pemanggil tanpa slot tail: perilaku lama */
+}
+
+int cmdsLinkPass(CmdsPassTail *t) {
+  if (!t) return 0;
+  int rc = cmdsBuildPassFinish(t);
+  free(t);
+  return rc;
+}
+
+void cmdsBuildPassDiscard(CmdsPassTail *t) {
+  if (!t) return;
+  free(t->inc);
+  free(t->wf);
+  depsFree(t->deps);
+  statPlanFree(&t->plan);
+  listFree(&t->srcs);
+  listFree(&t->pending);
+  free(t);
 }

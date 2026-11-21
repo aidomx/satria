@@ -42,6 +42,23 @@ bool cmdsLibVariantUpToDate(const Config *c, bool isStatic, const List *srcs);
    linkPathLibs=false (fase library workspace) melewatkan entri library
    ber-path proyek lain pada link shared (lihat cmds_lib.c). */
 bool cmdsBuildLibraryEx(const Config *c, const List *srcs, bool linkPathLibs);
+/* Varian dengan informasi set sumber: sourceSetChanged=false mengizinkan
+   update arsip statis inkremental (hanya object yang berubah) dan link .so
+   dari arsip. sourceSetChanged=true memaksa arsip dibangun ulang penuh agar
+   anggota basi dari sumber yang dihapus tidak tertinggal. */
+bool cmdsBuildLibraryEx2(const Config *c, const List *srcs, bool linkPathLibs,
+                         bool sourceSetChanged);
+
+/* Arsip link privat (single-project besar, POSIX/ELF): dikemas di dalam build
+   dir dan hanya dipakai linker executable; bukan artefak library pengguna.
+   Windows/macOS memakai daftar object langsung. */
+#define CMDS_LINK_ARCHIVE_MIN_SRCS 64
+bool cmdsLinkArchiveBuild(const Config *c, const List *srcs, const char *outPath);
+
+/* Batch stat path (pre-build): ok[i]=0 berarti path tidak ada. Dipakai
+   validator fast-state agar ribuan stamp tidak di-stat serial. */
+void cmdsStatBatchStamp(const char *const *paths, int n, int64_t *mtime,
+                        long long *size, unsigned char *ok);
 
 /* Build penuh (fase normal binary): library lintas-proyek disertakan. */
 bool cmdsBuildLibrary(const Config *c, const List *srcs);
@@ -99,13 +116,21 @@ int cmdsPackOnlyProject(const Config *c);
 
 /* ==================== commands.c (pass build) ==================== */
 
+typedef struct CmdsPassTail CmdsPassTail;
+
 /*
- * Isi pass build satu proyek — lihat definisi di commands.c. Koleksi
- * source, fingerprint, decide, compile, embed, library, link, state —
- * TANPA loadConfig dan TANPA chdir (Config & cwd disiapkan pemanggil:
- * cmdBuildEx untuk single, wsCmdBuild untuk workspace). Config by-value.
+ * Pass compile satu proyek — koleksi, fingerprint, decide, compile, embed.
+ * TANPA loadConfig dan TANPA chdir (Config & cwd disiapkan pemanggil).
+ * Fase library selesai di sini (tailOut = NULL); proyek binary mengembalikan
+ * tail yang WAJIB diserahkan ke cmdsLinkPass sesudah pass ini. Pemilik tail
+ * adalah pemanggil; cmdsLinkPass mengambil alih dan membebaskannya.
  */
-int cmdsBuildPassRun(int jobs, Config c, const char *buildfilePath, bool libOnly);
+int cmdsBuildPassCompile(int jobs, Config c, const char *buildfilePath, bool libOnly,
+                         CmdsPassTail **tailOut);
+/* Pass link: keputusan link + linking + state/packaging proyek binary. */
+int cmdsLinkPass(CmdsPassTail *tail);
+/* Buang tail hasil pass compile tanpa link (dipakai compile-only batch). */
+void cmdsBuildPassDiscard(CmdsPassTail *tail);
 
 /* Koleksi source .c/.cpp dari Config — entri file langsung, folder discan
    rekursif (walk cache .satria/sources.cache bila mode workspace aktif); hasil
@@ -238,6 +263,8 @@ void libCacheMetaFree(LibCacheMeta *m);
 struct DepCache; /* forward: didefinisikan di deps.h */
 void wsModeSet(bool on);
 bool wsFastStateValid(const char *buildfilePath, bool libOnly);
+/* Varian untuk rencana scheduler: sekaligus melaporkan verdict router. */
+bool wsFastStateValidOut(const char *buildfilePath, bool libOnly, bool *routeOk);
 bool cmdsStatCached(const char *path, int64_t *mtimeNs, long long *size);
 void cmdsStatMemoSetCwd(void);
 void cmdsStatMemoForget(const char *path);
@@ -381,10 +408,10 @@ const char *wsGateStalePath(int i);
 /* Warna diagnostic compiler (output TTY, tanpa ANSI di build.log). */
 bool diagColorWanted(void);
 
-/* Konteks serah cmdsBuildPassRun (cmds_pass.c) -> cmdsBuildPassFinish
-   (cmds_passfinish.c): ekor pass (libOnly/link/state/summary) menerima
-   seluruh state lewat struct ini, badan fungsi dipindah verbatim. */
-typedef struct {
+/* Konteks serah cmdsBuildPassCompile (cmds_pass.c) -> cmdsLinkPass /
+   cmdsBuildPassFinish (cmds_passfinish.c): ekor pass (libOnly/link/state/
+   summary) menerima seluruh state lewat struct ini. */
+struct CmdsPassTail {
   Config c;
   const char *buildfilePath;
   bool libOnly;
@@ -401,7 +428,7 @@ typedef struct {
   bool sourceSetChanged, linkConfigChanged;
   int64_t maxObjM;
   bool anyObjMissing;
-} CmdsPassTail;
+};
 
 int cmdsBuildPassFinish(CmdsPassTail *t);
 /* Kosongkan memo stat validasi fast-state; dipanggil sebelum build mengubah file. */

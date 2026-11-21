@@ -24,6 +24,8 @@
  *
  * Anak fork menstaging tiga hal:
  *   - output   : file slot, dicetak induk urut worklist setelah selesai;
+ *                SATRIA_WS_PAR memaksa mode stream: slot selesai langsung
+ *                dicetak (urutan selesai, blok per proyek tetap utuh);
  *   - state    : stateBlob stage (digabung induk saat waitpid);
  *   - verdict  : file ws-verdict-*, berisi byte-object-verdict fase library
  *                (commands.c cmdsWsPhaseVerdict*). Verdict lama hanya di
@@ -148,7 +150,17 @@ static void wsSlotDump(const WsModel *m, const WsWork *work, WsSlot *s, int idx)
     if (s->tmpl[0]) unlink(s->tmpl);
   }
   buildReportRenderArchives();
+  fflush(stdout); /* output proyek langsung terlihat, termasuk saat stdout pipe */
   s->flushed = true;
+}
+
+/* Mode SATRIA_WS_PAR: cetak setiap slot yang selesai tanpa menunggu urutan
+   worklist. Blok per proyek tetap utuh (satu slot = satu blok); hanya urutan
+   antar-proyek yang mengikuti waktu selesai, seperti job paralel CMake/Ninja. */
+static void wsFlushDone(const WsModel *m, const WsWork *work, WsSlot *slot, int n) {
+  for (int i = 0; i < n; i++)
+    if (slot[i].started && slot[i].done && !slot[i].flushed)
+      wsSlotDump(m, work, &slot[i], i);
 }
 
 /* Cetak output slot yang selesai mengikuti urutan runner SERIAL (design
@@ -178,12 +190,12 @@ static void wsFlushPrefix(const WsModel *m, const WsWork *work, WsSlot *slot, in
 }
 
 int runnerParallel(const WsModel *m, const WsWork *work, int n, int jobs,
-                         const char *cmd, const char *wsDir, bool libOnly) {
+                         const char *cmd, const char *wsDir, bool libOnly, bool compileOnly) {
   (void)wsDir;
   const char *pre = libOnly ? "ws-libpass-pre" : "ws-binpass-pre";
   const char *post = libOnly ? "ws-libpass-post" : "ws-binpass-post";
   WsSlot *slot = (WsSlot *)calloc((size_t)n, sizeof(WsSlot));
-  if (!slot) return runnerSerial(m, work, n, jobs, cmd, wsDir, libOnly);
+  if (!slot) return runnerSerial(m, work, n, jobs, cmd, wsDir, libOnly, compileOnly);
   for (int i = 0; i < n; i++) {
     slot[i].pid = -1;
     slot[i].fd = -1;
@@ -259,7 +271,7 @@ int runnerParallel(const WsModel *m, const WsWork *work, int n, int jobs,
              arsip adalah tanggung jawab induk saat flush worklist) — anak
              cukup mengekspornya lewat file fragment di bawah. */
           buildReportStaging(true);
-          int crc = wsRunProject(m, work[i].name, cmd, pj, libOnly);
+          int crc = wsRunProject(m, work[i].name, cmd, pj, libOnly, compileOnly);
           fflush(NULL);
           stateBlobExport(s->stage);
           buildReportExport(s->rep);
@@ -310,7 +322,10 @@ int runnerParallel(const WsModel *m, const WsWork *work, int n, int jobs,
     if (crc != 0 && rc == 0) rc = crc;
     stateBlobImport(s->stage);
     wsVerdictParentImport(work[si].name, s->verdict, libOnly);
-    wsFlushPrefix(m, work, slot, n, libOnly);
+    if (runnerStreamOutput())
+      wsFlushDone(m, work, slot, n);
+    else
+      wsFlushPrefix(m, work, slot, n, libOnly);
     if (rc != 0) failed = true; /* berhenti meluncurkan; kerikan sisa anak */
   }
 
@@ -327,7 +342,7 @@ int runnerParallel(const WsModel *m, const WsWork *work, int n, int jobs,
       slot[i].done = true;
       slot[i].flushed = true; /* output langsung ke stdout induk */
       profMark(pre);
-      rc = wsRunProject(m, work[i].name, cmd, jobs, libOnly);
+      rc = wsRunProject(m, work[i].name, cmd, jobs, libOnly, compileOnly);
       profMark(post);
     }
   }
@@ -346,8 +361,8 @@ int runnerParallel(const WsModel *m, const WsWork *work, int n, int jobs,
 #else
 /* Windows: fork tidak tersedia; jalankan serial (perilaku identik, tanpa paralel). */
 int runnerParallel(const WsModel *m, const WsWork *batch, int n, int jobs,
-                   const char *cmd, const char *wsDir, bool libOnly) {
-  return runnerSerial(m, batch, n, jobs, cmd, wsDir, libOnly);
+                   const char *cmd, const char *wsDir, bool libOnly, bool compileOnly) {
+  return runnerSerial(m, batch, n, jobs, cmd, wsDir, libOnly, compileOnly);
 }
 #endif /* !_WIN32 */
 

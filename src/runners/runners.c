@@ -5,6 +5,15 @@
 #include "runners.h"
 #include "../background.h"
 
+bool runnerStreamOutput(void) {
+#ifdef _WIN32
+  return false;
+#else
+  const char *env = getenv("SATRIA_WS_PAR");
+  return env && *env && strcmp(env, "0") != 0;
+#endif
+}
+
 bool runnerWantParallel(int n, int jobs) {
 #ifdef _WIN32
   (void)n; (void)jobs;

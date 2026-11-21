@@ -1,7 +1,7 @@
 /*
  * cmds_passfinish — ekor pass build: fase library workspace (libOnly),
  * keputusan link, link command, pack, dan summary.
- * Badan dipindah apa adanya dari cmdsBuildPassRun (commands.c lama);
+ * Badan dipindah apa adanya dari pass build lama (commands.c);
  * state dibuka dari CmdsPassTail sehingga logika tidak berubah.
  * Dipisah dari commands.c (audit refactor: berkas kandidat >600 baris).
  */
@@ -93,7 +93,7 @@ int cmdsBuildPassFinish(CmdsPassTail *t) {
      disertakan pada link .so: .a proyek lain belum tentu ada di titik ini
      dan shared library memang tidak perlu inline-kan kode proyek lain. */
   if (libOnly) {
-    if (!cmdsBuildLibraryEx(&c, &srcs, false)) {
+    if (!cmdsBuildLibraryEx2(&c, &srcs, false, sourceSetChanged)) {
       free(inc);
       free(wf);
       depsFree(deps);
@@ -191,7 +191,7 @@ int cmdsBuildPassFinish(CmdsPassTail *t) {
     printf("%s Linking : %s (up-to-date)\n", repPrefix(), target);
     /* Library bisa jadi masih perlu dibangun (baru diaktifkan di
        Buildfile / terhapus manual) meski binary sudah up-to-date. */
-    if (c.libRequested && !cmdsBuildLibraryEx(&c, &srcs, true)) {
+    if (c.libRequested && !cmdsBuildLibraryEx2(&c, &srcs, true, sourceSetChanged)) {
       free(inc);
       free(wf);
       return 1;
@@ -250,7 +250,7 @@ int cmdsBuildPassFinish(CmdsPassTail *t) {
   char staticLib[SATRIA_MAX_PATH * 2] = {0};
   if (c.libRequested && c.libStatic && !compilerIsMSVC(&c)) {
     cmdsLibStaticPath(&c, staticLib, sizeof(staticLib));
-    if (!cmdsBuildLibraryEx(&c, &srcs, true)) {
+    if (!cmdsBuildLibraryEx2(&c, &srcs, true, sourceSetChanged)) {
       free(inc);
       free(wf);
       depsFree(deps);
@@ -260,6 +260,23 @@ int cmdsBuildPassFinish(CmdsPassTail *t) {
     useStaticArchive = true;
     libraryBuilt = true;
   }
+
+  /* Single-project besar tanpa library pengguna: kemas object ke arsip privat
+     di build dir. Linker lalu membuka satu file berurutan, bukan ribuan object;
+     pada proot 2.000 object ini memangkas link dari ~9,5 dtk ke ~2,3 dtk.
+     Arsip tidak dicatat sebagai artefak dan dibersihkan bersama build dir. */
+#if !defined(_WIN32) && !defined(__APPLE__)
+  if (!useStaticArchive && !wsModeActive() && !compilerIsMSVC(&c) &&
+      srcs.count >= CMDS_LINK_ARCHIVE_MIN_SRCS) {
+    snprintf(staticLib, sizeof(staticLib), "%s/.satria-link.a", c.outBuildDir);
+    if (cmdsLinkArchiveBuild(&c, &srcs, staticLib)) {
+      useStaticArchive = true;
+    } else {
+      staticLib[0] = '\0';
+    }
+    profMark("link-archive");
+  }
+#endif
 
   size_t n = strlen(c.cc) + strlen(c.outBinaryDir) + strlen(c.outBinaryName) + 256;
   for (int i = 0; i < srcs.count; i++)
@@ -414,7 +431,7 @@ int cmdsBuildPassFinish(CmdsPassTail *t) {
   /* Library statis/shared dari object yang sama — object tidak dihapus.
      Bila arsip sudah dibangun sebelum link, pemanggilan ini hanya mencatat
      artefak yang up-to-date. */
-  if (!libraryBuilt && !cmdsBuildLibraryEx(&c, &srcs, true)) {
+  if (!libraryBuilt && !cmdsBuildLibraryEx2(&c, &srcs, true, sourceSetChanged)) {
     statPlanFree(&plan);
     return 1;
   }
@@ -441,13 +458,14 @@ int cmdsBuildPassFinish(CmdsPassTail *t) {
     statPlanFree(&plan);
     return 1;
   }
-  profReport();
 
   /* Lihat catatan jalur up-to-date: fase binary workspace tidak mengulang
      hitungan fase library. */
   if (!wsModeActive()) buildReportProjectCounts(compiled, skipped, warnings);
   buildReportAddBinary(target, REP_LINKED, fsFileSize(target));
   if (!fastSaved && !wsModeActive()) cmdsFastStateSave(&c, &srcs, target, buildfilePath, false);
+  profMark("fast-save");
+  profReport();
   statPlanFree(&plan);
   return 0;
 }

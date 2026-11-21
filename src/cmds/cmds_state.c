@@ -48,9 +48,12 @@ static char g_stateWsProj[80] = "";
 void cmdsStateSetWsProject(const char *name) {
   if (!name || !*name) {
     g_stateWsProj[0] = '\0';
+    csStageSetProject("");
     return;
   }
   snprintf(g_stateWsProj, sizeof(g_stateWsProj), "%s", name);
+  /* Fase 2 router-centric: cache_store menulis grup proyek ini ke stage. */
+  csStageSetProject(name);
 }
 
 const char *cmdsStateWsProject(void) { return g_stateWsProj[0] ? g_stateWsProj : NULL; }
@@ -310,6 +313,33 @@ bool cmdsFastStateValid(const char *buildfilePath, bool libOnly) {
                 (long long)targetMtime, targetSize, (long long)s.targetMtime, s.targetSize,
                 (int)targetStamp);
   }
+  /* Stat semua stamp sekali secara paralel untuk proyek besar. Validasi
+     serial membuat edit di akhir daftar membayar ribuan stat sebelum
+     akhirnya gagal; batch ini hanya mengubah biaya stat, urutan keputusan
+     dan semantik PATCH tetap sama. */
+  int64_t *batchM = NULL;
+  long long *batchS = NULL;
+  unsigned char *batchExists = NULL;
+  bool useBatch = false;
+  if (ok && s.count >= 256) {
+    const char **paths = malloc(sizeof(*paths) * (size_t)s.count);
+    batchM = malloc(sizeof(*batchM) * (size_t)s.count);
+    batchS = malloc(sizeof(*batchS) * (size_t)s.count);
+    batchExists = malloc((size_t)s.count);
+    if (paths && batchM && batchS && batchExists) {
+      for (int i = 0; i < s.count; i++) paths[i] = s.stamps[i].path;
+      cmdsStatBatchStamp(paths, s.count, batchM, batchS, batchExists);
+      useBatch = true;
+    } else {
+      free(batchM);
+      free(batchS);
+      free(batchExists);
+      batchM = NULL;
+      batchS = NULL;
+      batchExists = NULL;
+    }
+    free(paths);
+  }
   bool patched = false; /* sentuh: stamp di-PATCH setelah seluruh entri lolos */
   for (int i = 0; ok && i < s.count; i++) {
     FastStamp *st = &s.stamps[i];
@@ -328,7 +358,14 @@ bool cmdsFastStateValid(const char *buildfilePath, bool libOnly) {
       }
       continue;
     }
-    bool exists = memoStampNsSize(st->path, &currentMtime, &currentSize);
+    bool exists;
+    if (useBatch) {
+      exists = batchExists[i] != 0;
+      currentMtime = batchM[i];
+      currentSize = batchS[i];
+    } else {
+      exists = memoStampNsSize(st->path, &currentMtime, &currentSize);
+    }
     if (st->kind == 'M') {
       if (exists) {
         GATE_MISS("entri M ada padahal seharusnya hilang: %s", st->path);
@@ -406,6 +443,9 @@ bool cmdsFastStateValid(const char *buildfilePath, bool libOnly) {
     }
   }
   if (ok && patched) fastStateWriteFrom(&s); /* PATCH sentuh: perbarui stamp */
+  free(batchM);
+  free(batchS);
+  free(batchExists);
   fastStateFree(&s);
   return ok;
 }

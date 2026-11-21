@@ -123,4 +123,33 @@ bool csProjMetaStamp(uint64_t proj, uint64_t content, long long time);
 bool csProjMetaStampN(const uint64_t *projs, const uint64_t *contents,
                       const long long *times, int n);
 
+/* ==== Stage tulis cache grup (eksperimen router-centric, P4) ====
+   Executor TIDAK menulis langsung ke cache grup bersama, baik di proses anak
+   workspace maupun single-project. `csStageBegin` membuat folder stage
+   ber-token; selama aktif, `csCommit` untuk deps/lib/embed/fingerprint menulis
+   hanya grup proyek yang sedang dieksekusi (csStageSetProject atau
+   csStageSetProjectAddr) ke file stage. `csOpen` untuk target yang sama juga
+   membaca overlay stage, sehingga penulis/pembaca berikutnya dalam proses ini
+   melihat state terbaru tanpa menunggu merge. Induk memanggil `csStageMergeAll`
+   sekali setelah batch/pass: setiap grup proyek diganti dari file stage, lalu
+   file stage dihapus. Path lain (state.cache, artifact.cache, opts.cache,
+   file stage) tidak pernah dialihkan.
+
+   Aktif hanya bila pemanggil eksperimen mengaktifkannya; tanpa begin seluruh
+   fungsi menjadi no-op sehingga jalur default tidak berubah. */
+bool csStageBegin(void);
+void csStageEnd(void);
+bool csStageActive(void);
+bool csStageMerging(void);
+void csStageSetMerging(bool on);
+void csStageSetProject(const char *proj);
+/* Varian single-project: alamat proyek sudah berupa hash (cmdsCacheProjAddr),
+   bukan nama yang perlu di-hash ulang. */
+void csStageSetProjectAddr(uint64_t proj);
+/* Token run aktif; dipakai intent router agar file dari run mati diabaikan. */
+const char *csStageToken(void);
+/* Terapkan semua stage file token aktif ke cache target. Satu buka+commit per
+   file cache (bukan per proyek). false bila ada yang gagal. */
+bool csStageMergeAll(void);
+
 #endif

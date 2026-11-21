@@ -11,6 +11,8 @@
 #define WS_SOURCE_FILE ".satria/sources.cache"
 /* Helpers shared across CRUD units. */
 bool optsCacheHasGroup(const char *path, uint64_t proj);
+/* Stage intent metadata grup (P4 fase 2; lihat opts_create.c). */
+bool optsProjMetaIntent(uint64_t proj, uint64_t content);
 
 /* Stamp sources.cache (mtime nanodetik + ukuran) untuk route di opts.cache.
    Resolusi ns wajib: perubahan isi dalam detik yang sama dengan ukuran sama

@@ -5,16 +5,20 @@
  */
 #include "../commands.h"
 #include "../cache/artifact.h"
+#include "../cache/cache_store.h"
+#include "../cache/router.h"
 #include "../log/build_log.h"
 #include "../log/build_report.h"
 #include "../log/report_blob.h"
 
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h> /* trace audit cmdsCollectSources */
 #ifndef _WIN32
 #include <unistd.h>
+#include <sys/wait.h>
 #endif
 #ifdef _WIN32
 #include <io.h>
@@ -174,6 +178,180 @@ static bool statSrcHasDotD(const Config *c, const char *src) {
   return false;
 }
 
+typedef struct {
+  const char *path;
+  int64_t m;
+  long long sz;
+  bool ok;
+} StatTask;
+
+/* Hasil yang menyeberang pipe: layout tetap dan bebas pointer. */
+typedef struct {
+  int64_t m;
+  long long sz;
+  int ok;
+} StatStamp;
+
+#ifndef _WIN32
+/* Sama seperti pre-stat P-fast workspace: bagi tugas ke beberapa child,
+   masing-masing menulis array StatStamp untuk irisannya ke pipe. Parent
+   membaca jumlah byte yang pasti, jadi child yang selesai lebih dulu tidak
+   bisa menyisipkan hasil ke irisan lain. Gagal pipe/fork -> false dan
+   pemanggil mengisi seluruh tugas secara serial. */
+static bool statTasksFork(StatTask *tasks, size_t n, StatStamp *stamps) {
+  int workers = cpuCount();
+  if (workers < 2) return false;
+  if (workers > 8) workers = 8;
+  if ((size_t)workers > n) workers = (int)n;
+  int pfd[8][2], made = 0;
+  pid_t pid[8];
+  size_t start[8], count[8];
+  for (int w = 0; w < workers; w++) {
+    if (pipe(pfd[w]) != 0) break;
+    size_t s = n * (size_t)w / (size_t)workers;
+    size_t e = n * (size_t)(w + 1) / (size_t)workers;
+    pid_t p = fork();
+    if (p < 0) {
+      close(pfd[w][0]);
+      close(pfd[w][1]);
+      break;
+    }
+    if (p == 0) {
+      close(pfd[w][0]);
+      size_t bytes = (e - s) * sizeof(StatStamp);
+      StatStamp *local = bytes ? malloc(bytes) : NULL;
+      if (local) {
+        for (size_t i = s; i < e; i++) {
+          StatTask *t = &tasks[i];
+          local[i - s].m = -1;
+          local[i - s].sz = 0;
+          local[i - s].ok = fsStampNsSize(t->path, &local[i - s].m, &local[i - s].sz);
+          if (!local[i - s].ok) local[i - s].m = -1;
+        }
+        size_t off = 0;
+        while (off < bytes) {
+          ssize_t wr = write(pfd[w][1], (char *)local + off, bytes - off);
+          if (wr > 0) {
+            off += (size_t)wr;
+            continue;
+          }
+          if (wr < 0 && errno == EINTR) continue;
+          break;
+        }
+        free(local);
+      }
+      _exit(0);
+    }
+    close(pfd[w][1]);
+    pid[w] = p;
+    start[w] = s;
+    count[w] = e - s;
+    made++;
+  }
+  bool ok = made == workers;
+  for (int w = 0; w < made; w++) {
+    size_t bytes = count[w] * sizeof(StatStamp);
+    size_t base = start[w] * sizeof(StatStamp), off = 0;
+    while (off < bytes) {
+      ssize_t rd = read(pfd[w][0], (char *)stamps + base + off, bytes - off);
+      if (rd > 0) {
+        off += (size_t)rd;
+        continue;
+      }
+      if (rd < 0 && errno == EINTR) continue;
+      break;
+    }
+    close(pfd[w][0]);
+    int st = 0;
+    while (waitpid(pid[w], &st, 0) < 0 && errno == EINTR) {}
+    if (off != bytes || !WIFEXITED(st) || WEXITSTATUS(st) != 0) ok = false;
+  }
+  return ok;
+}
+#endif
+
+/* Isi mtime/size semua tugas. Ambang 256 tugas (~85 source) membuat proyek
+   kecil tetap serial; mulai 100 source biaya fork sudah terbayar di PRoot.
+   SATRIA_STATPLAN_PAR=0 memaksa serial untuk debugging/perbandingan. */
+static void statTasksRun(StatTask *tasks, size_t n) {
+  if (n == 0) return;
+  StatStamp *stamps = malloc(n * sizeof(*stamps));
+  bool parallel = false;
+#ifndef _WIN32
+  if (stamps && n >= 256 && !envOff("SATRIA_STATPLAN_PAR"))
+    parallel = statTasksFork(tasks, n, stamps);
+#endif
+  if (!parallel) {
+    for (size_t i = 0; i < n; i++) {
+      StatTask *t = &tasks[i];
+      t->m = -1;
+      t->sz = 0;
+      t->ok = fsStampNsSize(t->path, &t->m, &t->sz);
+      if (!t->ok) t->m = -1;
+    }
+    free(stamps);
+    return;
+  }
+  for (size_t i = 0; i < n; i++) {
+    StatTask *t = &tasks[i];
+    t->m = stamps[i].m;
+    t->sz = stamps[i].sz;
+    t->ok = stamps[i].ok != 0;
+  }
+  free(stamps);
+}
+
+void cmdsStatBatchStamp(const char *const *paths, int n, int64_t *mtime, long long *size,
+                        unsigned char *ok) {
+  if (n <= 0) return;
+  StatTask *tasks = malloc(sizeof(*tasks) * (size_t)n);
+  if (!tasks) {
+    for (int i = 0; i < n; i++) {
+      mtime[i] = -1;
+      size[i] = 0;
+      ok[i] = fsStampNsSize(paths[i], &mtime[i], &size[i]) ? 1 : 0;
+      if (!ok[i]) mtime[i] = -1;
+    }
+    return;
+  }
+  for (int i = 0; i < n; i++) tasks[i].path = paths[i];
+  statTasksRun(tasks, (size_t)n);
+  for (int i = 0; i < n; i++) {
+    mtime[i] = tasks[i].ok ? tasks[i].m : -1;
+    size[i] = tasks[i].sz;
+    ok[i] = tasks[i].ok ? 1 : 0;
+  }
+  free(tasks);
+}
+
+static bool statHasSuffix(const char *s, const char *suf) {
+  size_t n = strlen(s), m = strlen(suf);
+  return n >= m && strcmp(s + n - m, suf) == 0;
+}
+
+static void statDirOf(const char *path, char *out, size_t n) {
+  const char *slash = strrchr(path, '/');
+#ifdef _WIN32
+  const char *bslash = strrchr(path, '\\');
+  if (!slash || (bslash && bslash > slash)) slash = bslash;
+#endif
+  if (!slash) snprintf(out, n, ".");
+  else if (slash == path) snprintf(out, n, "/");
+  else snprintf(out, n, "%.*s", (int)(slash - path), path);
+}
+
+static bool statSortedHas(const List *sorted, const char *path) {
+  int lo = 0, hi = sorted->count - 1;
+  while (lo <= hi) {
+    int mid = lo + (hi - lo) / 2;
+    int c = strcmp(sorted->items[mid], path);
+    if (c == 0) return true;
+    if (c < 0) lo = mid + 1;
+    else hi = mid - 1;
+  }
+  return false;
+}
+
 void statPlanBuild(StatPlan *p, const Config *c, const List *srcs) {
   int n = srcs->count;
   p->count = n;
@@ -189,19 +367,37 @@ void statPlanBuild(StatPlan *p, const Config *c, const List *srcs) {
     return;
   }
   p->objCount = 0;
+
+  /* Satu array tugas untuk seluruh stat: source (n), object unik, dan .d
+     (hanya bila direktori object tidak seragam). Urutan tugas tidak
+     memengaruhi hasil; tiap konsumen dipetakan lewat srcTask/objTask. */
+  size_t cap = (size_t)n * 3 + 1;
+  StatTask *tasks = malloc(cap * sizeof(*tasks));
+  int *srcTask = malloc(sizeof(int) * (size_t)(n + 1));
+  int *objTask = malloc(sizeof(int) * (size_t)(n + 1));
+  int *dotdTask = malloc(sizeof(int) * (size_t)(n + 1));
+  bool *dotdReq = calloc((size_t)(n + 1), sizeof(bool));
+  bool *dotdAdded = calloc((size_t)(n + 1), sizeof(bool));
+  size_t taskN = 0;
+  if (!tasks || !srcTask || !objTask || !dotdTask || !dotdReq || !dotdAdded) {
+    free(tasks);
+    free(srcTask);
+    free(objTask);
+    free(dotdTask);
+    free(dotdReq);
+    free(dotdAdded);
+    /* Alokasi gagal: kosongkan plan agar decide men-stat sendiri. */
+    statPlanFree(p);
+    return;
+  }
   for (int i = 0; i < n; i++) {
-    const char *src = srcs->items[i];
-    p->path[i] = src;
-    long long sz = 0;
-    int64_t m = -1;
-    /* Sumber: memo stat (jalur fast-state sudah men-stat path yang sama run
-       ini); epoch identik dengan fsStampNsSize. Object tetap fsStampNsSize
-       langsung — output ditulis build, memo bisa basi. */
-    if (!cmdsStatCached(src, &m, &sz)) fsStampNsSize(src, &m, &sz); /* gagal -> -1, semantik lama */
-    p->srcM[i] = m;
+    p->path[i] = srcs->items[i];
+    srcTask[i] = (int)taskN;
+    tasks[taskN].path = srcs->items[i];
+    taskN++;
 
     char objPath[SATRIA_MAX_PATH];
-    if (!objectPathFor(c, src, objPath, sizeof(objPath))) {
+    if (!objectPathFor(c, srcs->items[i], objPath, sizeof(objPath))) {
       p->objIdx[i] = -1;
       continue;
     }
@@ -215,29 +411,115 @@ void statPlanBuild(StatPlan *p, const Config *c, const List *srcs) {
     if (slot < 0) {
       slot = p->objCount;
       snprintf(p->objPath[slot], SATRIA_MAX_PATH, "%s", objPath);
+      objTask[slot] = -1;
+      dotdTask[slot] = -1;
       if (p->obsObj) {
-        int64_t om = -1;
-        memoStampNsSize(objPath, &om, &sz); /* object: lewat memo (dibuang saat compile) */
-        /* .d hilang untuk sumber ber-.d: object diperlakukan basi (seperti object
-           hilang) agar compile ulang menulis ulang .d. Tanpa ini .d tak pernah
-           pulih dan catatan noop tidak pernah valid lagi. */
-        if (om >= 0 && statSrcHasDotD(c, src)) {
-          char dp[SATRIA_MAX_PATH * 2];
-          int64_t dm = -1;
-          long long dsz = 0;
-          if (dotDPathFor(c, src, dp, sizeof(dp)) && !memoStampNsSize(dp, &dm, &dsz)) om = -1;
-        }
-        p->objM[slot] = om;
+        objTask[slot] = (int)taskN;
+        tasks[taskN].path = p->objPath[slot];
+        taskN++;
       } else {
         p->objM[slot] = -99; /* belum distat — konsumen WAJIB stat sendiri */
       }
       p->objCount++;
     }
     p->objIdx[i] = slot;
+    if (p->obsObj && statSrcHasDotD(c, srcs->items[i])) dotdReq[slot] = true;
   }
+
+  /* .d hanya perlu ADA/TIDAK. Bila semua object satu direktori (umumnya
+     build/), satu readdir menggantikan n stat .d. Direktori campuran tetap
+     memakai stat per .d seperti sebelumnya. */
+  List dotdSeen = {0};
+  bool dotdScan = false;
+  if (p->obsObj && p->objCount > 0) {
+    char dir[SATRIA_MAX_PATH];
+    statDirOf(p->objPath[0], dir, sizeof(dir));
+    bool oneDir = true;
+    for (int slot = 1; slot < p->objCount; slot++) {
+      char other[SATRIA_MAX_PATH];
+      statDirOf(p->objPath[slot], other, sizeof(other));
+      if (strcmp(dir, other) != 0) {
+        oneDir = false;
+        break;
+      }
+    }
+    if (oneDir) {
+      List files = {0};
+      fsListDir(dir, NULL, &files);
+      for (int i = 0; i < files.count; i++)
+        if (statHasSuffix(files.items[i], ".d")) listAdd(&dotdSeen, files.items[i]);
+      listFree(&files);
+      listSort(&dotdSeen);
+      dotdScan = true;
+    }
+  }
+  if (p->obsObj && !dotdScan) {
+    for (int i = 0; i < n; i++) {
+      int slot = p->objIdx[i];
+      if (slot < 0 || !dotdReq[slot] || dotdAdded[slot]) continue;
+      dotdAdded[slot] = true;
+      char dp[SATRIA_MAX_PATH * 2];
+      if (dotDPathFor(c, srcs->items[i], dp, sizeof(dp))) {
+        dotdTask[slot] = (int)taskN;
+        tasks[taskN].path = strdup(dp);
+        if (!tasks[taskN].path) dotdTask[slot] = -1;
+        else taskN++;
+      }
+    }
+  }
+
+  statTasksRun(tasks, taskN);
+
+  /* Kembalikan hasil ke plan dan memo per-proses. Memo source dipertahankan
+     seperti jalur serial: save-walk sesudah pass membaca path yang sama.
+     Object juga dicatat, lalu dibuang saat compile menulis ulang file. */
+  for (int i = 0; i < n; i++) {
+    StatTask *t = &tasks[srcTask[i]];
+    p->srcM[i] = t->ok ? t->m : -1;
+    if (t->ok) cmdsStatMemoPut(t->path, t->m, t->sz);
+  }
+  for (int slot = 0; slot < p->objCount; slot++) {
+    if (!p->obsObj) continue;
+    int64_t om = -1;
+    if (objTask[slot] >= 0 && tasks[objTask[slot]].ok) {
+      om = tasks[objTask[slot]].m;
+      if (dotdTask[slot] >= 0) {
+        if (!tasks[dotdTask[slot]].ok)
+          om = -1;
+        else
+          cmdsStatMemoPut(tasks[dotdTask[slot]].path, tasks[dotdTask[slot]].m,
+                          tasks[dotdTask[slot]].sz);
+      } else if (dotdScan && dotdReq[slot]) {
+        /* Nama .d = object dengan huruf terakhir 'o' -> 'd' (dotDPathFor). */
+        char dp[SATRIA_MAX_PATH];
+        snprintf(dp, sizeof(dp), "%s", p->objPath[slot]);
+        size_t len = strlen(dp);
+        if (len < 2 || dp[len - 2] != '.' || dp[len - 1] != 'o') {
+          om = -1;
+        } else {
+          dp[len - 1] = 'd'; /* object.o -> object.d, baru dicocokkan ke dotdSeen */
+          if (!statSortedHas(&dotdSeen, dp)) om = -1;
+        }
+      }
+      cmdsStatMemoPut(tasks[objTask[slot]].path, tasks[objTask[slot]].m,
+                      tasks[objTask[slot]].sz);
+    }
+    p->objM[slot] = om;
+  }
+
+  for (int slot = 0; slot < p->objCount; slot++)
+    if (dotdTask[slot] >= 0) free((void *)tasks[dotdTask[slot]].path);
+  listFree(&dotdSeen);
+  free(tasks);
+  free(srcTask);
+  free(objTask);
+  free(dotdTask);
+  free(dotdReq);
+  free(dotdAdded);
 }
 
 int cmdBuildEx(int jobs, const char *buildfilePath, bool libOnly) {
+  profMark("cmd-entry");
   /* Sisa state lama (audit §Daftar Implementasi): mode single menyapu file
      tulisan versi lama sekali per run; mode workspace menyapu lewat
      wsLegacyStateRemove di workspaceRun. */
@@ -248,6 +530,7 @@ int cmdBuildEx(int jobs, const char *buildfilePath, bool libOnly) {
      fingerprint + decide penuh per proyek. */
   bool fastOk = wsModeActive() ? wsFastStateValid(buildfilePath, libOnly)
                                : cmdsFastStateValid(buildfilePath, libOnly);
+  profMark("fast-gate");
   if (fastOk) return 0; /* no-op: detail sudah dicetak fast-state */
   /* `background = true` (design/background.md §2): spawn HANYA bila build
      ini benar-benar mengerjakan sesuatu — run no-op (router opts.cache +
@@ -273,6 +556,7 @@ int cmdBuildEx(int jobs, const char *buildfilePath, bool libOnly) {
      ke .satria/report.blob bila build sukses, dibuang bila gagal. */
   reportBlobBegin();
   buildReportBegin(); /* laporan aktif: dirender setelah pass (design/build_report.md) */
+  buildReportSetCores(jobs);
 
   Config c = configDefaults();
   startupPhase("loading configuration");
@@ -323,9 +607,31 @@ int cmdBuildEx(int jobs, const char *buildfilePath, bool libOnly) {
   }
   startupPhaseEnd(true);
 
+  /* Router-centric untuk single-project (pilot P4): executor tetap menulis
+     cache grup, tetapi lewat stage yang digabung proses ini sesudah pass.
+     Induk yang sama kemudian menerapkan intent route/metadata, sehingga
+     deps/lib/embed/fingerprint/opts kembali punya satu penulis. */
+  bool txn = false;
+  if (!wsModeActive() && workspaceRouterPilotActive()) {
+    txn = csStageBegin();
+    if (txn) csStageSetProjectAddr(cmdsCacheProjAddr());
+  }
+
   bool logging = !wsModeActive() && c.logEnabled;
   if (logging) buildLogBegin();
-  int result = cmdsBuildPassRun(jobs, c, buildfilePath, libOnly);
+  /* Dua pass eksplisit: compile dulu, lalu link sebagai keputusan router
+     (untuk single-project, proses ini adalah router dan executor). */
+  CmdsPassTail *tail = NULL;
+  int result = cmdsBuildPassCompile(jobs, c, buildfilePath, libOnly, &tail);
+  if (result == 0 && tail) result = cmdsLinkPass(tail);
+  /* Satu penulis: merge stage + terapkan intent hanya setelah executor
+     selesai. Build gagal tidak menggabungkan apa pun (target lama utuh). */
+  if (txn) {
+    if (result == 0 &&
+        (!csStageMergeAll() || !optsRouterApplyIntents()))
+      result = 1;
+    csStageEnd();
+  }
   if (logging) buildLogEnd(result);
   buildReportFinish(result == 0); /* render Build Report (live stream compile dipertahankan) */
   /* sukses: jadikan report.blob dan salin ke state (pulih bila file hilang) */
@@ -378,7 +684,7 @@ bool cmdsCheckObjectCollisions(const Config *c, const List *srcs) {
  * .c dan .cpp dihasilkan dua walkDir terpisah per folder root, jadi di-sort
  * ulang jadi satu barisan stabil — baris link reprodusible antar mesin dan
  * urutan inisialisasi object statis C++ tidak melekat pada readdir.
- * Dipakai cmdsBuildPassRun dan jalur CompDB workspace (wsCompdbRefresh).
+ * Dipakai cmdsBuildPassCompile dan jalur CompDB workspace (wsCompdbRefresh).
  */
 void cmdsCollectSources(const Config *c, List *out) {
   /* Trace audit (SATRIA_PROFILE): durasi per entri sources — col timestamp

@@ -30,12 +30,11 @@ static bool optKeyVisit(const CsEntry *e, CsOp op, void *ctxp) {
    (depsSave berjalan tiap build sukses); lib bila fase library berjalan
    (libOnly) atau library diminta; embed bila ada entri embedded. Kehadiran
    grup diverifikasi per nama — router tidak pernah menunjuk cache kosong. */
-bool optsRouterRecord(const Config *c, bool libOnly) {
+bool optsRouterRecordProject(uint64_t proj, bool libOnly, bool libRequested, bool embed) {
   mkdirs(".satria");
   CsStore *st = optsStoreShared();
   if (!st) st = optsStoreRepair();
   if (!st) return false;
-  uint64_t proj = cmdsCacheProjAddr();
 
   OptKeyCtx keys = {proj, NULL, 0};
   bool collected = csForEach(st, optKeyVisit, &keys);
@@ -54,8 +53,8 @@ bool optsRouterRecord(const Config *c, bool libOnly) {
   /* Source index belongs to the same project route, not workspace only. */
   long long srcM = 0, srcS = 0;
   bool haveSources = optsSourcesStamp(&srcM, &srcS);
-  if (libOnly || c->libRequested) names[n++] = "lib";
-  if (c->embCount) names[n++] = "embed";
+  if (libOnly || libRequested) names[n++] = "lib";
+  if (embed) names[n++] = "embed";
   for (int i = 0; i < n; i++) {
     char path[128];
     snprintf(path, sizeof(path), ".satria/caches/%s.cache", names[i]);
@@ -70,5 +69,40 @@ bool optsRouterRecord(const Config *c, bool libOnly) {
   /* Commit di-flush per fase/batas proses (item 6): mutasi tinggal di store
      bersama — pembaca in-memory langsung melihatnya, tulis disk ditunda. */
   return true;
+}
+
+/* Fase 2 router-centric: executor anak menulis intent, bukan opts.cache.
+   Induk menerapkannya setelah stage cache digabung (optsRouterApplyIntents). */
+static bool optsIntentWrite(uint64_t proj, bool libOnly, bool libRequested,
+                            bool embed, bool hasMeta, uint64_t content) {
+  char path[256];
+  snprintf(path, sizeof(path), ".satria/router-stage/%s.route.%016llx",
+           csStageToken(), (unsigned long long)proj);
+  FILE *f = fopen(path, "w");
+  if (!f) return false;
+  int ok = fprintf(f, "libOnly=%d lib=%d emb=%d\n", (int)libOnly, (int)libRequested,
+                   (int)embed);
+  if (ok > 0 && hasMeta) ok = fprintf(f, "meta=%016llx\n", (unsigned long long)content);
+  if (fclose(f) != 0) ok = 0;
+  return ok > 0;
+}
+
+/* Append metadata ke intent route yang sudah ada (dipanggil sesudah record). */
+bool optsProjMetaIntent(uint64_t proj, uint64_t content) {
+  char path[256];
+  snprintf(path, sizeof(path), ".satria/router-stage/%s.route.%016llx",
+           csStageToken(), (unsigned long long)proj);
+  FILE *f = fopen(path, "a");
+  if (!f) return false;
+  int ok = fprintf(f, "meta=%016llx\n", (unsigned long long)content);
+  if (fclose(f) != 0) ok = 0;
+  return ok > 0;
+}
+
+bool optsRouterRecord(const Config *c, bool libOnly) {
+  uint64_t proj = cmdsCacheProjAddr();
+  if (csStageActive() && !csStageMerging())
+    return optsIntentWrite(proj, libOnly, c->libRequested, c->embCount > 0, false, 0);
+  return optsRouterRecordProject(proj, libOnly, c->libRequested, c->embCount > 0);
 }
 

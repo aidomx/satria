@@ -984,11 +984,9 @@ static void wsCacheSaveBody(const WsModel *m, const char *wsName) {
        dengan content/time grup workspace — penutup terakhir tanpa P meta. */
     if (sn > 0 && stamps[sn - 1].proj == wsProj)
       stateBlobProjMeta(WS_COMPDB_GLOBAL, stamps[sn - 1].content, stamps[sn - 1].time);
-    /* Penuh: prune (entri tak lagi dirujuk ikut hilang); selektif: merge —
-       pertahankan entri artefak proyek di luar closure (O1). */
-    if (sel) artifactCacheSaveMerge();
-    else artifactCacheSave(); /* flush metadata artefak/input release (§9) */
-    profMark("tail-artifact"); /* profil: artifact.cache */
+    /* artifact.cache diputuskan router/finish induk setelah cache grup
+       tersimpan (fase 3 P4; lihat workspace.c). */
+    profMark("tail-artifact"); /* profil: batas sebelum artifact.cache */
   }
   profMark("save-tail"); /* profil: router/opts/state.blob/artifact */
 }

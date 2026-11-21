@@ -531,13 +531,15 @@ static bool wsFastStateValidLib(const char *buildfilePath, const char *cwd) {
   return true;
 }
 
-bool wsFastStateValid(const char *buildfilePath, bool libOnly) {
+bool wsFastStateValidOut(const char *buildfilePath, bool libOnly, bool *routeOk) {
   char cwd[WS_PATH_LEN];
   if (!fsGetCwd(cwd, sizeof(cwd))) return false;
   cmdsStatMemoSetCwd(); /* memo memakai cwd root workspace (konstan antar proyek) */
   /* Router (opts.cache) dibaca lebih dulu: cache yang dirutekan hilang /
      kosong -> batal cepat tanpa memuat state (design/startup.md §4). */
-  if (!optsRouterValidate()) return false;
+  bool route = optsRouterValidate();
+  if (routeOk) *routeOk = route;
+  if (!route) return false;
   profMark("fs-router"); /* profil: validasi router opts.cache */
   /* Fase library kini dari caches/lib.cache (design/startup.md §3). */
   if (libOnly) return wsFastStateValidLib(buildfilePath, cwd);
@@ -609,6 +611,10 @@ bool wsFastStateValid(const char *buildfilePath, bool libOnly) {
   }
   listFree(&libs);
   return true;
+}
+
+bool wsFastStateValid(const char *buildfilePath, bool libOnly) {
+  return wsFastStateValidOut(buildfilePath, libOnly, NULL);
 }
 
 /* mtime untuk keputusan decide. Mode workspace: lewat memo (output yang berubah

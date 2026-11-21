@@ -19,10 +19,21 @@
 #else
 #include <sys/types.h> /* getpid: nama tmp commit unik per proses */
 #include <unistd.h>   /* getpid */
+#include <dirent.h>   /* stage cache: lihat file stage run aktif */
 #define CS_PID() ((long)getpid())
 #endif
 
 #include <time.h> /* csNowNs: clock_gettime */
+
+/* Stage tulis cache grup (eksperimen router-centric, P4): lihat cache_store.h. */
+#define CS_STAGE_DIR ".satria/router-stage"
+#define CS_STAGE_NAME_MAX 1600
+static bool g_stageOn = false;
+static bool g_stageMerging = false;
+static uint64_t g_stageProj = 0;
+static char g_stageToken[64];
+static const char *csStageBase(const char *path);
+static bool csStageOverlay(CsStore *st, const char *path);
 
 /* Penggantian atomik: POSIX rename; Windows MoveFileEx REPLACE_EXISTING |
    WRITE_THROUGH (fallback salin + hapus) — semantik sama dengan
@@ -381,7 +392,13 @@ CsStore *csOpen(const char *path) {
     return NULL;
   }
   struct stat sb;
-  if (stat(path, &sb) != 0) return st; /* tidak ada = store kosong */
+  if (stat(path, &sb) != 0) { /* tidak ada = store kosong */
+    if (!csStageOverlay(st, path)) {
+      freeStore(st);
+      return NULL;
+    }
+    return st;
+  }
   FILE *fp = fopen(path, "r");
   if (!fp) {
     freeStore(st);
@@ -389,6 +406,7 @@ CsStore *csOpen(const char *path) {
   }
   bool ok = loadFile(st, fp);
   fclose(fp);
+  if (ok) ok = csStageOverlay(st, path);
   if (!ok) {
     freeStore(st);
     return NULL;
@@ -486,8 +504,299 @@ static const char *opName(CsOp op) {
   }
 }
 
+/* ==================== Stage tulis cache grup (P4) ==================== */
+
+/* Hanya cache grup per proyek yang boleh di-stage. state.cache memakai
+   mekanismenya sendiri (stateBlobExport), opts.cache ditangani intent router,
+   artifact.cache tetap ditulis induk. */
+static const char *csStageBase(const char *path) {
+  static const char *const names[] = {
+      "deps.cache", "lib.cache", "embed.cache", "fingerprint.cache",
+  };
+  for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
+    const char *slash = strrchr(path, '/');
+    const char *base = slash ? slash + 1 : path;
+    if (strcmp(base, names[i]) == 0) return names[i];
+  }
+  return NULL;
+}
+
+/* Overlay baca stage: selama transaksi aktif, pembaca dalam proses yang sama
+   (mis. cmdsFastStateSave yang membuka DepCache baru) harus melihat tulisan
+   stage sebagai state terkini. Tanpa ini target belum berubah sampai merge,
+   sehingga pembaca jatuh ke jalur lambat — pada cold single-project setiap
+   source membaca ulang file .d karena edges di deps.cache belum terlihat.
+   Saat merge (g_stageMerging) overlay dimatikan agar target ditulis apa adanya. */
+static bool csStageOverlay(CsStore *st, const char *path) {
+#ifndef _WIN32
+  if (!g_stageOn || g_stageMerging || !g_stageProj) return true;
+  const char *base = csStageBase(path);
+  if (!base) return true;
+  char stage[CS_STAGE_NAME_MAX];
+  snprintf(stage, sizeof(stage), "%s/%s.%016llx.%s", CS_STAGE_DIR, g_stageToken,
+           (unsigned long long)g_stageProj, base);
+  struct stat sb;
+  if (stat(stage, &sb) != 0) return true; /* belum ada tulisan stage */
+  CsStore *src = csOpen(stage);
+  if (!src) return true; /* stage rusak: biarkan target lama, merge akan melapor */
+
+  uint64_t *keys = malloc((st->count ? st->count : 1) * sizeof(uint64_t));
+  if (!keys) {
+    csClose(src);
+    return false;
+  }
+  size_t n = 0;
+  for (size_t i = 0; i < st->cap; i++)
+    for (CsNode *node = st->buckets[i]; node; node = node->next)
+      if (node->e.proj == g_stageProj) keys[n++] = node->e.file;
+  for (size_t i = 0; i < n; i++) csDelete(st, g_stageProj, keys[i]);
+  free(keys);
+
+  bool ok = true;
+  for (size_t i = 0; i < src->cap && ok; i++)
+    for (CsNode *node = src->buckets[i]; node && ok; node = node->next)
+      if (node->e.proj == g_stageProj) ok = csPut(st, &node->e);
+  uint64_t content = 0;
+  long long time = 0, size = 0;
+  if (ok && csProjMetaGet(src, g_stageProj, &content, &time, &size))
+    csProjMetaSet(st, g_stageProj, content, time, size);
+  csClose(src);
+  return ok;
+#else
+  (void)st;
+  (void)path;
+  return true;
+#endif
+}
+
+bool csStageBegin(void) {
+#ifdef _WIN32
+  return false; /* fork tidak tersedia; serial sudah satu penulis */
+#else
+  struct stat sb;
+  if (stat(".satria", &sb) != 0) mkdir(".satria", 0755);
+  if (stat(CS_STAGE_DIR, &sb) != 0) mkdir(CS_STAGE_DIR, 0755);
+  snprintf(g_stageToken, sizeof(g_stageToken), "%ld-%lld", (long)getpid(), csNowNs());
+  g_stageOn = true;
+  g_stageMerging = false;
+  g_stageProj = 0;
+  /* Buang sisa run yang mati keras; file token run ini belum ada. */
+  DIR *d = opendir(CS_STAGE_DIR);
+  if (d) {
+    struct dirent *e;
+    while ((e = readdir(d)) != NULL) {
+      if (e->d_name[0] == '.') continue;
+      char p[CS_STAGE_NAME_MAX];
+      snprintf(p, sizeof(p), "%s/%s", CS_STAGE_DIR, e->d_name);
+      remove(p);
+    }
+    closedir(d);
+  }
+  return true;
+#endif
+}
+
+void csStageEnd(void) {
+  g_stageOn = false;
+  g_stageMerging = false;
+  g_stageProj = 0;
+  g_stageToken[0] = '\0';
+}
+
+bool csStageActive(void) { return g_stageOn; }
+bool csStageMerging(void) { return g_stageMerging; }
+void csStageSetMerging(bool on) { g_stageMerging = on; }
+const char *csStageToken(void) { return g_stageToken; }
+
+void csStageSetProject(const char *proj) {
+  g_stageProj = (proj && *proj) ? csHash(proj) : 0;
+}
+
+void csStageSetProjectAddr(uint64_t proj) { g_stageProj = proj; }
+
+static bool csStageWrite(CsStore *st, const char *base) {
+  char path[CS_STAGE_NAME_MAX];
+  snprintf(path, sizeof(path), "%s/%s.%016llx.%s", CS_STAGE_DIR, g_stageToken,
+           (unsigned long long)g_stageProj, base);
+  FILE *fp = fopen(path, "w");
+  if (!fp) return false;
+  bool ok = true;
+  CsNode **arr = malloc((st->count ? st->count : 1) * sizeof(CsNode *));
+  if (!arr) {
+    fclose(fp);
+    return false;
+  }
+  size_t k = 0;
+  for (size_t i = 0; i < st->cap; i++)
+    for (CsNode *n = st->buckets[i]; n; n = n->next)
+      if (n->e.proj == g_stageProj) arr[k++] = n;
+  qsort(arr, k, sizeof(CsNode *), cmpNode);
+  bool haveP = false;
+  uint64_t curProj = 0;
+  for (size_t i = 0; i < k && ok; i++) {
+    const CsNode *n = arr[i];
+    if (!haveP || n->e.proj != curProj) {
+      const CsProjMeta *pm = metaFind(st, n->e.proj);
+      if (pm)
+        ok = fprintf(fp, "P %016llx %016llx %lld %lld\n", (unsigned long long)n->e.proj,
+                     (unsigned long long)pm->content, pm->time, pm->size) > 0;
+      else
+        ok = fprintf(fp, "P %016llx\n", (unsigned long long)n->e.proj) > 0;
+      curProj = n->e.proj;
+      haveP = true;
+    }
+    if (ok) {
+      const char *pay = n->e.payload && *n->e.payload ? n->e.payload : "";
+      ok = fprintf(fp, "%s %016llx %016llx %016llx %lld %lld%s%s\n", opName(n->op),
+                   (unsigned long long)n->e.proj, (unsigned long long)n->e.file,
+                   (unsigned long long)n->e.content, n->e.time, n->e.size,
+                   pay[0] ? " " : "", pay) > 0;
+    }
+  }
+  free(arr);
+  if (fclose(fp) != 0) ok = false;
+  if (!ok) remove(path);
+  return ok;
+}
+
+/* Terapkan satu file stage ke target: ganti SELURUH grup proyek stage dengan
+   isi file, termasuk metadata P. File stage kosong = hapus grup. */
+typedef struct {
+  CsStore *dst;
+  uint64_t proj;
+  bool ok;
+} CsStageCopyCtx;
+static bool csStageCopyVisit(const CsEntry *e, CsOp op, void *ctx) {
+  (void)op;
+  CsStageCopyCtx *c = ctx;
+  if (e->proj != c->proj) return true;
+  if (!csPut(c->dst, e)) return c->ok = false;
+  return true;
+}
+
+typedef struct {
+  CsStore *dst;
+  uint64_t proj;
+} CsStageDelCtx;
+static bool csStageDelVisit(const CsEntry *e, CsOp op, void *ctx) {
+  (void)op;
+  CsStageDelCtx *c = ctx;
+  if (e->proj != c->proj) return true;
+  return csDelete(c->dst, e->proj, e->file);
+}
+
+static bool csStageApply(const char *target, const char *stage, uint64_t proj) {
+  CsStore *src = csOpen(stage);
+  if (!src) return false;
+  CsStore *dst = csOpen(target);
+  if (!dst) {
+    remove(target);
+    dst = csOpen(target);
+  }
+  if (!dst) {
+    csClose(src);
+    return false;
+  }
+  CsStageDelCtx del = {dst, proj};
+  bool ok = csForEach(dst, csStageDelVisit, &del);
+  CsStageCopyCtx cp = {dst, proj, true};
+  if (ok) ok = csForEach(src, csStageCopyVisit, &cp);
+  uint64_t content = 0;
+  long long time = 0, size = 0;
+  if (ok && csProjMetaGet(src, proj, &content, &time, &size))
+    csProjMetaSet(dst, proj, content, time, size);
+  if (ok) ok = csCommit(dst);
+  csClose(dst);
+  csClose(src);
+  return ok;
+}
+
+#ifndef _WIN32
+typedef struct {
+  char *name;
+  char base[32];
+  uint64_t proj;
+} CsStageFile;
+static int csStageFileCmp(const void *a, const void *b) {
+  const CsStageFile *x = a, *y = b;
+  int c = strcmp(x->base, y->base);
+  if (c) return c;
+  return x->proj < y->proj ? -1 : x->proj > y->proj;
+}
+#endif
+
+bool csStageMergeAll(void) {
+#ifdef _WIN32
+  return true;
+#else
+  if (!g_stageOn) return true;
+  DIR *d = opendir(CS_STAGE_DIR);
+  if (!d) return true; /* tidak ada stage = tidak ada yang digabung */
+  size_t cap = 64, n = 0;
+  CsStageFile *files = calloc(cap, sizeof(CsStageFile));
+  if (!files) {
+    closedir(d);
+    return false;
+  }
+  size_t tokLen = strlen(g_stageToken);
+  struct dirent *de;
+  while ((de = readdir(d)) != NULL) {
+    if (strncmp(de->d_name, g_stageToken, tokLen) != 0 || de->d_name[tokLen] != '.')
+      continue;
+    const char *p = de->d_name + tokLen + 1;
+    char *end = NULL;
+    uint64_t proj = strtoull(p, &end, 16);
+    if (!end || end != p + 16 || *end != '.') continue;
+    const char *base = end + 1;
+    if (strlen(base) >= sizeof(files[0].base)) continue;
+    if (n == cap) {
+      size_t nc = cap * 2;
+      CsStageFile *nr = realloc(files, nc * sizeof(CsStageFile));
+      if (!nr) break;
+      files = nr;
+      cap = nc;
+    }
+    char full[CS_STAGE_NAME_MAX];
+    snprintf(full, sizeof(full), "%s/%s", CS_STAGE_DIR, de->d_name);
+    files[n].name = strdup(full);
+    if (!files[n].name) continue;
+    snprintf(files[n].base, sizeof(files[n].base), "%s", base);
+    files[n].proj = proj;
+    n++;
+  }
+  closedir(d);
+  if (n > 1) qsort(files, n, sizeof(CsStageFile), csStageFileCmp);
+  bool ok = true;
+  g_stageMerging = true;
+  for (size_t i = 0; i < n;) {
+    size_t j = i + 1;
+    while (j < n && strcmp(files[j].base, files[i].base) == 0) j++;
+    char target[1024];
+    snprintf(target, sizeof(target), ".satria/caches/%s", files[i].base);
+    for (size_t k = i; k < j; k++)
+      if (!csStageApply(target, files[k].name, files[k].proj)) ok = false;
+    i = j;
+  }
+  g_stageMerging = false;
+  for (size_t i = 0; i < n; i++) {
+    remove(files[i].name);
+    free(files[i].name);
+  }
+  free(files);
+  return ok;
+#endif
+}
+
 bool csCommit(CsStore *st) {
   if (!st->dirty) return true;
+  if (g_stageOn && !g_stageMerging && g_stageProj) {
+    const char *base = csStageBase(st->path);
+    if (base) {
+      bool ok = csStageWrite(st, base);
+      if (ok) st->dirty = false;
+      return ok;
+    }
+  }
   CsNode **arr = malloc((st->count ? st->count : 1) * sizeof(CsNode *));
   if (!arr) return false;
   size_t k = 0;
@@ -593,6 +902,8 @@ long long csNowNs(void) {
 
 bool csProjMetaStampFileN(const char *path, const uint64_t *projs,
                           const uint64_t *contents, const long long *times, int n) {
+  /* Fase 2: stamp P grup ditulis router induk setelah merge stage. */
+  if (g_stageOn && !g_stageMerging) return true;
   if (n <= 0) return true;
   struct stat sb;
   if (stat(path, &sb) != 0) return true; /* belum ada: dilewati */

@@ -28,6 +28,12 @@ void optsStoreReload(void);
 CsStore *optsStoreRepair(void);
 
 bool optsRouterRecord(const Config *c, bool libOnly);
+/* Rekam route berdasarkan keputusan yang sudah dihitung (dipakai fase router
+   induk setelah merge stage). */
+bool optsRouterRecordProject(uint64_t proj, bool libOnly, bool libRequested,
+                             bool embed);
+/* Terapkan intent route/metadata yang distage executor (P4 fase 2). */
+bool optsRouterApplyIntents(void);
 /* Metadata grup P (§4) mode single: content = stamp proyek (hash konfigurasi
    + daftar sumber); format sama dengan workspace (wsOptsMetaSave). */
 bool optsProjMetaStamp(uint64_t proj, uint64_t content);

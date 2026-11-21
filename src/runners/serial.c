@@ -2,11 +2,21 @@
  * Lihat runners.h. Dipakai foreground dan sebagai fallback runnerParallel. */
 #include "runners.h"
 
+#include "../cache/router.h"
 #include "../prof/prof.h"
+
+/* Fase 2 P4: proyek serial juga men-stage tulis cache grup. Merge setelah tiap
+   proyek supaya proyek berikutnya membaca state final (urutan sama dengan
+   perilaku lama), bukan file stage milik proyek sebelumnya. */
+static void wsSerialStageFlush(void) {
+  if (!wsPlanActive() || !csStageActive()) return;
+  csStageMergeAll();
+  optsRouterApplyIntents();
+}
 
 /* Serial: penanda fase per anak, henti saat gagal — persis perilaku lama. */
 int runnerSerial(const WsModel *m, const WsWork *batch, int n, int jobs,
-                            const char *cmd, const char *wsDir, bool libOnly) {
+                            const char *cmd, const char *wsDir, bool libOnly, bool compileOnly) {
   (void)wsDir; /* proyek dieksekusi in-process dari root workspace */
   const char *pre = libOnly ? "ws-libpass-pre" : "ws-binpass-pre";
   const char *post = libOnly ? "ws-libpass-post" : "ws-binpass-post";
@@ -20,7 +30,8 @@ int runnerSerial(const WsModel *m, const WsWork *batch, int n, int jobs,
     for (int i = 0; i < n; i++) {
       if (libOnly && batch[i].level != lv) continue;
       profMark(pre);
-      int rc = wsRunProject(m, batch[i].name, cmd, jobs, libOnly);
+      int rc = wsRunProject(m, batch[i].name, cmd, jobs, libOnly, compileOnly);
+      wsSerialStageFlush();
       profMark(post);
       if (rc != 0) return rc;
     }

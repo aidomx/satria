@@ -5,6 +5,7 @@
 #include "../background.h"    /* background build + watch (design/background.md) */
 #include "../cmds/cmds_internal.h" /* cmdsLegacyStateSweep: pembersihan state lama */
 #include "../cache/router.h" /* optsSourcesRouteSync: sinkron sources <-> opts */
+#include "../cache/artifact.h" /* fase 3: artifact.cache diputuskan induk */
 #include "../log/report_blob.h" /* detail laporan no-op (design/startup.md §10) */
 #include "../log/build_report.h" /* Build Report workspace (design/build_report.md) */
 #include "../log/build_log.h"
@@ -279,6 +280,29 @@ static bool wsNoopGroupedPrint(const WsModel *m, const unsigned char *sel, doubl
   return true;
 }
 
+/* Link batch induk (pilot router-centric): semua proyek sudah melewati pass
+   compile, lalu induk menjalankan link serial. Stage cache tetap satu penulis;
+   merge dilakukan setelah tiap proyek supaya proyek berikutnya membaca state
+   final. Tanpa SATRIA_WS_PLAN, pemanggil tidak memakai fungsi ini. */
+static int wsRunLinkBatch(const WsModel *m, const WsWork *batch, int n, int jobs,
+                          const char *cmd) {
+  if (n <= 0) return 0;
+  if (wsPlanActive())
+    fprintf(stderr, "satria: ws-plan: link batch %d proyek\n", n);
+  bool txn = wsPlanActive() && csStageBegin();
+  int rc = 0;
+  for (int i = 0; i < n; i++) {
+    rc = wsRunProject(m, batch[i].name, cmd, jobs, false, false);
+    if (txn) {
+      if (!csStageMergeAll() && rc == 0) rc = 1;
+      if (!optsRouterApplyIntents() && rc == 0) rc = 1;
+    }
+    if (rc != 0) break;
+  }
+  if (txn) csStageEnd();
+  return rc;
+}
+
 static int wsRunCore(const char *cmd, int jobs, const char *only, const char *releaseSel,
                      bool withCdeps) {
   profMark("ws-entry"); /* profil: pisahkan startup vs model-load */
@@ -529,6 +553,7 @@ static int wsRunCore(const char *cmd, int jobs, const char *only, const char *re
     reportBlobCachePath(WS_CACHE_FP);
     reportBlobBegin();
     buildReportBegin(); /* laporan workspace: header + blok # Execution per proyek */
+    buildReportSetCores(jobs);
     /* Peringatan kecil pada header (design §5): build selektif pada workspace
        yang belum pernah dibangun penuh — fingerprint tidak ada / parsial —
        bisa menghasilkan output yang tidak sinkron dengan proyek lain
@@ -579,7 +604,7 @@ static int wsRunCore(const char *cmd, int jobs, const char *only, const char *re
        dependensi persis perilaku lama. Alasan & ukuran gain (gap
        hedit/libhdr bench/ws.sh) ada di komentar modul ws_batch.c. */
     wsPlanBegin(&m, work, wcount, true);
-    rc = wsRunBatch(&m, work, wcount, jobs, cmd, wsDir, true);
+    rc = wsRunBatch(&m, work, wcount, jobs, cmd, wsDir, true, false);
     wsPlanEnd(rc);
     /* FASE 2 — binary pass: link binary setelah SEMUA library tersedia
        (cdeps bisa siklik — lihat catatan wsBuildWorklist). Proyek
@@ -592,13 +617,16 @@ static int wsRunCore(const char *cmd, int jobs, const char *only, const char *re
       for (int i = 0; i < wcount; i++)
         if (!wsProjectArchiveOnly(&m.projects[work[i].idx])) bin[bn++] = work[i];
       wsPlanBegin(&m, bin, bn, false);
-      rc = wsRunBatch(&m, bin, bn, jobs, cmd, wsDir, false);
+      bool splitLink = wsPlanActive();
+      /* Pilot: compile seluruh proyek dulu, link dijalankan batch induk. */
+      rc = wsRunBatch(&m, bin, bn, jobs, cmd, wsDir, false, splitLink);
       wsPlanEnd(rc);
+      if (rc == 0 && splitLink) rc = wsRunLinkBatch(&m, bin, bn, jobs, cmd);
     }
   } else {
     /* clean: satu pass serial (binary pass), tanpa fase library. */
     for (int i = 0; rc == 0 && i < wcount; i++)
-      rc = wsRunProject(&m, work[i].name, cmd, jobs, false);
+      rc = wsRunProject(&m, work[i].name, cmd, jobs, false, false);
   }
   if (strcmp(cmd, "build") == 0) wsModeSet(false);
 
@@ -644,6 +672,10 @@ static int wsRunCore(const char *cmd, int jobs, const char *only, const char *re
       } else {
         wsCacheSave(&m, wsName);
       }
+      /* Fase 3 router-centric: keputusan artefak/input release dilakukan
+         induk SETELAH cache grup tersimpan, bukan di finish per proyek. */
+      if (selectiveBuild) artifactCacheSaveMerge();
+      else artifactCacheSave();
     }
     profMark("ws-cachesave"); /* profil */
     /* Sinkron dua arah sources <-> opts: run sukses bisa menulis ulang
@@ -729,6 +761,8 @@ const char *workspaceFileName(void) {
 bool workspaceFileExists(void) {
   return workspaceFileName() != NULL;
 }
+
+bool workspaceRouterPilotActive(void) { return wsPlanActive(); }
 
 /* Status kasar mode workspace untuk SATRIA_STATUS (bootstrap.c): cache
    fingerprint ada. Bukan keputusan build — lihat wsCacheNoopValid. */

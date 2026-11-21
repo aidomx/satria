@@ -30,17 +30,21 @@ bool wsProjectArchiveOnly(const WsProject *p) {
  * dilarang design/workspace_v1.md):
  *   cmd "clean" -> Config in-memory (wsBuildConfig) + cmdsCleanRun;
  *   cmd "build" -> label pass -> fast-state -> wsBuildConfig ->
- *                  resolveCompiler -> cmdsBuildPassRun (library/binary).
+ *                  resolveCompiler -> cmdsBuildPassCompile + cmdsLinkPass.
  * State per proyek ditandai cmdsStateSetWsProject (.satria/workspace/<n>.*).
  */
 int wsRunProject(const WsModel *m, const char *name, const char *cmd, int jobs,
-                        bool libOnly) {
+                        bool libOnly, bool compileOnly) {
   int idx = wsFindProject(m, name);
   if (idx < 0) return 1;
   const WsProject *p = &m->projects[idx];
   if (!p->root[0]) return 1;
 
   cmdsStateSetWsProject(name);
+  /* Rencana P4 sudah memvalidasi state; memo stat dari fase rencana tidak
+     boleh dipakai keputusan build proyek ini (proyek sebelumnya bisa saja
+     menulis output). */
+  if (wsPlanActive()) cmdsStatMemoReset();
 
   if (strcmp(cmd, "clean") == 0) {
     Config c;
@@ -91,7 +95,10 @@ int wsRunProject(const WsModel *m, const char *name, const char *cmd, int jobs,
   const char *langTag = langEff == WS_LANG_C ? "c" : langEff == WS_LANG_CPP ? "cpp" : "hybrid";
   char bfLabel[WS_NAME_LEN + 48];
   snprintf(bfLabel, sizeof(bfLabel), "%s:%s:%s", WORKSPACE_FILENAME, name, langTag);
-  if (wsFastStateValid(bfLabel, libOnly)) {
+  int planVerdict = wsPlanFastConsume(name, libOnly);
+  bool fastHit = planVerdict == 1;
+  if (planVerdict < 0) fastHit = wsFastStateValid(bfLabel, libOnly);
+  if (fastHit) {
     wsLogFastOk[idx] = true;
     /* Artefak cached proyek fast-hit: catat ke # Execution summary (design §2)
        hanya bila path output bisa diresolusi dari config. Tanpa blok # Execution
@@ -122,6 +129,8 @@ int wsRunProject(const WsModel *m, const char *name, const char *cmd, int jobs,
     cmdsStateSetWsProject("");
     return 0;
   }
+  /* Plan miss sudah diverifikasi scheduler; hit basi memakai fallback di atas. */
+  wsPlanNoteBuilt(name);
   profMark("ws-faststate"); /* profil: validasi fast-state per fase */
 
   if ((!configReady && !wsBuildConfig(m, idx, &c)) || !resolveCompiler(&c)) {
@@ -130,7 +139,7 @@ int wsRunProject(const WsModel *m, const char *name, const char *cmd, int jobs,
   }
   profMark("ws-resolvecc"); /* profil: resolveCompiler (probe compiler) */
 
-  /* Prune .d orphan tidak lagi di sini: pindah ke cmdsBuildPassRun sesudah
+  /* Prune .d orphan tidak lagi di sini: pindah ke pass compile sesudah
      koleksi sumber (lihat catatan di atas file ini). */
   procSetForeground(jobs > 1 ? false : c.foreground);
 
@@ -151,7 +160,14 @@ int wsRunProject(const WsModel *m, const char *name, const char *cmd, int jobs,
      bukan sebagai blok proyek di # Execution (design §5/§7). */
   if (buildReportActive() && !wsProjectArchiveOnly(p)) buildReportProject(name);
 
-  int rc = cmdsBuildPassRun(jobs, c, bfLabel, libOnly);
+  /* Dua pass eksplisit: compile lalu link. Fase library selesai di compile;
+     proyek binary menyerahkan tail ke pass link sebelum state/finalisasi. */
+  CmdsPassTail *tail = NULL;
+  int rc = cmdsBuildPassCompile(jobs, c, bfLabel, libOnly, &tail);
+  if (rc == 0 && tail) {
+    if (compileOnly) cmdsBuildPassDiscard(tail);
+    else rc = cmdsLinkPass(tail);
+  }
   if (rc != 0) cmdsStatMemoReset(); /* build gagal: output mungkin berubah sebagian */
   cmdsStateSetWsProject("");
   return rc;

@@ -8,6 +8,9 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <time.h> /* optsNowNs */
+#ifndef _WIN32
+#include <dirent.h>
+#endif
 
 /* Upsert workspace route metadata, commit once per recording. */
 bool wsRouterRecord(void) {
@@ -85,11 +88,64 @@ static long long optsNowNs(void) {
    size = jumlah entri grup. Validasi no-op single tetap FAST5; stamp ini
    menyamakan format store + observabilitas. */
 bool optsProjMetaStamp(uint64_t proj, uint64_t content) {
+  if (csStageActive() && !csStageMerging()) return optsProjMetaIntent(proj, content);
   CsStore *st = optsStoreShared();
   if (!st) st = optsStoreRepair();
   if (!st) return false;
   csProjMetaSet(st, proj, content, optsNowNs(), (long long)csCountProj(st, proj));
   return true; /* commit di-flush per fase/batas proses (item 6) */
+}
+
+/* Fase 2 router-centric: terapkan intent route/metadata yang ditulis executor
+   anak. Dipanggil induk SESUDAH csStageMergeAll, supaya optsCacheHasGroup
+   melihat grup final hasil merge. */
+bool optsRouterApplyIntents(void) {
+#ifndef _WIN32
+  if (!csStageActive()) return true;
+  DIR *d = opendir(".satria/router-stage");
+  if (!d) return true;
+  size_t tokLen = strlen(csStageToken());
+  struct dirent *de;
+  bool ok = true;
+  while ((de = readdir(d)) != NULL) {
+    if (strncmp(de->d_name, csStageToken(), tokLen) != 0 || de->d_name[tokLen] != '.')
+      continue;
+    const char *p = de->d_name + tokLen + 1;
+    if (strncmp(p, "route.", 6) != 0) continue;
+    char *end = NULL;
+    uint64_t proj = strtoull(p + 6, &end, 16);
+    if (!end || *end != '\0') continue;
+    char path[512];
+    snprintf(path, sizeof(path), ".satria/router-stage/%s", de->d_name);
+    FILE *f = fopen(path, "r");
+    if (!f) {
+      ok = false;
+      continue;
+    }
+    int libOnly = 0, lib = 0, emb = 0;
+    bool hasRoute = false, hasMeta = false;
+    unsigned long long content = 0;
+    char line[128];
+    while (fgets(line, sizeof(line), f)) {
+      if (sscanf(line, "libOnly=%d lib=%d emb=%d", &libOnly, &lib, &emb) == 3)
+        hasRoute = true;
+      else if (sscanf(line, "meta=%16llx", &content) == 1)
+        hasMeta = true;
+    }
+    fclose(f);
+    csStageSetMerging(true);
+    if (hasRoute &&
+        !optsRouterRecordProject(proj, libOnly != 0, lib != 0, emb != 0))
+      ok = false;
+    if (hasMeta && !optsProjMetaStamp(proj, (uint64_t)content)) ok = false;
+    csStageSetMerging(false);
+    remove(path);
+  }
+  closedir(d);
+  return ok;
+#else
+  return true;
+#endif
 }
 
 bool optsSourcesRouteSync(void) {

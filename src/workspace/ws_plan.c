@@ -21,11 +21,16 @@
 typedef struct {
   char name[WS_NAME_LEN];
   bool libOnly;
+  bool routeOk; /* keputusan router: route + grup cache proyek */
+  bool fastOk;  /* verdict fast-state yang dihitung scheduler */
 } WsPlanEntry;
 
 static WsPlanEntry g_plan[WS_MAX_PROJECTS];
 static int g_planN = 0;
 static int g_planEnv = -1; /* -1 belum dibaca, 0 off, 1 on */
+/* Proyek yang benar-benar membangun membuat verdict fast-state proyek lain
+   berpotensi basi. Hit berikutnya jatuh ke validasi executor (perilaku lama). */
+static bool g_planDirty = false;
 
 static bool wsPlanOn(void) {
   if (g_planEnv < 0) {
@@ -41,10 +46,14 @@ static void wsPlanMarker(int i, char *out, size_t cap) {
   snprintf(out, cap, ".satria/ws-plan-%d", i);
 }
 
+/* Fase 1 P4: scheduler menghitung route + verdict fast-state SEBELUM batch.
+   Verdict dipakai executor sehingga ia tidak memanggil router/validasi lagi.
+   Bila ada proyek yang benar-benar membangun, hit berikutnya tidak dipercaya
+   (g_planDirty) — executor memvalidasi ulang seperti jalur lama. */
 void wsPlanBegin(const WsModel *m, const WsWork *work, int n, bool libOnly) {
   g_planN = 0;
+  g_planDirty = false;
   if (!wsPlanOn()) return;
-  (void)m;
   if (n > WS_MAX_PROJECTS) n = WS_MAX_PROJECTS;
   /* Buang penanda basi dari run yang berhenti paksa: verifikasi tidak boleh
      memakai penanda eksekusi lama. */
@@ -56,8 +65,39 @@ void wsPlanBegin(const WsModel *m, const WsWork *work, int n, bool libOnly) {
   for (int i = 0; i < n; i++) {
     snprintf(g_plan[i].name, sizeof(g_plan[i].name), "%s", work[i].name);
     g_plan[i].libOnly = libOnly;
+    g_plan[i].routeOk = false;
+    g_plan[i].fastOk = false;
+    cmdsStateSetWsProject(work[i].name);
+    /* Label META identik dengan wsRunProject supaya verdict menilai state
+       fase yang sama (bahasa efektif termasuk dalam label). */
+    WsLang langEff = wsProjectLang(m, work[i].idx);
+    const char *langTag = langEff == WS_LANG_C ? "c" : langEff == WS_LANG_CPP ? "cpp" : "hybrid";
+    char bfLabel[WS_NAME_LEN + 48];
+    snprintf(bfLabel, sizeof(bfLabel), "%s:%s:%s", WORKSPACE_FILENAME, work[i].name, langTag);
+    g_plan[i].fastOk = wsFastStateValidOut(bfLabel, libOnly, &g_plan[i].routeOk);
+    cmdsStateSetWsProject("");
   }
   g_planN = n;
+}
+
+static WsPlanEntry *wsPlanFind(const char *name, bool libOnly) {
+  if (!wsPlanOn() || !name) return NULL;
+  for (int i = 0; i < g_planN; i++)
+    if (g_plan[i].libOnly == libOnly && strcmp(g_plan[i].name, name) == 0) return &g_plan[i];
+  return NULL;
+}
+
+/* 1 = hit terverifikasi scheduler, 0 = miss terverifikasi, -1 = tidak ada /
+   verdict basi -> executor memakai jalur validasi lama. */
+int wsPlanFastConsume(const char *name, bool libOnly) {
+  WsPlanEntry *e = wsPlanFind(name, libOnly);
+  if (!e) return -1;
+  if (e->fastOk && g_planDirty) return -1;
+  return e->fastOk ? 1 : 0;
+}
+
+void wsPlanNoteBuilt(const char *name) {
+  if (wsPlanFind(name, false) || wsPlanFind(name, true)) g_planDirty = true;
 }
 
 /* Dipanggil executor tepat sebelum bekerja. true = sesuai rencana (penanda
@@ -122,7 +162,15 @@ void wsPlanEnd(int rc) {
     }
   }
   const char *phase = g_plan[0].libOnly ? "library" : "binary";
-  fprintf(stderr, "satria: ws-plan: fase %s: %d rencana, %d terverifikasi, %d menyimpang\n",
-          phase, g_planN, ok, bad);
+  int fast = 0, route = 0;
+  for (int i = 0; i < g_planN; i++) {
+    if (g_plan[i].fastOk) fast++;
+    if (g_plan[i].routeOk) route++;
+  }
+  fprintf(stderr,
+          "satria: ws-plan: fase %s: %d rencana, %d terverifikasi, %d menyimpang "
+          "(route %d/%d, fast %d/%d)\n",
+          phase, g_planN, ok, bad, route, g_planN, fast, g_planN);
   g_planN = 0;
+  g_planDirty = false;
 }
