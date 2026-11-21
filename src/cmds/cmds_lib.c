@@ -26,7 +26,9 @@
 /* ==================== fase pack (proyek binary + pack.*) ==================== */
 
 /* Wrapper fase normal: library lintas-proyek disertakan pada link shared. */
-bool cmdsBuildLibrary(const Config *c, const List *srcs) { return cmdsBuildLibraryEx(c, srcs, true); }
+bool cmdsBuildLibrary(const Config *c, const List *srcs) {
+  return cmdsBuildLibraryEx2(c, srcs, true, true);
+}
 
 /*
  * Proyek binary dengan pack.*: summary build tidak lengkap tanpa status
@@ -111,6 +113,326 @@ void cmdsLibSharedPath(const Config *c, char *out, size_t n) {
   (void)c;
   snprintf(out, n, "%s/lib%s.so", c->outLibDir, c->outLibName);
 #endif
+}
+
+typedef struct { const char *p; int i; } LinkDedupKey;
+static int linkDedupCmp(const void *a, const void *b) {
+  const LinkDedupKey *x = a, *y = b;
+  int c = strcmp(x->p, y->p);
+  if (c) return c;
+  return (x->i > y->i) - (x->i < y->i);
+}
+
+/*
+ * Tulis satu header anggota ar (60 byte, format Unix). Nama anggota sengaja
+ * pendek dan unik: arsip ini privat untuk linker, jadi nama path asli tidak
+ * dibutuhkan dan batas 16 byte klasik tidak jadi masalah.
+ */
+static bool arMemberHeader(FILE *f, const char *name, long long size) {
+  char hdr[64];
+  int n = snprintf(hdr, sizeof(hdr), "%-16.16s%-12lld%-6d%-6d%-8o%-10lld`\n",
+                   name, 0LL, 0, 0, 0100644, size);
+  if (n != 60) return false;
+  return fwrite(hdr, 1, 60, f) == 60;
+}
+
+/* Salin tepat `n` byte dari satu FILE ke FILE lain lewat buffer bersama. */
+static bool streamCopy(FILE *in, FILE *out, long long n, char *buf, size_t cap) {
+  while (n > 0) {
+    size_t want = n > (long long)cap ? cap : (size_t)n;
+    size_t got = fread(buf, 1, want, in);
+    if (got == 0 || fwrite(buf, 1, got, out) != got) return false;
+    n -= (long long)got;
+  }
+  return true;
+}
+
+/* Verifikasi cepat: format ar dan jumlah anggota cocok. Dipakai sebelum
+   memakai ulang arsip tanpa menulis, supaya arsip rusak (disk/manual) tidak
+   langsung menghasilkan link gagal. */
+static bool arArchiveLooksValid(const char *path, int members) {
+  void *map = NULL;
+  size_t size = 0;
+  if (!fsMapRead(path, &map, &size) || size < 8 || memcmp(map, "!<arch>\n", 8) != 0) {
+    if (map && size > 0) fsMapClose(map, size);
+    return false;
+  }
+  const unsigned char *base = map;
+  const unsigned char *p = base + 8, *end = base + size;
+  bool ok = true;
+  for (int i = 0; i < members; i++) {
+    if ((size_t)(end - p) < 60 || memcmp(p + 58, "`\n", 2) != 0) {
+      ok = false;
+      break;
+    }
+    char szbuf[11];
+    memcpy(szbuf, p + 48, 10);
+    szbuf[10] = '\0';
+    long long sz = strtoll(szbuf, NULL, 10);
+    if (sz < 0) {
+      ok = false;
+      break;
+    }
+    size_t next = (size_t)(p - base) + 60 + (size_t)sz + ((size_t)sz & 1);
+    if (next > size) {
+      ok = false;
+      break;
+    }
+    p = base + next;
+  }
+  if (p != end) ok = false;
+  fsMapClose(map, size);
+  return ok;
+}
+
+/* Tulis satu anggota ar baru dari object (header + isi + padding). */
+static bool arWriteObject(FILE *out, const char *name, const char *obj, long long size,
+                          char *buf, size_t cap) {
+  if (!arMemberHeader(out, name, size)) return false;
+  FILE *in = fopen(obj, "rb");
+  if (!in) return false;
+  bool ok = streamCopy(in, out, size, buf, cap);
+  fclose(in);
+  if (ok && (size & 1) && fputc('\n', out) == EOF) ok = false;
+  return ok;
+}
+
+/*
+ * Bangun arsip link privat dari object proyek. Tidak memakai `ar` eksternal:
+ * pada proot `ar rcs` 2.000 object ~5-19 dtk karena setiap object di-stat dan
+ * arsip ditulis ulang penuh. Di sini object dibaca sekali dan ditulis sebagai
+ * anggota ar polos (tanpa symbol table — linker selalu memakai
+ * --whole-archive sehingga semua anggota pasti dimuat; ini sudah diuji
+ * dengan `ar rcS`). Urutan object dipertahankan agar urutan constructor sama
+ * dengan link object langsung.
+ *
+ * Bila daftar object sama dengan run sebelumnya (manifest <out>.list), hanya
+ * anggota yang object-nya lebih baru dari arsip yang ditulis ulang; anggota
+ * lain disalin dari arsip lama. Ini menghindari membuka ribuan object pada
+ * setiap editrel. Arsip ditulis ke <out>.tmp lalu di-rename, sehingga linker
+ * tidak pernah melihat arsip setengah jadi. Gagal -> false dan pemanggil
+ * jatuh kembali ke daftar object langsung.
+ */
+bool cmdsLinkArchiveBuild(const Config *c, const List *srcs, const char *outPath) {
+  List objs = {0};
+  char obj[SATRIA_MAX_PATH];
+  for (int i = 0; i < srcs->count; i++) {
+    if (excludedSource(c, srcs->items[i])) continue;
+    if (!objectPathFor(c, srcs->items[i], obj, sizeof(obj))) continue;
+    listAdd(&objs, obj);
+  }
+
+  /* Dedup path (source bisa tumpang tindih) tanpa mengubah urutan asli. */
+  if (objs.count > 1) {
+    LinkDedupKey *dk = malloc(sizeof(*dk) * (size_t)objs.count);
+    bool *drop = calloc((size_t)objs.count, sizeof(bool));
+    if (!dk || !drop) {
+      free(dk);
+      free(drop);
+      listFree(&objs);
+      return false;
+    }
+    for (int i = 0; i < objs.count; i++) {
+      dk[i].p = objs.items[i];
+      dk[i].i = i;
+    }
+    qsort(dk, (size_t)objs.count, sizeof(*dk), linkDedupCmp);
+    for (int i = 1; i < objs.count; i++)
+      if (strcmp(dk[i - 1].p, dk[i].p) == 0) drop[dk[i].i] = true;
+    List uniq = {0};
+    for (int i = 0; i < objs.count; i++)
+      if (!drop[i]) listAdd(&uniq, objs.items[i]);
+    listFree(&objs);
+    objs = uniq;
+    free(dk);
+    free(drop);
+  }
+
+  if (objs.count == 0) {
+    listFree(&objs);
+    return false;
+  }
+
+  char tmp[SATRIA_MAX_PATH * 2 + 8];
+  char listPath[SATRIA_MAX_PATH * 2 + 8];
+  char listTmp[SATRIA_MAX_PATH * 2 + 12];
+  int tn = snprintf(tmp, sizeof(tmp), "%s.tmp", outPath);
+  int ln = snprintf(listPath, sizeof(listPath), "%s.list", outPath);
+  int lt = snprintf(listTmp, sizeof(listTmp), "%s.list.tmp", outPath);
+  if (tn < 0 || (size_t)tn >= sizeof(tmp) || ln < 0 || (size_t)ln >= sizeof(listPath) ||
+      lt < 0 || (size_t)lt >= sizeof(listTmp)) {
+    listFree(&objs);
+    return false;
+  }
+
+  /* Daftar object harus sama persis dengan manifest agar indeks anggota tidak
+     bergeser. Bila manifest hilang/berbeda -> bangun penuh. */
+  bool sameSet = false;
+  FILE *lf = fopen(listPath, "rb");
+  if (lf) {
+    sameSet = true;
+    char line[SATRIA_MAX_PATH * 2];
+    for (int i = 0; i < objs.count; i++) {
+      if (!fgets(line, sizeof(line), lf)) {
+        sameSet = false;
+        break;
+      }
+      size_t l = strlen(line);
+      while (l && (line[l - 1] == '\n' || line[l - 1] == '\r')) line[--l] = '\0';
+      if (strcmp(line, objs.items[i]) != 0) {
+        sameSet = false;
+        break;
+      }
+    }
+    if (sameSet && fgetc(lf) != EOF) sameSet = false;
+    fclose(lf);
+  }
+
+  long long *sizes = calloc((size_t)objs.count, sizeof(long long));
+  bool *changed = calloc((size_t)objs.count, sizeof(bool));
+  char *buf = malloc(64 * 1024);
+  if (!sizes || !changed || !buf) {
+    free(sizes);
+    free(changed);
+    free(buf);
+    listFree(&objs);
+    return false;
+  }
+
+  int changedCount = 0;
+  int64_t archiveM = sameSet ? fsMTimeNs(outPath) : -1;
+  for (int i = 0; i < objs.count; i++) {
+    int64_t m = -1;
+    sizes[i] = 0;
+    if (!memoStampNsSize(objs.items[i], &m, &sizes[i]) || m < 0 || sizes[i] < 0) {
+      sizes[i] = -1;
+      changed[i] = true;
+      changedCount++;
+      continue;
+    }
+    if (archiveM >= 0 && m > archiveM) {
+      changed[i] = true;
+      changedCount++;
+    }
+  }
+
+  if (sameSet && archiveM >= 0 && changedCount == 0 &&
+      arArchiveLooksValid(outPath, objs.count)) {
+    /* Semua object sudah tercakup arsip: tidak perlu menulis apa pun. */
+    free(sizes);
+    free(changed);
+    free(buf);
+    listFree(&objs);
+    return true;
+  }
+
+  /* Jalur inkremental: mmap arsip lama, salin blok yang tidak berubah dan
+     tulis ulang hanya anggota berubah. Satu fwrite besar untuk rentang utuh
+     menghindari ribuan fread/fwrite anggota (mahal di proot). */
+  if (sameSet && archiveM >= 0 && changedCount > 0) {
+    void *map = NULL;
+    size_t mapSize = 0;
+    bool ok = fsMapRead(outPath, &map, &mapSize) && mapSize >= 8 &&
+              memcmp(map, "!<arch>\n", 8) == 0;
+    FILE *out = ok ? fopen(tmp, "wb") : NULL;
+    if (out) ok = fwrite("!<arch>\n", 1, 8, out) == 8;
+    size_t runStart = 8;
+    const unsigned char *base = ok ? (const unsigned char *)map : NULL;
+    const unsigned char *p = base ? base + 8 : NULL;
+    const unsigned char *end = base ? base + mapSize : NULL;
+    for (int i = 0; ok && i < objs.count; i++) {
+      if ((size_t)(end - p) < 60 || memcmp(p + 58, "`\n", 2) != 0) {
+        ok = false;
+        break;
+      }
+      char szbuf[11];
+      memcpy(szbuf, p + 48, 10);
+      szbuf[10] = '\0';
+      long long oldSize = strtoll(szbuf, NULL, 10);
+      if (oldSize < 0 || (changed[i] && sizes[i] < 0)) {
+        ok = false;
+        break;
+      }
+      size_t memberStart = (size_t)(p - base);
+      size_t memberEnd = memberStart + 60 + (size_t)oldSize + ((size_t)oldSize & 1);
+      if (memberEnd > mapSize) {
+        ok = false;
+        break;
+      }
+      if (changed[i]) {
+        size_t plen = memberStart - runStart;
+        if (plen && !fwrite(base + runStart, 1, plen, out)) {
+          ok = false;
+          break;
+        }
+        char name[16];
+        snprintf(name, sizeof(name), "%05d.o", i);
+        if (!arWriteObject(out, name, objs.items[i], sizes[i], buf, 64 * 1024)) {
+          ok = false;
+          break;
+        }
+        runStart = memberEnd;
+      }
+      p = base + memberEnd;
+    }
+    /* Anggota berlebih = arsip/manifest tidak sinkron; paksa bangun penuh. */
+    if (ok && p != end) ok = false;
+    if (ok) {
+      size_t tail = mapSize - runStart;
+      if (tail && !fwrite(base + runStart, 1, tail, out)) ok = false;
+    }
+    if (out && fclose(out) != 0) ok = false;
+    if (map && mapSize > 0) fsMapClose(map, mapSize);
+    if (ok && rename(tmp, outPath) == 0) {
+      free(sizes);
+      free(changed);
+      free(buf);
+      listFree(&objs);
+      return true;
+    }
+    remove(tmp);
+  }
+
+  /* Bangun penuh (arsip pertama, set berubah, atau arsip lama rusak). */
+  FILE *f = fopen(tmp, "wb");
+  bool ok = f != NULL;
+  if (ok) ok = fwrite("!<arch>\n", 1, 8, f) == 8;
+  char name[16];
+  for (int i = 0; ok && i < objs.count; i++) {
+    if (sizes[i] < 0) {
+      int64_t m = -1;
+      long long sz = 0;
+      if (!memoStampNsSize(objs.items[i], &m, &sz) || m < 0 || sz < 0) {
+        ok = false;
+        break;
+      }
+      sizes[i] = sz;
+    }
+    snprintf(name, sizeof(name), "%05d.o", i);
+    ok = arWriteObject(f, name, objs.items[i], sizes[i], buf, 64 * 1024);
+  }
+  if (f && fclose(f) != 0) ok = false;
+  if (ok && rename(tmp, outPath) != 0) ok = false;
+  if (!ok) remove(tmp);
+
+  /* Manifest hanya ditulis setelah arsip valid. */
+  if (ok) {
+    FILE *mf = fopen(listTmp, "wb");
+    bool mok = mf != NULL;
+    for (int i = 0; mok && i < objs.count; i++)
+      mok = fprintf(mf, "%s\n", objs.items[i]) > 0;
+    if (mf && fclose(mf) != 0) mok = false;
+    if (mok) mok = rename(listTmp, listPath) == 0;
+    if (!mok) remove(listTmp);
+    /* Gagal tulis manifest bukan alasan membatalkan link: run berikutnya hanya
+       akan membangun arsip penuh sekali lagi. */
+  }
+
+  free(sizes);
+  free(changed);
+  free(buf);
+  listFree(&objs);
+  return ok;
 }
 
 /*
@@ -608,6 +930,11 @@ void cmdsEmitCapture(ProcHandle *h, bool unitOk) {
  * tetap disertakan.
  */
 bool cmdsBuildLibraryEx(const Config *c, const List *srcs, bool linkPathLibs) {
+  return cmdsBuildLibraryEx2(c, srcs, linkPathLibs, true);
+}
+
+bool cmdsBuildLibraryEx2(const Config *c, const List *srcs, bool linkPathLibs,
+                         bool sourceSetChanged) {
   if (!c->libRequested) return true;
 
   /* Jalur no-op: hindari membangun daftar object, alokasi string, dan mkdir
@@ -685,6 +1012,38 @@ bool cmdsBuildLibraryEx(const Config *c, const List *srcs, bool linkPathLibs) {
     return false;
   }
 
+  /* Update arsip statis inkremental: hanya object yang lebih baru dari arsip
+     yang diserahkan ke `ar rcs`. `ar rcs` penuh membaca/menulis ulang semua
+     anggota — di proot 5001 object = ~75 dtk; update satu object ~16 dtk.
+     Aman hanya bila set sumber tidak berubah dan tidak ada tabrakan basename:
+     `ar r` tidak menghapus anggota basi, dan object stage hasil mangle punya
+     nama anggota berbeda. Selain itu arsip dibangun ulang penuh. */
+  bool incrementalStatic = false;
+  List changedObjs = {0};
+  char staticPath[SATRIA_MAX_PATH * 2] = {0};
+  if (c->libStatic) cmdsLibStaticPath(c, staticPath, sizeof(staticPath));
+  if (c->libStatic && !staticUpToDate && !sourceSetChanged &&
+      !compilerIsMSVC(c) && !stageDir[0] && fsFileExists(staticPath)) {
+    int64_t archiveM = fsMTimeNs(staticPath);
+    if (archiveM >= 0) {
+      int missing = 0;
+      for (int i = 0; i < objs.count; i++) {
+        int64_t om = -1;
+        long long osz = 0;
+        if (!memoStampNsSize(objs.items[i], &om, &osz) || om < 0) {
+          missing++;
+          continue;
+        }
+        if (om > archiveM) listAdd(&changedObjs, objs.items[i]);
+      }
+      /* Semua object berubah = rebuild penuh; tidak ada yang berubah berarti
+         arsip seharusnya sudah up-to-date (atau ada kondisi tak terduga) —
+         jalur penuh yang aman. */
+      incrementalStatic = missing == 0 && changedObjs.count > 0 &&
+                          changedObjs.count < objs.count;
+    }
+  }
+
   mkdirs(c->outLibDir);
 
   bool staticDone = true, sharedDone = true;
@@ -705,21 +1064,23 @@ bool cmdsBuildLibraryEx(const Config *c, const List *srcs, bool linkPathLibs) {
         !archiveMembersMatch(c, target, &objs))
       staticUpToDate = false;
     if (!staticUpToDate) {
+      const List *inputs = incrementalStatic ? &changedObjs : &objs;
       size_t n = 64;
-      for (int i = 0; i < objs.count; i++)
-        n += strlen(objs.items[i]) + 3;
+      for (int i = 0; i < inputs->count; i++)
+        n += strlen(inputs->items[i]) + 3;
       char *cmd = malloc(n);
       if (compilerIsMSVC(c))
         snprintf(cmd, n, "lib /nologo /OUT:%s", target);
       else
         snprintf(cmd, n, "ar rcs %s", target);
-      for (int i = 0; i < objs.count; i++) {
+      for (int i = 0; i < inputs->count; i++) {
         strcat(cmd, " ");
-        strcat(cmd, objs.items[i]);
+        strcat(cmd, inputs->items[i]);
       }
       /* Buang arsip lama agar isinya PERSIS objs: `ar rcs` hanya menimpa
-         anggota bernama sama dan tidak menghapus anggota basi. */
-      if (fsFileExists(target)) remove(target);
+         anggota bernama sama dan tidak menghapus anggota basi. Pada update
+         inkremental arsip dipertahankan: posisi anggota lama tidak berubah. */
+      if (!incrementalStatic && fsFileExists(target)) remove(target);
       staticCmd = cmd;
       staticSlot = nph;
       if (!procStartCapture(staticCmd, &ph[nph])) {
@@ -733,12 +1094,42 @@ bool cmdsBuildLibraryEx(const Config *c, const List *srcs, bool linkPathLibs) {
     }
   }
 
+  /* Shared library dari arsip statis: satu file untuk dibaca linker, bukan
+     ribuan object. Diukur pada 5001 object/proot: 58,8 dtk -> 4,9 dtk.
+     Hanya dipakai bila arsip statis pasti ada dan tidak dibangun ulang penuh
+     (up-to-date atau baru di-update inkremental). Bila arsip sedang dibangun
+     inkremental, tunggu dulu; bila gagal, kembali ke object langsung agar
+     kegagalan ar tidak menyeret link .so. */
+  bool sharedFromArchive = false;
+  if (c->libShared && c->libStatic && !compilerIsMSVC(c) && !sourceSetChanged &&
+      (staticUpToDate || incrementalStatic)) {
+    if (staticSlot >= 0) {
+      ProcHandle *fin = NULL;
+      while (!ph[staticSlot].finished) {
+        if (procWaitAny(&ph[staticSlot], 1, &fin) < 0) break;
+      }
+      if (!ph[staticSlot].finished) procStopAll(&ph[staticSlot], 1);
+      staticDone = ph[staticSlot].finished && ph[staticSlot].ok;
+      cmdsEmitCapture(&ph[staticSlot], staticDone);
+      if (!staticDone) {
+        fprintf(stderr, "satria: static library command: %s\n", staticCmd);
+        fprintf(stderr, "satria: static library build failed\n");
+      }
+      staticSlot = -1; /* output sudah dikonsumsi di sini */
+    }
+    sharedFromArchive = staticDone && fsFileExists(staticPath);
+  }
+
   if (c->libShared) {
     cmdsLibSharedPath(c, target, sizeof(target));
     if (!sharedUpToDate) {
-      size_t n = strlen(c->cc) + strlen(target) + 96;
-      for (int i = 0; i < objs.count; i++)
-        n += strlen(objs.items[i]) + 3;
+      size_t n = strlen(c->cc) + strlen(target) + 160;
+      if (sharedFromArchive) {
+        n += strlen(staticPath) + 48;
+      } else {
+        for (int i = 0; i < objs.count; i++)
+          n += strlen(objs.items[i]) + 3;
+      }
       for (int i = 0; i < c->libraries.count; i++)
         n += strlen(c->libraries.items[i]) + 8;
       char *cmd = malloc(n);
@@ -760,9 +1151,23 @@ bool cmdsBuildLibraryEx(const Config *c, const List *srcs, bool linkPathLibs) {
         snprintf(cmd, n, c->langCpp && !compilerIsCppDriver(c) ? "%s -shared -lstdc++"
                                                                : "%s -shared",
                  c->cc);
-        for (int i = 0; i < objs.count; i++) {
-          strcat(cmd, " ");
-          strcat(cmd, objs.items[i]);
+        if (sharedFromArchive) {
+          /* Semua anggota arsip ikut, semantik sama dengan mendaftar seluruh
+             object langsung. macOS memakai -force_load; GNU/ELF memakai
+             --whole-archive. */
+#ifdef __APPLE__
+          strcat(cmd, " -Wl,-force_load,");
+          strcat(cmd, staticPath);
+#else
+          strcat(cmd, " -Wl,--whole-archive ");
+          strcat(cmd, staticPath);
+          strcat(cmd, " -Wl,--no-whole-archive");
+#endif
+        } else {
+          for (int i = 0; i < objs.count; i++) {
+            strcat(cmd, " ");
+            strcat(cmd, objs.items[i]);
+          }
         }
         strcat(cmd, " -o ");
         strcat(cmd, target);
@@ -854,6 +1259,7 @@ bool cmdsBuildLibraryEx(const Config *c, const List *srcs, bool linkPathLibs) {
   if (stageDir[0]) fsRemoveTree(stageDir);
   free(staticCmd);
   free(sharedCmd);
+  listFree(&changedObjs);
   listFree(&objs);
   return staticDone && sharedDone;
 }
