@@ -145,6 +145,21 @@ bool fsStampNsSize(const char *path, int64_t *mtimeNs, long long *size) {
   return true;
 }
 
+bool fsStampNsSizeKind(const char *path, int64_t *mtimeNs, long long *size,
+                       bool *isDir) {
+  WIN32_FILE_ATTRIBUTE_DATA fad;
+  if (!statInfo(path, &fad)) return false;
+  int64_t ns = filetimeToNsSinceEpoch(&fad.ftLastWriteTime);
+  if (ns < 0) return false;
+  ULARGE_INTEGER u;
+  u.LowPart = fad.nFileSizeLow;
+  u.HighPart = fad.nFileSizeHigh;
+  *mtimeNs = ns;
+  *size = (long long)u.QuadPart;
+  if (isDir) *isDir = (fad.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+  return true;
+}
+
 void fsMakeDir(const char *path) {
   char tmp[SATRIA_MAX_PATH * 2];
   toBackslash(tmp, sizeof(tmp), path);
@@ -359,6 +374,20 @@ bool fsStampNsSize(const char *path, int64_t *mtimeNs, long long *size) {
   *mtimeNs = (int64_t)st.st_mtim.tv_sec * 1000000000LL + st.st_mtim.tv_nsec;
 #endif
   *size = (long long)st.st_size;
+  return true;
+}
+
+bool fsStampNsSizeKind(const char *path, int64_t *mtimeNs, long long *size,
+                       bool *isDir) {
+  struct stat st;
+  if (stat(path, &st) != 0) return false;
+#if defined(__APPLE__)
+  *mtimeNs = (int64_t)st.st_mtimespec.tv_sec * 1000000000LL + st.st_mtimespec.tv_nsec;
+#else
+  *mtimeNs = (int64_t)st.st_mtim.tv_sec * 1000000000LL + st.st_mtim.tv_nsec;
+#endif
+  *size = (long long)st.st_size;
+  if (isDir) *isDir = S_ISDIR(st.st_mode);
   return true;
 }
 

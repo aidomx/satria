@@ -157,6 +157,10 @@ bool fsStatDirMTimeNs(const char *path, bool *isDir, int64_t *mtimeNs);
 long long fsFileSize(const char *path);
 /* mtime ns + size dalam SATU stat (dipakai fastState validasi massal). */
 bool fsStampNsSize(const char *path, int64_t *mtimeNs, long long *size);
+/* Varian satu stat: sekaligus isDir. Dipakai stamping fast-state agar file
+   tidak di-stat dua kali (fsStampNsSize + fsDirExists). */
+bool fsStampNsSizeKind(const char *path, int64_t *mtimeNs, long long *size,
+                       bool *isDir);
 bool fsNewerThan(const char *a, const char *b);
 bool fsRemoveFile(const char *path);
 /* Ganti `to` dengan `from` (atomik; Windows: MoveFileEx
