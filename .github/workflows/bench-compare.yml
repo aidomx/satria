@@ -1,13 +1,15 @@
 name: Single-Project Benchmark
 
+# SEMENTARA (cabang eksperimen): versi file ini di cabang exp hanya menjalankan
+# profil fase editrel di runner CI. Jangan digabung ke main.
 on:
   workflow_dispatch:
     inputs:
       tools:
-        description: 'Comma-separated tools (ninja,make,bear,satria,cmake,meson,xmake). tup belum didukung.'
+        description: 'Comma-separated tools'
         type: string
         required: true
-        default: 'ninja,cmake,satria'
+        default: 'satria'
       sources:
         description: 'Number of generated C sources'
         type: number
@@ -24,7 +26,7 @@ on:
         required: true
         default: 5
       warmup:
-        description: 'Prime each tool once before measuring (untimed, built into satria bench)'
+        description: 'Prime each tool once before measuring'
         type: boolean
         default: true
       artifacts:
@@ -32,109 +34,49 @@ on:
         type: boolean
         default: true
       strace:
-        description: 'Add no-op syscall profiling (strace -c); installs strace'
+        description: 'Add no-op syscall profiling'
         type: boolean
         default: false
-  # Tag rilis (v*) yang di-push pengguna memicu uji benchmark otomatis —
-  # event `release: published` yang dibuat GITHUB_TOKEN di release.yml
-  # TIDAK memicu workflow lain (GitHub memblokir rekursi).
-  push:
-    tags:
-      - "v*"
 
 permissions:
   contents: read
 
 jobs:
-  compare:
+  profile:
     runs-on: ubuntu-24.04
-    timeout-minutes: 180
-    env:
-      # Fallback untuk trigger push tag (input workflow kosong di event itu).
-      # Boolean TIDAK boleh `x || default`: false ikut falsy, jadi pakai
-      # perbandingan eksplisit.
-      BENCH_TOOLS: ${{ inputs.tools || 'ninja,cmake,satria' }}
-      BENCH_SOURCES: ${{ inputs.sources || 150 }}
-      BENCH_HEADERS: ${{ inputs.headers || 30 }}
-      BENCH_REPEATS: ${{ inputs.repeats || 5 }}
-      BENCH_WARMUP: ${{ inputs.warmup == false && 'false' || 'true' }}
-      BENCH_ARTIFACTS: ${{ inputs.artifacts == false && 'false' || 'true' }}
-      BENCH_STRACE: ${{ inputs.strace == true && 'true' || 'false' }}
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-      - name: Install benchmark dependencies
-        shell: bash
+
+      - name: Bootstrap
+        run: ./install.sh --dev
+
+      - name: Generate and prime project
         run: |
-          set -euo pipefail
-          # Dasar: build-essential (gcc, ar), ninja-build, make (gcc-floor).
-          pkgs=(build-essential ninja-build make)
-          want_xmake=0
-          IFS=',' read -r -a requested <<< "$BENCH_TOOLS"
-          for raw in "${requested[@]}"; do
-            t="${raw//[[:space:]]/}"
-            case "$t" in
-              ""|ninja|make|satria) ;;
-              cmake)  pkgs+=(cmake) ;;
-              meson)  pkgs+=(meson) ;;
-              bear)   pkgs+=(bear) ;;
-              xmake)  want_xmake=1 ;;
-              tup)
-                echo "::error::tool 'tup' belum didukung oleh workflow ini; hapus dari input tools" >&2
-                exit 1 ;;
-              *)
-                echo "::error::tool tidak dikenal: $t" >&2
-                exit 1 ;;
-            esac
+          rm -rf /tmp/pb && mkdir -p /tmp/pb
+          ./bin/satria bench -f tools=satria -f source=${{ inputs.sources }} \
+            -f header=${{ inputs.headers }} -f runs=1 -f scenario=editrel \
+            -f warmup=true -f artifact=true -f keep=true -f out=/tmp/pb/bench.tmp
+
+      - name: Profile incremental relink
+        env:
+          SATRIA_PROFILE: "1"
+        run: |
+          set -e
+          W=/tmp/pb/bench.tmp/satria
+          cd "$W"
+          for i in 1 2 3 4 5; do
+            printf '\nint probe_%d(void){return %d;}\n' "$i" "$i" >> src/t1.c
+            /usr/bin/time -f "wall=%e user=%U sys=%S" \
+              "$GITHUB_WORKSPACE/bin/satria" >/tmp/pb/out$i.log 2>/tmp/pb/err$i.log
+            echo "=== run $i"
+            grep -E "^wall=" /tmp/pb/err$i.log || true
+            sed -n '/> Profile/,$p' /tmp/pb/err$i.log | head -28
           done
-          if [[ "$BENCH_STRACE" == true ]]; then
-            pkgs+=(strace)
-          fi
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends "${pkgs[@]}"
-          if [[ "$want_xmake" == 1 ]]; then
-            curl -fsSL https://xmake.io/shget.text | bash
-            echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-          fi
-          # Verifikasi: setiap tool yang diminta harus benar-benar bisa dieksekusi.
-          missing=0
-          for raw in "${requested[@]}"; do
-            t="${raw//[[:space:]]/}"
-            case "$t" in
-              ""|satria) continue ;;
-            esac
-            if ! command -v "$t" >/dev/null 2>&1; then
-              echo "::error::tool '$t' tidak ditemukan setelah instalasi" >&2
-              missing=1
-            fi
-          done
-          if [[ "$BENCH_STRACE" == true ]] && ! command -v strace >/dev/null 2>&1; then
-            echo "::error::strace tidak ditemukan setelah instalasi" >&2
-            missing=1
-          fi
-          exit "$missing"
-      - name: Bootstrap Satria
-        run: |
-          ./install.sh --dev
-          test -x bin/satria
-      # Benchmark berjalan penuh di C: `satria bench` (src/bench). Warmup/
-      # audit/rolling built-in; tidak ada lagi pemanggilan bench/*.sh.
-      - name: Measure (bin/satria bench)
-        shell: bash
-        run: |
-          set -euo pipefail
-          args=(-f "tools=$BENCH_TOOLS" -f "source=$BENCH_SOURCES" -f "header=$BENCH_HEADERS"
-                -f "runs=$BENCH_REPEATS" -f "warmup=$BENCH_WARMUP" -f "trace=$BENCH_STRACE")
-          if [[ "$BENCH_ARTIFACTS" == true ]]; then
-            mkdir -p benchmark-results/compare
-            bin/satria bench "${args[@]}" -f artifact=true -f out="$PWD/benchmark-results/compare" \
-              2>&1 | tee benchmark-results/compare.log
-          else
-            bin/satria bench "${args[@]}" -f artifact=false -f out="$RUNNER_TEMP/satria-compare"
-          fi
-      - name: Upload artifacts
-        if: ${{ always() && env.BENCH_ARTIFACTS == 'true' }}
+
+      - name: Upload profile logs
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: compare-${{ env.BENCH_SOURCES }}-r${{ env.BENCH_REPEATS }}
-          path: benchmark-results/
-          if-no-files-found: warn
+          name: editrel-profile
+          path: /tmp/pb
