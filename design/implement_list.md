@@ -9,6 +9,9 @@ aktif (`src/`). Rujukan bukti berupa berkas source dan tes yang benar-benar ada.
   (`* discovery / resolving / indexing / preparing`), `startup.state`.
   Bukti: `src/startup.c`, `src/workspace/ws_startup.c`, `src/background.c`;
   rekaman startup diuji `tests/unit/common/background.sh`.
+- No-op skala besar: output `build/` lewat `readdir` per direktori dan stat
+  source paralel (maks. 8 child POSIX) di `src/workspace/ws_cache_noop.c`.
+  Pada workspace 5000 source/proyek di PRoot, no-op ~15,1 -> ~2,6 dtk.
 - [startup-audit.md](startup-audit.md) — audit trail verifikasi startup (selesai;
   temuan sudah masuk desain/source).
 - [background.md](background.md) — `background = true`: spawn (§2), `watch`
@@ -16,9 +19,11 @@ aktif (`src/`). Rujukan bukti berupa berkas source dan tes yang benar-benar ada.
   Bukti: `src/background.c`; `tests/unit/common/background.sh` (miniws 39/0).
 - [build_report.md](build_report.md) — format `# Execution`/`# Summary` +
   fallback no-op lama + `report.blob` replay; banner `* Release :` dihapus
-  (off-spec). Bukti: `src/log/report_blob.c`, `src/log/build_report.c`,
-  `src/workspace/ws_exec.c`, `src/cmds/cmds_pass.c`; 11 tes teks keluaran
-  disesuaikan.
+  (off-spec); header menampilkan `Cores` (core aktif + jobs) dan output
+  paralel paksa `SATRIA_WS_PAR` dicetak per proyek selesai. Bukti:
+  `src/log/report_blob.c`, `src/log/build_report.c`,
+  `src/workspace/ws_exec.c`, `src/cmds/cmds_pass.c`,
+  `src/runners/parallel.c`; 11 tes teks keluaran disesuaikan.
 - [workspace.md](workspace.md) — `WsBuildfile` (nama resmi tanpa ekstensi;
   `Buildfile.ws`/`Buildfile.workspace` masih dibaca dengan peringatan
   deprecasi), build selektif `-w <nama>`, `--with-cdeps` (closure cdeps
@@ -45,8 +50,22 @@ aktif (`src/`). Rujukan bukti berupa berkas source dan tes yang benar-benar ada.
   memakai basename object, sehingga object dengan basename sama di-staging
   (`<tag>_<nama>.o`) sebelum `ar rcs`; arsip lama dibuang saat rebuild dan isi
   arsip diverifikasi (`ar t`) ketika staging terjadi, sehingga arsip dobel/basi
-  dari build lama menyembuhkan diri. Bukti: `src/cmds/cmds_lib.c`
-  (`objsStageCollisions`, `objMemberName`, `archiveMembersMatch`).
+  dari build lama menyembuhkan diri. Update inkremental (`ar rcs` hanya object
+  yang berubah) dipakai bila set sumber tetap; link `.so` memakai arsip statis
+  (`--whole-archive`/`-force_load`) agar tidak membuka ribuan object langsung.
+  Bukti: `src/cmds/cmds_lib.c` (`objsStageCollisions`, `objMemberName`,
+  `archiveMembersMatch`, `cmdsBuildLibraryEx2`); profil 5001 object/proot:
+  `ar` 74,8 s -> 16,5 s, `.so` 58,8 s -> 4,9 s.
+- [startup.md](startup.md) § Optimasi editrel single-project — **arsip link privat single-project (POSIX/ELF)**: bila 
+  executable memakai >= 512 source tanpa library pengguna, object dikemas ke
+  `build/.satria-link.a` dan linker memakai `--whole-archive`. Arsip ditulis
+  tanpa `ar` eksternal (header ar polos, tanpa symbol table), dengan manifest
+  `.list` dan update inkremental: arsip lama di-mmap, hanya anggota yang
+  object-nya lebih baru dari arsip yang ditulis ulang; set sumber berubah/arsip
+  rusak -> bangun penuh. Gagal menulis arsip -> fallback daftar object langsung.
+  Bukti: `cmdsLinkArchiveBuild` di `src/cmds/cmds_lib.c`, dipanggil dari
+  `src/cmds/cmds_passfinish.c`; editrel 2.000 source/proot: link ~9,5 -> ~2,1
+  dtk, tulis arsip inkremental ~40 ms, median total 13,1 -> 6,9 dtk.
 - [embedded.md](embedded.md) — codegen sebagai satu-satunya mekanisme
   (`embedded.c/.h`, `getEmbed`, tabel), makro kompat `EMBED_*`, no-op
   content-based. Bukti: `src/embed*.c`; tes `embed_getembed` (common,

@@ -77,7 +77,7 @@ Desain ini dicocokkan dengan source `v0.2.4` sebelum implementasi penuh. Sebagia
 | `packRun()` / `packRunAt()` hanya mengembalikan boolean | Sesuai | `pack/pack.c:203-209` |
 | Runner paralel memakai `fork()` dan pola stage | Sesuai, dan pola sudah ada | `runners/parallel.c:188-246` |
 | Baris `Build with`, `Embedded:`, `Library :`, `Package :`, `Checksum:` | Sesuai | `cmds_pass.c:201,203,315,331`; `cmds_lib.c`; `pack.c:185-284` |
-| `cmdBuildEx`, `cmdsBuildPassRun`, `cmdsBuildPassFinish` | Sesuai | `cmds_build.c`, `cmds_pass.c`, `cmds_passfinish.c` |
+| `cmdBuildEx`, `cmdsBuildPassCompile`, `cmdsLinkPass`, `cmdsBuildPassFinish` | Sesuai | `cmds_build.c`, `cmds_pass.c`, `cmds_passfinish.c` |
 
 ### Celah yang dimasukkan ke desain
 
@@ -123,6 +123,7 @@ startup
 Build Report
 ------------
 Toolchain   : gcc -Wall -Wextra -MMD -MP -std=gnu11
+Cores       : 8 cores (jobs 8)
 CompDB      : compile_commands.json refreshed
 Fingerprint : state build tidak terbaca; semua object dikompilasi ulang
 
@@ -157,6 +158,7 @@ startup
 Build Report
 ------------
 Toolchain : gcc -Wall -Wextra -MMD -MP -std=gnu11
+Cores     : 8 cores (jobs 8)
 CompDB    : compile_commands.json refreshed
 
 # Archive
@@ -217,7 +219,7 @@ Status `built`/`cached`/`linked` hanya digunakan pada report cold/incremental ya
 
 Urutan bagian:
 
-1. Header (`Toolchain`, `CompDB`)
+1. Header (`Toolchain`, `Cores`, `CompDB`)
 2. `Archive`
 3. `Execution`
 4. `Execution summary`
@@ -234,6 +236,7 @@ Header boleh memuat baris non-kunci `! <pesan>` (setelah `Fingerprint` bila ada)
 Build Report
 ------------
 Toolchain   : gcc -Wall -Wextra -MMD -MP -std=gnu11
+Cores       : 8 cores (jobs 8)
 CompDB      : compile_commands.json refreshed
 ! Workspace never built — bade may be out of sync
 ```
@@ -244,10 +247,10 @@ Varian kedua bila fingerprint ada tetapi belum mencakup semua proyek: `! Workspa
 
 - `cmdBuildEx()` berada di `src/cmds/cmds_build.c`.
 - Gerbang fast-state berada sebelum `reportBlobBegin()`. Karena itu fast no-op single-project keluar lebih awal dan report tersimpan ditampilkan melalui jalur state (`src/cmds/cmds_state.c`), bukan menjalankan lifecycle build baru.
-- Setelah gerbang no-op lolos, `cmdBuildEx()` memanggil `reportBlobBegin()`, memuat konfigurasi, resolve compiler, berpindah ke root proyek, lalu menjalankan `cmdsBuildPassRun()`.
+- Setelah gerbang no-op lolos, `cmdBuildEx()` memanggil `reportBlobBegin()`, memuat konfigurasi, resolve compiler, berpindah ke root proyek, lalu menjalankan `cmdsBuildPassCompile()` dan `cmdsLinkPass()`.
 - Hasil pass diteruskan ke `reportBlobFinish(result == 0)`. Report sukses disimpan; report gagal dibuang dan report sukses lama dipertahankan.
-- `cmdsBuildPassRun()` di `src/cmds/cmds_pass.c` menangani archive-only project, embedded archive/codegen, source collection, fingerprint, CompDB single-project, keputusan compile, dan kemudian menyerahkan ekor pass ke `cmdsBuildPassFinish()`.
-- `cmdsBuildPassFinish()` di `src/cmds/cmds_passfinish.c` menangani library pass, keputusan link, linking, library output, packaging, dan ringkasan pass.
+- `cmdsBuildPassCompile()` di `src/cmds/cmds_pass.c` menangani archive-only project, embedded archive/codegen, source collection, fingerprint, CompDB single-project, dan keputusan compile; proyek binary mengembalikan `CmdsPassTail` untuk pass link terpisah.
+- `cmdsLinkPass()` menjalankan `cmdsBuildPassFinish()` di `src/cmds/cmds_passfinish.c`: library pass, keputusan link, linking, library output, packaging, dan ringkasan pass.
 
 ### Lifecycle workspace
 
@@ -259,7 +262,7 @@ Varian kedua bila fingerprint ada tetapi belum mencakup semua proyek: `! Workspa
 - Build selektif memakai worklist closure yang dipilih. Release normal tidak dijalankan pada build selektif; release eksplisit tetap dapat dijalankan sesuai aturan `workspace.c`.
 - `wsRelease()` menjalankan release workspace setelah fase build bila dikonfigurasi dan memenuhi syarat.
 - `reportBlobFinish(rc == 0)` dipanggil sebelum model dibebaskan.
-- `runnerSerial()` menjalankan proyek in-process. `runnerParallel()` menjalankan proyek melalui child process dan menampung stdout masing-masing proyek pada slot sementara, lalu mengeluarkannya sesuai urutan worklist. stderr compiler tetap mengalir langsung. Ini penting untuk desain report: state report yang hanya berada di memori parent tidak otomatis dibagi ke child.
+- `runnerSerial()` menjalankan proyek in-process. `runnerParallel()` menjalankan proyek melalui child process dan menampung stdout masing-masing proyek pada slot sementara, lalu mengeluarkannya sesuai urutan worklist. Saat `SATRIA_WS_PAR` memaksa paralel di foreground, slot dicetak begitu proyek selesai (urutan selesai, seperti job CMake/Ninja) agar tidak diam sampai batch berakhir; blok satu proyek tetap utuh. stderr compiler tetap mengalir langsung. Ini penting untuk desain report: state report yang hanya berada di memori parent tidak otomatis dibagi ke child.
 
 ### Output dan statistik compile
 
@@ -273,7 +276,7 @@ Varian kedua bila fingerprint ada tetapi belum mencakup semua proyek: `! Workspa
 ### Artefak saat ini
 
 - Embedded archive: `buildEmbeddedArchivesEx()` di `src/embed_archive.c` mengembalikan satu `anyRebuilt` global. Fungsi internal `buildEmbeddedArchiveEntryEx()` sudah mengetahui per-entri apakah archive prebuilt, fresh, atau dibuat ulang, tetapi hasil per-entri belum diekspos.
-- Archive-only project: `cmdsBuildPassRun()` mencetak daftar archive dari `Config.emb[]`, tetapi belum menampilkan ukuran/status per entri. Kegagalan archive atau entri hilang menggagalkan pass.
+- Archive-only project: `cmdsBuildPassCompile()` mencetak daftar archive dari `Config.emb[]`, tetapi belum menampilkan ukuran/status per entri. Kegagalan archive atau entri hilang menggagalkan pass.
 - Library: `cmdsBuildLibraryEx()` di `src/cmds/cmds_lib.c` sudah mengetahui status `staticUpToDate` dan `sharedUpToDate` secara terpisah. Jalur sukses mencetak `Library : <path>` atau `(up-to-date)`.
 - Binary: `cmdsBuildPassFinish()` sudah mengetahui `linkNeeded`, hasil `runCmd()`, target final, dan ukuran target. Jalur up-to-date mencetak `Linking : ... (up-to-date)`; jalur link baru mencetak `Linking : ...` lalu ringkasan target.
 - Package: `packRun()` di `src/pack/pack.c` mengetahui setiap package tar/deb up-to-date atau baru dibuat, serta ukuran package. `packLastRebuilt()` hanya memberikan boolean agregat.
@@ -281,7 +284,7 @@ Varian kedua bila fingerprint ada tetapi belum mencakup semua proyek: `! Workspa
 - Release workspace: `wsRelease()` di `src/workspace/ws_release.c` mengonversi `release.*` menjadi `Config.pack` lalu memanggil pack engine yang sama melalui `packRunAt()`.
 - CompDB single-project: `writeCompdb()` di `src/compdb.c` mencetak `refreshed`, `unchanged (cache hit)`, atau `restored (blob)`. Bila disabled, fungsi tidak dipanggil dari jalur normal.
 - CompDB workspace: `wsCompdbRefresh()` menyusun config/source seluruh proyek dan dapat mencetak `unchanged (workspace)` atau memanggil `writeCompdbMulti()`. Jalur multi dapat diam saat cache hit/restore.
-- Toolchain: `cmdsBuildPassRun()` mencetak `Build with <cc> <warning flags> -std=<std>` setelah embedded codegen dan source collection. Ini sumber konfigurasi compile efektif per proyek; workspace dapat memiliki konfigurasi berbeda antar proyek.
+- Toolchain: `cmdsBuildPassCompile()` mencetak `Build with <cc> <warning flags> -std=<std>` setelah embedded codegen dan source collection. Ini sumber konfigurasi compile efektif per proyek; workspace dapat memiliki konfigurasi berbeda antar proyek.
 - Report blob: `src/log/report_blob.c` saat ini men-tee stdout ke `.satria/report.blob.tmp`, lalu `rbCondense()` mem-parsing format teks lama (`Project`, `Fase`, `Summary`, `Library`, `Archive`, `Target`, `Linking`) untuk menghasilkan `STATUS` + `LAST BUILD SUMMARY`. Parser ini menghitung agregat dari teks dan tidak menyimpan report rinci. Mekanisme tersebut tidak cocok menjadi sumber data format report baru.
 
 ## Rancangan implementasi
@@ -296,6 +299,7 @@ Tambahkan model report kecil di modul log, misalnya `src/log/build_report.h` dan
 - `ReportArtifact`: path, kind, status, ukuran (opsional), dan urutan tampil.
 - `ReportProject`: nama/label proyek, daftar detail compile yang memang ditampilkan, `compiled`, `skipped`, `warnings`, serta flag fase yang sudah dikerjakan.
 - `ReportToolchain`: command compiler efektif dan flags compile efektif.
+- `ReportCores`: jumlah core aktif (`cpuCount()`) dan jobs efektif; dicatat `buildReportSetCores(jobs)` setelah `buildReportBegin()`.
 - Enum status artefak: `REPORT_BUILT`, `REPORT_CACHED`, `REPORT_LINKED`.
 - Enum CompDB: `REFRESHED`, `UNCHANGED`, `RESTORED`, `DISABLED`, `SKIPPED`, `FAILED`.
 
@@ -310,14 +314,14 @@ Single-project:
 - `cmdBuildEx()` tetap menjadi pemilik lifecycle report.
 - Mulai report setelah gerbang `cmdsFastStateValid()` dan setelah keputusan background tidak mengalihkan proses ke child. No-op tidak membuka report baru.
 - Setelah `loadConfig()` dan `resolveCompiler()`, set toolchain efektif dari `Config` dan flags yang sama dengan `Build with`.
-- Selesaikan report setelah `cmdsBuildPassRun()` mengembalikan hasil. `reportFinish` menerima hasil akhir, bukan menyimpulkan status dari baris `Summary`.
+- Selesaikan report setelah `cmdsBuildPassCompile()` + `cmdsLinkPass()` mengembalikan hasil. `reportFinish` menerima hasil akhir, bukan menyimpulkan status dari baris `Summary`.
 - Jalur gagal pada load config, resolve compiler, root, compile, link, library, atau pack harus menutup report sebagai gagal dan membuang hasil sementara.
 
 Workspace:
 
 - `wsRunCore()` tetap menjadi pemilik lifecycle report workspace.
 - Mulai setelah global `wsCacheNoopValid()` dan setelah jalur background parent diputuskan, sebelum `wsCompdbRefresh()`.
-- Satu report workspace menampung semua proyek pada fase library dan binary. Jangan membuat report global baru dari `cmdBuildEx()`; workspace menjalankan `cmdsBuildPassRun()` langsung melalui `wsRunProject()`.
+- Satu report workspace menampung semua proyek pada fase library dan binary. Jangan membuat report global baru dari `cmdBuildEx()`; workspace menjalankan `cmdsBuildPassCompile()` lalu `cmdsLinkPass()` melalui `wsRunProject()`.
 - `wsRunProject()` mengirim identitas proyek dan fase ke report sebelum fast-state check. Jika fast-state hit, catat proyek/artefaknya sebagai cached hanya bila konfigurasi dan path output dapat diresolusikan tanpa menjalankan build pass. Jangan membuat blok Execution palsu untuk proyek yang tidak memiliki aktivitas compile.
 - Archive-only project dicatat pada bagian Archive dan tidak dimasukkan sebagai proyek binary.
 - Karena `runnerParallel()` mem-fork child, jangan mengandalkan satu global `BuildReport` di memori parent. Pilih mekanisme fragment per child: child menulis record report khusus ke file slot yang sudah memiliki identitas proyek, parent mengimpor record saat `waitpid` selesai dan merender berdasarkan urutan worklist. Hindari menulis satu file report bersama dari banyak child.
@@ -331,7 +335,7 @@ Format final terdiri dari header, Archive, Execution, Execution summary, Release
 - Header dicetak sekali per build global. Workspace tidak boleh mengulang header untuk setiap proyek.
 - Archive record dikumpulkan saat `buildEmbeddedArchivesEx()` memeriksa tiap entri. Tampilkan sebelum Execution pada render final.
 - Detail compile tetap dicetak saat proses berjalan atau disimpan sebagai detail proyek untuk dirender pada akhir. Jangan menahan stderr compiler sampai seluruh workspace selesai.
-- Execution disusun sesuai urutan worklist, bukan urutan child selesai. Pada workspace, fase library memasok compile counters/detail; fase binary memasok hasil link. Gabungkan keduanya menjadi satu blok per proyek, bukan dua blok proyek yang duplikat.
+- Execution disusun sesuai urutan worklist pada runner serial dan paralel background. Pada mode paksa `SATRIA_WS_PAR`, urutan mengikuti proyek yang selesai lebih dulu; setiap blok proyek tetap utuh. Pada workspace, fase library memasok compile counters/detail; fase binary memasok hasil link. Gabungkan keduanya menjadi satu blok per proyek, bukan dua blok proyek yang duplikat.
 - Execution summary mengelompokkan library dan binary berdasarkan path output final. Jangan membuat path dengan asumsi nama proyek; gunakan helper path `cmdsLibStaticPath()`, `cmdsLibSharedPath()`, dan resolusi target yang sudah dipakai build.
 - Release mengikuti urutan yang dikeluarkan pack engine.
 - Summary selalu paling akhir.
@@ -351,7 +355,7 @@ Ubah hasil `buildEmbeddedArchivesEx()` secara terbatas agar caller dapat mengeta
 
 ### 5. Statistik execution dan warning
 
-Statistik `compiled`/`skipped` tidak perlu dihitung ulang: nilainya sudah tersedia di `cmdsBuildPassRun()` dan disalin ke `CmdsPassTail` untuk `cmdsBuildPassFinish()`.
+Statistik `compiled`/`skipped` tidak perlu dihitung ulang: nilainya sudah tersedia di `cmdsBuildPassCompile()` dan disalin ke `CmdsPassTail` untuk `cmdsBuildPassFinish()`.
 
 - Pada `libOnly` workspace, catat compile count dan skipped count untuk proyek. Pada fase binary, jangan menambahkan lagi `skipped = srcs.count` yang berasal dari fast-tail; angka itu bukan compile pass kedua yang ingin ditampilkan.
 - Single-project mencatat satu pass yang benar-benar dijalankan. Bila fast-state mengembalikan no-op, tidak ada blok Execution baru.
@@ -362,6 +366,12 @@ Statistik `compiled`/`skipped` tidak perlu dihitung ulang: nilainya sudah tersed
 - **Keputusan pemilik (O2): baris WARN dipakai HANYA saat `log = true`.** Dengan log aktif, output mentah compiler TIDAK dicetak ke report — detail penuh (termasuk konteks source/note) pindah ke `.satria/build.log` untuk `satria log`, dan report mencetak `WARN <diagnostic>` sebagai pengganti. Ini bukan duplikasi. Baris WARN juga membawa warna kembali: dengan log aktif flag `-fdiagnostics-color` dimatikan (`compileSetDiagColor`), sehingga warning sampai tanpa warna — satria mewarnai baris WARN sendiri (aturan `NO_COLOR`/`SATRIA_NO_COLOR`/`TERM=dumb` via `diagColorWanted`; Windows tanpa ANSI). Dengan `log = false`, output asli tampil utuh seperti sebelumnya dan tidak ada baris WARN. Unit compile yang GAGAL (atau terinterrupt) selalu mencetak output mentah: error butuh konteks penuh di terminal.
 
 ### 6. Toolchain dan CompDB
+
+Cores:
+
+- Baris `Cores` menampilkan jumlah core aktif dari `cpuCount()` dan jobs efektif run (`jobs`). Contoh: `Cores : 8 cores (jobs 4)`.
+- Baris ini informatif: pada cold build pengguna bisa melihat apakah build benar-benar memakai seluruh core atau dibatasi `-jN`.
+- Jangan menampilkan `Cores` pada replay no-op; replay memakai format `STATUS` + `LAST BUILD SUMMARY` tanpa header.
 
 Toolchain:
 
@@ -410,7 +420,7 @@ Binary (`src/cmds/cmds_passfinish.c`):
 
 `src/log/report_blob.c` saat ini melakukan tee stdout POSIX ke `.satria/report.blob.tmp`, lalu `rbCondense()` mem-parsing output lama untuk membentuk `STATUS` + `LAST BUILD SUMMARY`. Implementasi baru tetap harus memisahkan dua kebutuhan yang formatnya memang berbeda:
 
-1. **Build Report aktif** — dipakai pada cold build dan incremental build yang melewati gerbang fast no-op. Formatnya adalah `Build Report` dengan bagian Toolchain, CompDB, Archive, Execution, Execution summary, Release, dan Summary. Artefak boleh berstatus `built`, `cached`, atau `linked` karena memang ada lifecycle build yang dijalankan.
+1. **Build Report aktif** — dipakai pada cold build dan incremental build yang melewati gerbang fast no-op. Formatnya adalah `Build Report` dengan bagian Toolchain, Cores, CompDB, Archive, Execution, Execution summary, Release, dan Summary. Artefak boleh berstatus `built`, `cached`, atau `linked` karena memang ada lifecycle build yang dijalankan.
 2. **Fast no-op summary** — dipakai ketika fast-state valid dan build dilewati. Bila blob ada: replay `LAST BUILD SUMMARY`. Bila tidak: layout fallback gabungan (bagian 9a). Bukan replay `Build Report` penuh. Contoh kontrak output:
 
 ```text

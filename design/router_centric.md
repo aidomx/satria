@@ -1,9 +1,13 @@
-# Router-centric workspace (eksperimen P4)
+# Router-centric workspace dan single-project (eksperimen P4)
 
-> Status: eksperimen. Pilot **read-only** sudah ada di kode:
-> `src/workspace/ws_plan.c`, aktif hanya dengan `SATRIA_WS_PLAN=1`,
-> diuji oleh `tests/unit/common/ws_plan.sh`. Dokumen ini menetapkan arah
-> dan batas migrasi; kode tetap sumber kebenaran.
+> Status: eksperimen, fase 1-2 dan pemisahan compile/link fase 3 sudah
+> diimplementasikan; artefak/laporan/release diputuskan induk, semuanya di balik
+> `SATRIA_WS_PLAN=1`. Tanpa env itu jalur default tidak berubah. Rencana,
+> stage cache, dan intent route ada di `src/workspace/ws_plan.c`,
+> `src/cache/cache_store.c`, dan `src/cache/opts_*.c`; diuji oleh
+> `tests/unit/common/ws_plan.sh`. Transaksi stage yang sama juga dipakai
+> jalur single-project (`cmdBuildEx`), dengan induk = proses build itu sendiri.
+> Dokumen ini menetapkan arah dan batas migrasi; kode tetap sumber kebenaran.
 
 ## 1. Siapa yang disebut "router"?
 
@@ -109,8 +113,53 @@ satria: ws-plan: fase binary: 2 rencana, 2 terverifikasi, 0 menyimpang
 
 Penyimpangan yang dilaporkan: proyek dieksekusi di luar rencana, fase tidak
 cocok, atau (saat rc == 0) proyek rencana tidak dieksekusi. `wsPlanBegin`
-membuang penanda basi lebih dulu. Pilot ini **tidak mengubah** keputusan
-build maupun isi cache.
+membuang penanda basi lebih dulu. Pilot awal ini tidak mengubah keputusan
+build maupun isi cache; fase 1-3 di bawah memperluasnya.
+
+## 5b. Implementasi fase 1-3 (P4)
+
+Semua fase memakai env yang sama, `SATRIA_WS_PLAN=1`; tanpa env seluruh
+jalur baru no-op.
+
+- **Fase 1 — verdict di rencana.** `wsPlanBegin` menyetel proyek, menghitung
+  `optsRouterValidate()` dan verdict `wsFastStateValid()` untuk fase yang
+  akan dieksekusi, lalu menyimpannya di `WsPlanEntry`. Executor memakai
+  `wsPlanFastConsume()`: hit langsung masuk jalur cached tanpa memanggil
+  router/validasi lagi; miss langsung membangun. Bila salah satu proyek
+  benar-benar membangun, hit berikutnya ditandai basi dan executor kembali
+  memvalidasi (perilaku lama). Baris ringkasan plan menampilkan
+  `route N/M, fast N/M`.
+- **Fase 2 — satu penulis.** `cache_store` mendapat stage per run
+  (`csStageBegin/SetProject/MergeAll`). Selama stage aktif, commit untuk
+  `deps.cache`, `lib.cache`, `embed.cache`, dan `fingerprint.cache` hanya
+  menulis grup proyek yang sedang dieksekusi ke `.satria/router-stage/`.
+  Pembaca dalam proses yang sama melihat tulisan stage lewat overlay `csOpen`,
+  jadi cache turunan (mis. `cmdsFastStateSave` yang membuka `DepCache` baru)
+  tidak membaca ulang file `.d` sebelum merge. Runner serial menggabungkan stage setelah tiap proyek; runner fork
+  menggabungkan sekali per batch. Single-project memakai transaksi yang sama:
+  `cmdBuildEx` membuka stage setelah gerbang no-op, mengikat grup ke alamat
+  cwd (`csStageSetProjectAddr`), lalu menggabungkan dan menerapkan intent
+  sebelum laporan/artefak disimpan. Executor tidak lagi menulis `opts.cache`:
+  `optsRouterRecord`/`optsProjMetaStamp` menulis intent, dan induk
+  menerapkannya lewat `optsRouterApplyIntents()` setelah merge. Stamp P grup
+  ditulis induk setelah merge (`csProjMetaStampN` di-suppress selama stage).
+  `state.cache` tetap memakai stage `stateBlobExport/Import` yang sudah ada.
+- **Fase 3 — compile dan link terpisah.** `cmdsBuildPassCompile()` berhenti
+  setelah compile dan mengembalikan `CmdsPassTail`; `cmdsLinkPass()` mengambil
+  alih tail itu untuk menghitung verdict link, menjalankan linker, dan menulis
+  state/packaging. Single-project memanggil kedua pass dari `cmdBuildEx`;
+  workspace, pilot `SATRIA_WS_PLAN=1` menjalankan pass binary compile-only
+  untuk seluruh proyek lalu `wsRunLinkBatch()` di induk. Link batch induk
+  berjalan serial dan menjadi satu-satunya pelaksana link; keputusan link
+  tidak lagi berada di dalam pass compile. `artifactCacheSave/Merge` tetap
+  dipindahkan ke `workspace.c` setelah cache grup tersimpan; release dan
+  `report.blob` juga tetap diputuskan induk.
+
+Batas eksperimen: stage hanya untuk empat cache grup di atas; `artifact.cache`,
+`state.cache`, dan `opts.cache` punya jalur sendiri. Windows tidak memakai
+stage karena runner paralelnya serial (single-project di Windows juga tidak
+membuka stage). Build gagal pada single-project tidak menggabungkan stage,
+sehingga target dan cache lama tetap utuh.
 
 ## 6. Tahap berikutnya
 
@@ -167,6 +216,6 @@ memutuskan apa pun; ia hanya menampilkan ringkasan.
 | --- | --- |
 | Rencana basi karena anak lain menulis file | Fase 2 menghapus penulisan anak; fase 1 hanya verifikasi |
 | Fork mewarisi memo stat induk | Executor tetap `cmdsStatMemoReset()` seperti sekarang |
-| Kegagalan di tengah batch | `wsPlanEnd(rc != 0)` memaafkan proyek yang tak sempat jalan |
+| Kegagalan di tengah batch | `wsPlanEnd(rc != 0)` memaafkan proyek yang tak sempat jalan; link batch dilewati bila compile batch gagal |
 | Format cache berubah | Stage memakai format cache_store yang sama; merge per grup |
 | Rollback sulit | Setiap fase di balik env; perilaku lama tetap jalur default |
