@@ -1,0 +1,26 @@
+# Port version_alias.sh: --version diperlakukan sama dengan `version` di semua
+# posisi, termasuk saat didahului/diikuti -w (dispatch bootstrap, bukan nama
+# proyek), dan baris help menyebut alias --version.
+@suite project
+@requires snap
+@purpose "--version setara dengan version di semua posisi"
+
+work.new version_alias
+
+run.cmd version as v
+rc.ok v
+
+run.cmd --version as dash
+rc.ok dash
+out.equals dash v
+
+run.cmd -w --version as w1
+rc.ok w1
+out.equals w1 v
+
+run.cmd --version -w as w2
+rc.ok w2
+out.equals w2 v
+
+run.cmd help as h
+out.contains h --version
