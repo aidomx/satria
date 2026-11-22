@@ -88,6 +88,10 @@ static void wsVerdictParentImport(const char *project, const char *path, bool li
      snapshot fork); byte fase binary tidak menimpanya. */
   if (libOnly && (c1 == '0' || c1 == '1')) cmdsWsPhaseVerdictSet(project, c1 == '1');
   if (c2 == '1') cmdsWsPhaseCompiledSet(project, true);
+  /* Rencana dihitung sebelum batch. Begitu satu anak benar-benar menulis
+     hasil, verdict hit untuk proyek lain bisa basi (mis. arsip embed yang
+     baru dibuat) — buang di induk, bukan hanya di proses anak. */
+  if (c1 == '1' || c2 == '1') wsPlanNoteBuilt(project);
 }
 
 /* ---------- penjadwal siap-dep (fork) ---------- */

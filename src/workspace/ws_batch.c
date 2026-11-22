@@ -13,8 +13,12 @@ int wsRunBatch(const WsModel *m, const WsWork *batch, int n, int jobs, const cha
   /* Fase 2 router-centric: executor (anak fork maupun serial) men-stage
      tulisan cache grup. Induk/runner menggabungkan per grup; serial melakukan
      merge setelah tiap proyek agar proyek berikutnya membaca state terbaru. */
-  bool txn = wsPlanActive() && csStageBegin();
-  int rc = runnerWantParallel(n, jobs)
+  /* Stage hanya perlu saat ada penulis paralel. Runner serial menulis cache
+     langsung seperti jalur non-plan; merge per proyek di runner serial mahal
+     (rewrite fingerprint/lib cache) dan pada 10k source menambah 5-6 detik. */
+  bool parallel = runnerWantParallel(n, jobs);
+  bool txn = wsPlanActive() && parallel && csStageBegin();
+  int rc = parallel
                ? runnerParallel(m, batch, n, jobs, cmd, wsDir, libOnly, compileOnly)
                : runnerSerial(m, batch, n, jobs, cmd, wsDir, libOnly, compileOnly);
   if (txn) {

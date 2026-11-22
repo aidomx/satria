@@ -41,10 +41,10 @@ int wsRunProject(const WsModel *m, const char *name, const char *cmd, int jobs,
   if (!p->root[0]) return 1;
 
   cmdsStateSetWsProject(name);
-  /* Rencana P4 sudah memvalidasi state; memo stat dari fase rencana tidak
-     boleh dipakai keputusan build proyek ini (proyek sebelumnya bisa saja
-     menulis output). */
-  if (wsPlanActive()) cmdsStatMemoReset();
+  /* Memo stat dipakai lintas proyek seperti jalur non-plan; penulisan output
+     membuang entri terkait lewat cmdsStatMemoForget. Rencana tidak lagi
+     mengosongkan memo setelah proyek pertama membangun: reset total memaksa
+     stat ulang 10k input dan membuat edit kecil lebih lambat dari non-plan. */
 
   if (strcmp(cmd, "clean") == 0) {
     Config c;

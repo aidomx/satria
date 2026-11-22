@@ -1,8 +1,10 @@
 # Router-centric workspace dan single-project (eksperimen P4)
 
-> Status: eksperimen, fase 1-2 dan pemisahan compile/link fase 3 sudah
+> Status: eksperimen, fase 1-2 dan pemisahan pass compile/link sudah
 > diimplementasikan; artefak/laporan/release diputuskan induk, semuanya di balik
-> `SATRIA_WS_PLAN=1`. Tanpa env itu jalur default tidak berubah. Rencana,
+> `SATRIA_WS_PLAN=1`. Tanpa env itu jalur default tidak berubah. Fase binary
+> workspace memakai satu batch compile+link (link batch serial pilot dihapus
+> karena menggandakan pekerjaan). Rencana,
 > stage cache, dan intent route ada di `src/workspace/ws_plan.c`,
 > `src/cache/cache_store.c`, dan `src/cache/opts_*.c`; diuji oleh
 > `tests/unit/common/ws_plan.sh`. Transaksi stage yang sama juga dipakai
@@ -104,11 +106,12 @@ bool wsPlanAdmit(const char *name, bool libOnly); /* dipanggil executor */
 void wsPlanEnd(int rc);                            /* dipanggil scheduler */
 ```
 
-Keluaran (`SATRIA_WS_PLAN=1`, stderr):
+Keluaran (`SATRIA_WS_PLAN=1`): build sukses **senyap**, tanpa ringkasan
+fase. Hanya penyimpangan yang dicetak ke stderr, misalnya:
 
 ```text
-satria: ws-plan: fase library: 3 rencana, 3 terverifikasi, 0 menyimpang
-satria: ws-plan: fase binary: 2 rencana, 2 terverifikasi, 0 menyimpang
+satria: ws-plan: core di luar rencana fase binary
+satria: ws-plan: penanda core tidak cocok (0x00 != B)
 ```
 
 Penyimpangan yang dilaporkan: proyek dieksekusi di luar rencana, fase tidak
@@ -127,16 +130,19 @@ jalur baru no-op.
   `wsPlanFastConsume()`: hit langsung masuk jalur cached tanpa memanggil
   router/validasi lagi; miss langsung membangun. Bila salah satu proyek
   benar-benar membangun, hit berikutnya ditandai basi dan executor kembali
-  memvalidasi (perilaku lama). Baris ringkasan plan menampilkan
-  `route N/M, fast N/M`.
+  memvalidasi (perilaku lama). Jumlah route/fast tetap dihitung untuk
+  keputusan, tetapi tidak dicetak saat sukses.
 - **Fase 2 — satu penulis.** `cache_store` mendapat stage per run
   (`csStageBegin/SetProject/MergeAll`). Selama stage aktif, commit untuk
   `deps.cache`, `lib.cache`, `embed.cache`, dan `fingerprint.cache` hanya
   menulis grup proyek yang sedang dieksekusi ke `.satria/router-stage/`.
   Pembaca dalam proses yang sama melihat tulisan stage lewat overlay `csOpen`,
   jadi cache turunan (mis. `cmdsFastStateSave` yang membuka `DepCache` baru)
-  tidak membaca ulang file `.d` sebelum merge. Runner serial menggabungkan stage setelah tiap proyek; runner fork
-  menggabungkan sekali per batch. Single-project memakai transaksi yang sama:
+  tidak membaca ulang file `.d` sebelum merge. Stage workspace **hanya dibuka
+  untuk runner paralel**; runner serial (foreground default) menulis cache
+  langsung seperti jalur non-plan. Merge per proyek me-rewrite cache 10k dan
+  menambah 5-6 detik pada edit satu source, tanpa penulis paralel yang perlu
+  dilindungi. Single-project memakai transaksi yang sama:
   `cmdBuildEx` membuka stage setelah gerbang no-op, mengikat grup ke alamat
   cwd (`csStageSetProjectAddr`), lalu menggabungkan dan menerapkan intent
   sebelum laporan/artefak disimpan. Executor tidak lagi menulis `opts.cache`:
@@ -147,13 +153,34 @@ jalur baru no-op.
 - **Fase 3 — compile dan link terpisah.** `cmdsBuildPassCompile()` berhenti
   setelah compile dan mengembalikan `CmdsPassTail`; `cmdsLinkPass()` mengambil
   alih tail itu untuk menghitung verdict link, menjalankan linker, dan menulis
-  state/packaging. Single-project memanggil kedua pass dari `cmdBuildEx`;
-  workspace, pilot `SATRIA_WS_PLAN=1` menjalankan pass binary compile-only
-  untuk seluruh proyek lalu `wsRunLinkBatch()` di induk. Link batch induk
-  berjalan serial dan menjadi satu-satunya pelaksana link; keputusan link
-  tidak lagi berada di dalam pass compile. `artifactCacheSave/Merge` tetap
-  dipindahkan ke `workspace.c` setelah cache grup tersimpan; release dan
-  `report.blob` juga tetap diputuskan induk.
+  state/packaging. Single-project memanggil kedua pass dari `cmdBuildEx`.
+  Workspace **tidak** lagi memecah fase binary menjadi compile-only lalu
+  `wsRunLinkBatch()` serial: versi pilot itu mengulang Config/plan/validasi
+  untuk setiap proyek dan membuat link tidak paralel. Fase binary kini satu
+  batch compile+link seperti jalur non-plan; stage cache tetap satu penulis
+  karena induk menggabungkan grup setelah batch. `artifactCacheSave/Merge`
+  tetap dipindahkan ke `workspace.c` setelah cache grup tersimpan; release
+  dan `report.blob` juga tetap diputuskan induk.
+
+Optimasi rencana: verdict route + fast-state seluruh proyek dihitung paralel
+(maksimal 8 child; matikan dengan `SATRIA_WSPLAN_PAR=0`), penanda hanya
+dibersihkan sejumlah proyek rencana, validasi library memakai batch stat
+paralel bila gerbang tidak menandai entri basi (kalau ada, entri basi sudah
+di depan dan validasi berhenti lebih awal), dan memo stat tidak lagi di-reset
+setelah proyek pertama membangun
+(penulisan output sudah memanggil `cmdsStatMemoForget`). Hit rencana
+dibatalkan setelah ada proyek yang membangun — juga di induk runner fork,
+lewat verdict anak. Pada benchmark 40 source/proyek, cold plan turun dari
+7.868 ms ke 7.555 ms (non-plan 7.404 ms); no-op tetap dilayani gerbang cache
+sebelum rencana dibuat.
+
+Evaluasi workspace 10k source (edit satu source, 4 job, urutan selang-seling):
+non-plan median sekitar 19,7 dtk; plan sekitar 23,3 dtk. Staging yang tadinya
+selalu aktif adalah regresi terbesar (sudah dihapus untuk serial); sisa
+selisih berasal dari validasi rencana yang dihitung lebih awal, sebelum
+proyek dependensi membangun. Karena default foreground memakai runner serial,
+`SATRIA_WS_PLAN` **belum dijadikan default** — rencana baru menguntungkan saat
+runner paralel/background dipakai.
 
 Batas eksperimen: stage hanya untuk empat cache grup di atas; `artifact.cache`,
 `state.cache`, dan `opts.cache` punya jalur sendiri. Windows tidak memakai
@@ -215,7 +242,7 @@ memutuskan apa pun; ia hanya menampilkan ringkasan.
 | Risiko | Mitigasi |
 | --- | --- |
 | Rencana basi karena anak lain menulis file | Fase 2 menghapus penulisan anak; fase 1 hanya verifikasi |
-| Fork mewarisi memo stat induk | Executor tetap `cmdsStatMemoReset()` seperti sekarang |
-| Kegagalan di tengah batch | `wsPlanEnd(rc != 0)` memaafkan proyek yang tak sempat jalan; link batch dilewati bila compile batch gagal |
+| Fork mewarisi memo stat induk | Anak fork tetap `cmdsStatMemoReset()`; runner serial memakai memo lintas proyek seperti non-plan, dan penulis output memanggil `cmdsStatMemoForget` |
+| Kegagalan di tengah batch | `wsPlanEnd(rc != 0)` memaafkan proyek yang tak sempat jalan; fase binary berhenti seperti batch biasa |
 | Format cache berubah | Stage memakai format cache_store yang sama; merge per grup |
 | Rollback sulit | Setiap fase di balik env; perilaku lama tetap jalur default |

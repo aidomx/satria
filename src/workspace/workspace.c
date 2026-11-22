@@ -280,29 +280,6 @@ static bool wsNoopGroupedPrint(const WsModel *m, const unsigned char *sel, doubl
   return true;
 }
 
-/* Link batch induk (pilot router-centric): semua proyek sudah melewati pass
-   compile, lalu induk menjalankan link serial. Stage cache tetap satu penulis;
-   merge dilakukan setelah tiap proyek supaya proyek berikutnya membaca state
-   final. Tanpa SATRIA_WS_PLAN, pemanggil tidak memakai fungsi ini. */
-static int wsRunLinkBatch(const WsModel *m, const WsWork *batch, int n, int jobs,
-                          const char *cmd) {
-  if (n <= 0) return 0;
-  if (wsPlanActive())
-    fprintf(stderr, "satria: ws-plan: link batch %d proyek\n", n);
-  bool txn = wsPlanActive() && csStageBegin();
-  int rc = 0;
-  for (int i = 0; i < n; i++) {
-    rc = wsRunProject(m, batch[i].name, cmd, jobs, false, false);
-    if (txn) {
-      if (!csStageMergeAll() && rc == 0) rc = 1;
-      if (!optsRouterApplyIntents() && rc == 0) rc = 1;
-    }
-    if (rc != 0) break;
-  }
-  if (txn) csStageEnd();
-  return rc;
-}
-
 static int wsRunCore(const char *cmd, int jobs, const char *only, const char *releaseSel,
                      bool withCdeps) {
   profMark("ws-entry"); /* profil: pisahkan startup vs model-load */
@@ -603,9 +580,13 @@ static int wsRunCore(const char *cmd, int jobs, const char *only, const char *re
        meng-embed); jalur serial (-j1 / SATRIA_WS_PAR=0) tetap bertingkat
        dependensi persis perilaku lama. Alasan & ukuran gain (gap
        hedit/libhdr bench/ws.sh) ada di komentar modul ws_batch.c. */
+    profMark("ws-plan-lib-pre");
     wsPlanBegin(&m, work, wcount, true);
+    profMark("ws-plan-lib-begin");
     rc = wsRunBatch(&m, work, wcount, jobs, cmd, wsDir, true, false);
+    profMark("ws-plan-lib-batch");
     wsPlanEnd(rc);
+    profMark("ws-plan-lib-end");
     /* FASE 2 — binary pass: link binary setelah SEMUA library tersedia
        (cdeps bisa siklik — lihat catatan wsBuildWorklist). Proyek
        kemasan (output.binary = false) tuntas di fase library — Lewati
@@ -616,12 +597,17 @@ static int wsRunCore(const char *cmd, int jobs, const char *only, const char *re
       int bn = 0;
       for (int i = 0; i < wcount; i++)
         if (!wsProjectArchiveOnly(&m.projects[work[i].idx])) bin[bn++] = work[i];
+      profMark("ws-plan-bin-pre");
       wsPlanBegin(&m, bin, bn, false);
-      bool splitLink = wsPlanActive();
-      /* Pilot: compile seluruh proyek dulu, link dijalankan batch induk. */
-      rc = wsRunBatch(&m, bin, bn, jobs, cmd, wsDir, false, splitLink);
+      profMark("ws-plan-bin-begin");
+      /* Fase binary tetap satu batch seperti jalur non-plan: compile+link per
+         proyek dijalankan runner. Versi pilot sebelumnya memecah compile-only
+         lalu mengulang wsRunProject untuk link di induk; itu membayar dua kali
+         konfigurasi/plan/validasi dan membuat link serial. */
+      rc = wsRunBatch(&m, bin, bn, jobs, cmd, wsDir, false, false);
+      profMark("ws-plan-bin-batch");
       wsPlanEnd(rc);
-      if (rc == 0 && splitLink) rc = wsRunLinkBatch(&m, bin, bn, jobs, cmd);
+      profMark("ws-plan-bin-end");
     }
   } else {
     /* clean: satu pass serial (binary pass), tanpa fase library. */
