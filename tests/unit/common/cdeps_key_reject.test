@@ -1,0 +1,23 @@
+# Port cdeps_key_reject.sh: kunci `cdeps.<nama>` ditolak eksplisit dengan
+# nomor baris dan nama kunci, bukan diterima sebagai proyek implisit `cdeps`.
+@suite workspace
+@fixture miniws
+@requires cold
+@purpose "cdeps.preshared ditolak, bukan proyek implisit"
+
+work.new cdeps_key_reject
+fixture.copy
+
+file.append WsBuildfile cdeps.preshared = windows
+
+run.cmd -w -g compdb as reject
+@response reject
+  rc.fail
+  out.contains "WsBuildfile:"
+  out.contains "cdeps.preshared"
+  out.contains "belum didukung"
+@end
+
+# Tidak boleh ada state yang terbentuk dari input yang ditolak.
+work.clean state
+file.absent .satria/startup.state

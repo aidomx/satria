@@ -13,6 +13,7 @@ discovery, jadi berkas `.sh` ini tidak lagi dieksekusi oleh `unit.sh`.
 | `embed_getembed.sh` | `../embed_getembed.test` | M1 |
 | `trace_src_sync.sh` | `../trace_src_sync.test` | M3 |
 | `version_alias.sh` | `../version_alias.test` | M0 |
+| `cdeps_key_reject.sh` | `../cdeps_key_reject.test` | M0 |
 
 `.sh` yang MASIH berjalan (port parsial atau fitur proses yang belum
 terekspresikan DSL) tetap di `../`:
