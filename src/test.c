@@ -15,11 +15,15 @@
 #include <string.h>
 
 #include "portability.h" /* SATRIA_MAX_PATH */
+#include "test/parser.h"
 
 #if defined(_WIN32)
 
 int cmdTest(const char *const *args, int nargs, const char *argv0) {
-  (void)args; (void)nargs; (void)argv0;
+  (void)argv0;
+  /* `satria test --parse …` native (M4a) — tidak butuh bash. */
+  if (nargs >= 1 && strcmp(args[0], "--parse") == 0)
+    return testParserMain(nargs - 1, args + 1);
   fprintf(stderr, "satria test: hanya tersedia di POSIX (unit.sh memakai bash).\n");
   return 2;
 }
@@ -110,6 +114,10 @@ static bool isUnitModeWord(const char *a) {
 }
 
 int cmdTest(const char *const *args, int nargs, const char *argv0) {
+  /* `satria test --parse …` native (M4a): parser DSL, tanpa delegasi bash. */
+  if (nargs >= 1 && strcmp(args[0], "--parse") == 0)
+    return testParserMain(nargs - 1, args + 1);
+
   char script[SATRIA_MAX_PATH], root[SATRIA_MAX_PATH];
   if (!unitScriptPath(argv0, script, sizeof(script), root, sizeof(root)) ||
       !fsFileExists(script)) {

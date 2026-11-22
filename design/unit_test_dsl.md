@@ -38,7 +38,9 @@ Perincian:
   (tokenisasi + heredoc + tumpukan blok, tanpa eksekusi apa pun).
   `unit_dev.sh`/`unit.sh` TIDAK meng-consume-nya sampai M0 stabil, sehingga
   suite yang berjalan hari ini tak tersentuh; `dsl.sh` nanti tinggal
-  mengeksekusi event hasil parse modul ini.
+  mengeksekusi event hasil parse modul ini. Padanan C-nya (M4a) ada di
+  `src/test/parser.c` + `src/test/parser_cli.c` dan dapat dipanggil lewat
+  `satria test --parse …`.
 - Parser dibangun bertahap (milestone M0–M3, lihat #Parser bertahap); tiap
   milestone diuji konforman sebelum dipakai memigrasi tes.
 - Env yang diwarisi runner tetap sama: `UNIT_REPO`, `UNIT_TMP`, `UNIT_BASE`,
@@ -465,6 +467,19 @@ Event jejak: `HDR DIR BLOCK ENDB STMT OPEN TEXT CLOSE CMT`, semua bernomor
 baris. Status: `unit_runner.sh` mengonsumsi parser via `tests/unit/lib/dsl.sh`
 (staging `$STAGE/lib/parser.sh`); `unit_dev.sh` tetap tidak menyentuh keduanya.
 
+Padanan C (M4a) menjaga kontrak yang sama byte-per-byte:
+```
+gcc -std=c11 -Wall -Wextra -Isrc -o /tmp/test_parser \
+    tests/unit/test_parser.c src/test/parser.c && /tmp/test_parser
+./bin/satria test --parse <file.test>          # jejak event TSV
+./bin/satria test --parse --check <file>       # sunyi; rc 0=sah 1=salah
+./bin/satria test --parse --suite <dir>        # --check tiap *.test di dir
+bash tests/unit/parser/parity.sh               # C vs bash: stdout/stderr/rc
+```
+Uji paritas mencakup kit parser (positif + negatif), seluruh `.test`/`.t` di
+`tests/unit/common`, kit DSL, fragmen, serta mode `--check`/`--suite` dan
+berkas yang tidak ada. Jalur `--parse` tidak pernah mendelegasikan ke bash.
+
 ---
 
 # M4 — port infrastruktur test bash → C
@@ -550,7 +565,7 @@ resmi untuk tes di `tests/unit/common`.
 - [x] Arsip `.sh` yang sudah tergantikan port `.test` penuh ke `tests/unit/common/arsip/` (cache_noop, report_binaries_uptodate, cmdhelp_crlf, embed_stamp_skip, embed_getembed, trace_src_sync) — discovery `.test` > `.t` > `.sh` membuat mereka tak pernah dieksekusi lagi; `.sh` yang masih berjalan tetap di `common/`
 - [x] Contoh acuan `example.test` untuk penulis tes baru (lihat butir M2 pilot)
 - [x] `satria test` fase 1 (delegasi, tanpa porting): parsing standalone-break (pola `trace`) + `src/test.c` menemukan root repo dari exe (`/proc/self/exe`, fallback cwd bila `scripts/unit.sh` ada di cwd) lalu exec `bash scripts/unit.sh <args…>`; shorthand `satria test miniws` — binary satria sendiri disisipkan bila argumen pertama bukan opsi/kata mode/path binary, dan path binary relatif-repo dari subdirektori diabsolutkan (unit.sh me-resolve relatif cwd); rc unit.sh = rc satria; sweep miniws via `satria test miniws` 348/29, rc 0; `help test` tersedia
-- [ ] M4a: parser → C (`src/test/parser.c`) — uji unit C positif+negatif, jejak event identik
+- [x] M4a: parser → C (`src/test/parser.c`, CLI `src/test/parser_cli.c`) — `satria test --parse [--check|--suite]` native tanpa delegasi bash; uji unit C `tests/unit/test_parser.c` (37 cek: jejak positif, heredoc/CRLF/EOF, seluruh error bernomor baris) + paritas byte-per-byte `tests/unit/parser/parity.sh` 81/81 (stdout/stderr/rc) atas kit parser, `common/*.test|*.t`, kit DSL, fragmen, `--check`, `--suite`, dan berkas hilang
 - [ ] M4b: evaluator + eksekutor → C (`src/test/eval.c`, `src/test/exec.c`) — kit dsl 14/14 via runner C
 - [ ] M4c: runner/discovery/klasifikasi → C (`src/test/runner.c`) — sweep miniws 371/31 via runner C
 - [ ] M4d: `satria test` native in-process; pensiunkan `unit.sh`/`unit_dev.sh`/`lib/unit_*.sh` (arsip) — verifikasi "tanpa bash" via `satria trace`

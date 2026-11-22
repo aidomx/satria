@@ -11,5 +11,8 @@
    Path binary relatif-repo diabsolutkan (unit.sh me-resolve relatif cwd).
    Root repo dicari dari direktori binary ini (…/bin → repo root = parent),
    sehingga `satria test` jalan dari direktori mana pun. Exit code unit.sh
-   diteruskan sebagai exit code satria. */
+   diteruskan sebagai exit code satria.
+   `satria test --parse …` tidak didelegasikan: parser DSL native (M4a,
+   src/test/parser.c) menerima --parse <file> | --parse --check <file> |
+   --parse --suite <dir>. */
 int cmdTest(const char *const *args, int nargs, const char *argv0);
