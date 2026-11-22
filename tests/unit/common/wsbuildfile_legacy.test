@@ -1,0 +1,48 @@
+# Port wsbuildfile_legacy.sh: WsBuildfile nama resmi; Buildfile.ws masih
+# dibaca dengan peringatan deprecasi; init -w tidak menimpa nama lama.
+@suite workspace
+@fixture miniws
+@requires cold
+@purpose "Nama workspace resmi vs legacy"
+
+# 1. Nama lama masih membangun, dengan peringatan deprecasi.
+work.new wsbuildfile
+fixture.copy
+file.copy work(WsBuildfile) Buildfile.ws
+file.delete WsBuildfile
+run.build as legacy
+@response legacy
+  rc.ok
+  out.contains "deprecated"
+  out.contains "WsBuildfile"
+@end
+
+# 2. Dua kandidat: WsBuildfile menang, tanpa peringatan deprecasi.
+file.copy work(Buildfile.ws) WsBuildfile
+run.build as both
+@response both
+  rc.ok
+  out.not-contains "deprecated"
+@end
+
+# 3. init -w menulis WsBuildfile, bukan Buildfile.ws.
+work.new wsbuildfile_init
+run.cmd init -w as init
+@response init
+  rc.ok
+  file.exists WsBuildfile
+  file.absent Buildfile.ws
+@end
+
+# 4. init -w menolak bila nama lama sudah ada dan menyarankan rename.
+work.new wsbuildfile_init_legacy
+file.write Buildfile.ws <<T
+use workspace
+projects = app
+T
+run.cmd init -w as reject
+@response reject
+  rc.fail
+  out.contains "rename"
+  file.absent WsBuildfile
+@end
