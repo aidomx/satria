@@ -692,7 +692,10 @@ void cmdsCollectSources(const Config *c, List *out) {
      wrapper monotonic portabel: MSVC tanpa CLOCK_MONOTONIC). */
   bool trace = profOn();
   double tc0 = 0;
-  if (trace) tc0 = portMonoMs();
+  if (trace) {
+    stateSourcesCacheLoad(); /* muat cache di luar hitungan [collect] pertama */
+    tc0 = portMonoMs();
+  }
   listReserve(out, 1024);
   for (int i = 0; i < c->sources.count; i++) {
     const char *entry = c->sources.items[i];

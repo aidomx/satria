@@ -480,6 +480,7 @@ static bool wsFastStateValidLib(const char *buildfilePath, const char *cwd) {
      berbeda (wsGateStale*) — entri itu dipindah ke depan dan dinilai lebih
      dulu. Murni urutan (swap antar slot): seluruh entri tetap dinilai, keputusan
      akhir identik. Bila path tak ada di state ini, tidak ada yang berubah. */
+  bool gateStale = false;
   for (int s = 0, front = 0; front < nst && s < wsGateStaleCount(); s++) {
     const char *stale = wsGateStalePath(s);
     if (!stale) break;
@@ -489,8 +490,30 @@ static bool wsFastStateValidLib(const char *buildfilePath, const char *cwd) {
       st[front] = st[i];
       st[i] = tmp;
       front++;
+      gateStale = true;
       break;
     }
+  }
+  /* Stat semua stamp sekali (paralel untuk daftar besar) lalu isi memo.
+     Loop di bawah memakai memo; tanpa ini edit satu source di workspace 10k
+     membayar ribuan stat serial sebelum akhirnya gagal. Bila gerbang sudah
+     menandai entri basi di proyek ini, entri itu ada di depan: stat semua justru
+     membuang early-exit dan menambah ~2,5 dtk pada edit satu source. */
+  if (nst >= 256 && !gateStale) {
+    const char **paths = malloc(sizeof(*paths) * (size_t)nst);
+    int64_t *sm = malloc(sizeof(*sm) * (size_t)nst);
+    long long *ss = malloc(sizeof(*ss) * (size_t)nst);
+    unsigned char *sok = malloc((size_t)nst);
+    if (paths && sm && ss && sok) {
+      for (int i = 0; i < nst; i++) paths[i] = st[i].path;
+      cmdsStatBatchStamp(paths, nst, sm, ss, sok);
+      for (int i = 0; i < nst; i++)
+        if (sok[i]) cmdsStatMemoPut(st[i].path, sm[i], ss[i]);
+    }
+    free(paths);
+    free(sm);
+    free(ss);
+    free(sok);
   }
   bool ok = true;
   for (int i = 0; ok && i < nst; i++) {

@@ -64,6 +64,10 @@ void walkDir(const char *dir, const char *ext, List *out);
 /* Sama dengan walkDir; di mode workspace hasilnya di-cache (.satria/sources.cache).
    Implementasi di cmds/cmds_wsstate.c. */
 void stateWalkDirCached(const char *dir, const char *ext, List *out);
+/* Muat .satria/sources.cache sekali di awal (no-op bila mode tanpa cache atau
+   sudah dimuat). Dipakai pemanggil yang men-trace walk agar biaya muat tidak
+   dibebankan ke direktori pertama. */
+void stateSourcesCacheLoad(void);
 bool newerThan(const char *a, const char *b);
 bool safeRelative(const char *path);
 
