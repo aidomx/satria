@@ -1,0 +1,135 @@
+# Port crud_touch_delete.sh: update (sentuh) = PATCH tanpa rebuild, create =
+# rebuild + tercatat, delete = entri hilang + no-op pulih. Mode workspace dan
+# single-project.
+@suite workspace
+@fixture miniws
+@requires snap
+@purpose "CRUD per-source: sentuh=PATCH, create/delete membatalkan no-op"
+@keep
+
+
+# ============================ MODE WORKSPACE ============================
+work.new
+fixture.copy
+file.append WsBuildfile flags = MMD, MP
+@set eng project(core).source
+@set engdir dirname({eng})
+
+run.build as cold
+@response cold
+  rc.ok
+@end
+
+run.build as noop
+@response noop
+  out.contains "Nothing to build"
+  out.matches "Cache valid *:"
+@end
+
+time.tick
+file.touch {eng}
+run.build as touch
+@response touch
+  out.contains "Nothing to build"
+  out.matches "Cache valid *:"
+@end
+
+file.write {engdir}/crud_tmp.c <<T
+int crud_tmp(void){return 1;}
+T
+run.build as create
+@response create
+  out.not-contains "Nothing to build"
+@end
+file.contains .satria/sources.cache crud_tmp
+run.build as created
+@response created
+  out.contains "Nothing to build"
+@end
+
+file.delete {engdir}/crud_tmp.c
+run.build as del
+@response del
+  out.not-contains "Nothing to build"
+@end
+@set left count(.satria/sources.cache, "crud_tmp")
+@set gone {left} == 0
+file.write gone.txt <<T
+{gone}
+T
+file.contains gone.txt 1
+run.build as deleted
+@response deleted
+  out.contains "Nothing to build"
+@end
+
+# ============================ MODE SINGLE ============================
+work.new crud_touch_delete-2
+file.write Buildfile <<T
+use project
+
+sources = src
+T
+file.write src/main.c <<T
+int main(void){return 0;}
+T
+file.write src/crud2.c <<T
+int crud2(void){return 2;}
+T
+
+run.cmd -j2 as scold
+@response scold
+  rc.ok
+@end
+
+time.mark .satria/opts.cache as opt0
+run.cmd -j2 as snoop
+mtime.unchanged opt0
+@response snoop
+  out.contains "Nothing to build"
+@end
+
+# P opts.cache harus bermetadata lengkap.
+@set pt count(.satria/opts.cache, "^P ")
+@set pm count(.satria/opts.cache, "^P [0-9a-f]{16} [0-9a-f]{16} [0-9]+ [0-9]+")
+@set pmok {pt} > 0 and {pt} == {pm}
+file.write pm.txt <<T
+{pmok}
+T
+file.contains pm.txt 1
+
+# Sentuh sumber: fast path tetap dipakai, fingerprint di-PATCH.
+time.mark .satria/opts.cache as opt1
+time.mark .satria/caches/fingerprint.cache as fp1
+time.tick
+file.touch src/crud2.c
+run.cmd -j2 as stouch
+mtime.unchanged opt1
+mtime.changed fp1
+@response stouch
+  out.contains "Status     : Success"
+@end
+
+time.mark .satria/opts.cache as opt2
+run.cmd -j2 as snoop2
+mtime.unchanged opt2
+
+# Create: sumber baru -> opts.cache tertulis, lalu no-op pulih.
+file.write src/crud3.c <<T
+int crud3(void){return 3;}
+T
+time.mark .satria/opts.cache as opt3
+run.cmd -j2 as screate
+mtime.changed opt3
+time.mark .satria/opts.cache as opt4
+run.cmd -j2 as snoop3
+mtime.unchanged opt4
+
+# Delete: sumber hilang -> opts.cache tertulis, lalu no-op pulih.
+file.delete src/crud2.c
+time.mark .satria/opts.cache as opt5
+run.cmd -j2 as sdel
+mtime.changed opt5
+time.mark .satria/opts.cache as opt6
+run.cmd -j2 as snoop4
+mtime.unchanged opt6

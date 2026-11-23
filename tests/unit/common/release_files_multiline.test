@@ -1,0 +1,99 @@
+# Port release_files_multiline.sh: nilai release.files boleh berlanjut ke
+# baris berikutnya; tiap baris lanjutan menjadi entri, tanpa spasi/tab/koma
+# yang ikut menjadi nama di dist.
+@suite workspace
+@requires cold
+@purpose "release.files multi-baris: entri lanjutan masuk, hanya entri terdaftar"
+
+# ---- A. Buildfile proyek tunggal: daftar berlanjut (binary + aset) --------
+work.new release_files_multiline-p
+file.write Buildfile <<T
+use project
+
+sources = src
+output.binaryName = demo
+
+release.name = demo
+release.version = 1.0.0
+release.output = dist/demo-v{version}.tar.gz
+release.format = tar
+release.compress = gzip
+# Baris lanjutan (spasi + trailing comma) harus ikut menjadi entri.
+release.files = bin/demo:bin/demo,
+                notes.txt:share/demo/notes.txt
+T
+file.write src/main.c <<T
+#include <stdio.h>
+int main(void){puts("demo");return 0;}
+T
+file.write notes.txt <<T
+catatan rilis
+T
+
+run.cmd -j2 as build
+@response build
+  rc.ok
+@end
+file.exists dist/demo-v1.0.0.tar.gz
+
+run.exec tar tzf dist/demo-v1.0.0.tar.gz as list
+@response list
+  rc.ok
+  out.contains bin/demo
+  out.contains share/demo/notes.txt
+  out.not-matches "[[:space:]]"
+@end
+@set n lines(.out.list.txt)
+@set two {n} == 2
+file.write count.txt <<T
+{two}
+T
+file.contains count.txt 1
+
+# ---- B. WsBuildfile: daftar berlanjut, hanya entri terdaftar --------------
+work.new release_files_multiline-w
+file.write WsBuildfile <<T
+use workspace
+projects = a, c, d
+
+release.name = demo
+release.version = 1.0.0
+release.output = dist/demo-v{version}.tar.gz
+release.format = tar
+release.compress = gzip
+release.files =
+        bin/a:bin/a
+T
+file.write a/src/main.c <<T
+#include <stdio.h>
+int main(void){puts("a");return 0;}
+T
+file.write c/src/main.c <<T
+#include <stdio.h>
+int main(void){puts("c");return 0;}
+T
+file.write d/src/main.c <<T
+#include <stdio.h>
+int main(void){puts("d");return 0;}
+T
+
+run.build as wsbuild
+@response wsbuild
+  rc.ok
+@end
+file.exists dist/demo-v1.0.0.tar.gz
+
+run.exec tar tzf dist/demo-v1.0.0.tar.gz as wslist
+@response wslist
+  rc.ok
+  out.contains bin/a
+  out.not-contains bin/c
+  out.not-contains bin/d
+  out.not-matches "[[:space:]]"
+@end
+@set wn lines(.out.wslist.txt)
+@set one {wn} == 1
+file.write wcount.txt <<T
+{one}
+T
+file.contains wcount.txt 1

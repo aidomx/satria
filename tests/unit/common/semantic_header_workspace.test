@@ -1,0 +1,53 @@
+# Port semantic_header_workspace.sh: perubahan deklarasi header yang tidak
+# dipakai tidak boleh mengompilasi; yang dipakai harus. Touch tanpa ubah isi
+# tetap dianggap setara.
+@suite workspace
+@fixture miniws
+@requires cold
+@purpose "Header semantik: deklarasi tak terpakai dilewati, yang terpakai dikompilasi"
+
+work.new
+fixture.copy
+work.clean all
+env.set SATRIA_CACHE_NOOP=0
+@set hdr core/include/rupa.h
+
+run.build as cold
+@response cold
+  rc.ok
+@end
+
+# 1) Tambah deklarasi yang tidak dikonsumsi translation unit mana pun.
+file.append {hdr} "int miniws_unused_api(int value);"
+run.build as unused
+@response unused
+  out.not-matches "OK[[:space:]].*\\.(c|cc|cpp|cxx)$"
+  out.contains "Headers : "
+  out.contains "skipped (touched, content unchanged)"
+@end
+
+# 2) Sentuh header tanpa mengubah isi: tidak ada kompilasi.
+file.touch {hdr}
+run.build as touch
+@response touch
+  out.not-matches "OK[[:space:]].*\\.(c|cc|cpp|cxx)$"
+@end
+
+# 3) Ubah deklarasi yang benar-benar dipakai core/src/main.c.
+work.new semantic_header_used
+fixture.copy
+work.clean all
+
+run.build as cold2
+@response cold2
+  rc.ok
+@end
+
+@find hdrs include/*.h
+@for p in {hdrs}
+run.exec sed -i "2i #define AB_PROBE 2" {p} as sedit
+@end
+run.build as used
+@response used
+  out.matches "OK .*core/src/main.c"
+@end

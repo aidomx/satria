@@ -1,0 +1,51 @@
+# Port faststate_external_header.sh: fast-state proyek tunggal harus ikut
+# memperhitungkan dependensi header di luar sources/includeDirs, mis.
+# `#include "../shared.h"`.
+@suite project
+@requires snap
+@purpose "Fast-state menghitung header eksternal; touch tanpa ubah isi tetap no-op"
+
+work.new
+file.write Buildfile <<T
+use project
+sources = src
+headers = include
+compiler = gcc
+flags = Wall, Wextra, MMD, MP
+std = gnu11
+T
+file.write shared.h <<T
+#define EXTERNAL_VALUE 1
+T
+file.write src/main.c <<T
+#include "../shared.h"
+int main(void) { return EXTERNAL_VALUE == 1 ? 0 : 1; }
+T
+
+run.build as cold
+@response cold
+  out.contains src/main.c
+@end
+
+run.build as noop
+@response noop
+  out.contains "Nothing to build"
+@end
+
+# Edit isi dengan panjang sama: fast-state harus batal dan konsumen dikompilasi.
+file.write shared.h <<T
+#define EXTERNAL_VALUE 2
+T
+run.build as edit
+@response edit
+  out.not-contains "Nothing to build"
+  out.contains src/main.c
+@end
+
+# Sentuh saja: isi sama terbukti lewat hash, tetap no-op.
+time.tick
+file.touch shared.h
+run.build as touch
+@response touch
+  out.contains "Nothing to build"
+@end

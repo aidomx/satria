@@ -1,0 +1,95 @@
+# Port cdeps_group.sh: grup cdeps level atas setara penulisan per proyek,
+# tumpang tindih digabung tanpa duplikat, dan bentuk salah ditolak dengan
+# lokasi baris WsBuildfile.
+@suite workspace
+@fixture miniws
+@requires cold
+@purpose "Grup cdeps: setara per proyek, tumpang tindih, bentuk salah ditolak"
+
+work.new
+fixture.copy
+
+# Fixture sudah memuat baris cdeps; buang agar tiap kasus menulis sendiri.
+run.exec sed -i "/^cdeps/d" WsBuildfile as cleanup
+
+# 1. Grup {bade,core} vs penulisan dua arah per proyek.
+file.append WsBuildfile "cdeps = {bade,core}"
+work.clean all
+run.cmd -w -g compdb as grup
+@response grup
+  rc.ok
+@end
+file.copy work(compile_commands.json) grup.json
+
+run.exec sed -i "/^cdeps/d" WsBuildfile as clean2
+file.append WsBuildfile bade.cdeps = core
+file.append WsBuildfile core.cdeps = bade
+work.clean all
+run.cmd -w -g compdb as manual
+@response manual
+  rc.ok
+@end
+file.copy work(compile_commands.json) manual.json
+file.same grup.json manual.json
+
+# 2. Grup tumpang tindih = satu relasi yang sama.
+run.exec sed -i "/^cdeps/d" WsBuildfile as clean3
+file.append WsBuildfile "cdeps = {bade,core}, {core,bade}"
+work.clean all
+run.cmd -w -g compdb as tumpang
+@response tumpang
+  rc.ok
+@end
+file.copy work(compile_commands.json) tumpang.json
+file.same manual.json tumpang.json
+
+# 3. Bentuk salah: pesan menunjuk baris WsBuildfile.
+run.exec sed -i "/^cdeps/d" WsBuildfile as clean4
+file.append WsBuildfile "cdeps = {bade}"
+work.clean all
+run.cmd -w -g compdb as satu
+@response satu
+  rc.fail
+  out.contains "WsBuildfile:"
+  out.contains "minimal dua proyek berbeda"
+@end
+
+run.exec sed -i "/^cdeps/d" WsBuildfile as clean5
+file.append WsBuildfile "cdeps = {bade,nope}"
+work.clean all
+run.cmd -w -g compdb as nope
+@response nope
+  rc.fail
+  out.contains "WsBuildfile:"
+  out.contains "tidak dikenal"
+@end
+
+run.exec sed -i "/^cdeps/d" WsBuildfile as clean6
+file.append WsBuildfile "cdeps = bade, core"
+work.clean all
+run.cmd -w -g compdb as lama
+@response lama
+  rc.fail
+  out.contains "WsBuildfile:"
+  out.contains "harus berbentuk"
+@end
+
+run.exec sed -i "/^cdeps/d" WsBuildfile as clean7
+file.append WsBuildfile "cdeps = {bade,core"
+work.clean all
+run.cmd -w -g compdb as tutup
+@response tutup
+  rc.fail
+  out.contains "WsBuildfile:"
+  out.contains "tidak ditemukan"
+@end
+
+run.exec sed -i "/^cdeps/d" WsBuildfile as clean8
+file.append WsBuildfile "cdeps = {bade,,core}"
+work.clean all
+run.cmd -w -g compdb as kosong
+@response kosong
+  rc.fail
+  out.contains "WsBuildfile:"
+  out.contains "nama proyek kosong"
+@end

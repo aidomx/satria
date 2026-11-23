@@ -1,0 +1,27 @@
+# Port workspace_selective_target.sh: target selektif `-w core` tidak boleh
+# membangun proyek yang tertaut lewat cdeps (bade), tetapi harus memperingatkan
+# bahwa input proyek tak terpilih juga berubah.
+@suite workspace
+@fixture miniws
+@requires cold
+@purpose "Target selektif: peringatan divergensi, bade tidak diproses, core dibangun"
+
+work.new
+fixture.copy
+
+run.build as cold
+@response cold
+  rc.ok
+@end
+
+@set core project(core).source
+@set bade project(bade).source
+file.append {core} "/* selected core edit */"
+file.append {bade} "/* unselected bade edit */"
+
+run.cmd -w core as sel
+@response sel
+  out.contains "warning: selective target 'core' has changed inputs in selected project(s) [core] and unselected project(s) [bade]."
+  out.not-matches '^> Project : bade$|bade/src/.*OK|^> Linking : bin/bade|^> Library : lib/libbade'
+  out.matches "OK .*{core}"
+@end

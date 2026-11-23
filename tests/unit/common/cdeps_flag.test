@@ -1,0 +1,65 @@
+# Port cdeps_flag.sh: --with-cdeps menarik provider cdeps; tanpa flag kontrak
+# lama tetap berlaku (+ peringatan pre-flight yang menyebut provider dan opsi).
+@suite workspace
+@fixture miniws
+@requires cold
+@purpose "--with-cdeps menarik provider; kontrak default + peringatan pre-flight"
+
+work.new
+fixture.copy
+work.clean all
+
+# 1) Flag tanpa -w harus ditolak.
+run.cmd -j2 --with-cdeps as bad
+@response bad
+  rc.fail
+  out.contains "requires -w"
+@end
+
+# 2) Dingin, -w bade TANPA flag: provider core tidak dibangun (kontrak lama),
+#    peringatan menyebut provider + opsi --with-cdeps.
+run.cmd -j2 -w bade as cold
+@response cold
+  rc.fail
+  out.contains "links against 'core' through cdeps"
+  out.contains --with-cdeps
+  file.absent lib/librupa.a
+@end
+
+# 3) Dingin, -w bade --with-cdeps: core ditarik dan dibangun; link sukses.
+work.clean all
+run.cmd -j2 -w bade --with-cdeps as pull
+@response pull
+  rc.ok
+  out.contains "> core"
+  file.exists lib/librupa.a
+  file.exists bin/bade
+@end
+
+# 4) Run kedua dengan flag = no-op.
+run.cmd -j2 -w bade --with-cdeps as cached
+@response cached
+  rc.ok
+  out.contains cached
+@end
+
+# 5) Provider prebuilt: full build lalu -w core TANPA flag sukses, tanpa
+#    peringatan provider hilang, dan tidak memproses bade.
+work.clean all
+run.build as full
+@response full
+  rc.ok
+@end
+@set core project(core).source
+file.append {core} "/* selected core edit */"
+run.cmd -j2 -w core as sel
+@response sel
+  rc.ok
+  out.not-contains "links against 'bade' through cdeps"
+  out.matches "OK .*{core}"
+  out.not-contains "> bade"
+  out.not-contains "Project : bade"
+  out.not-contains "bade/src/"
+  out.not-contains "Linking : bin/bade"
+  out.not-contains "Library : lib/libbade"
+@end

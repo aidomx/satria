@@ -1,0 +1,204 @@
+# Port legacy_sweep.sh: state lama dibuang otomatis pada run dan clean, baik
+# workspace maupun single-project; <p>.Buildfile (current) dipertahankan dan
+# no-op tetap berlaku setelah penyapuan.
+@suite workspace
+@fixture miniws
+@requires snap
+@purpose "Sapu state legacy: run/clean membuang state lama, cache config dipertahankan"
+
+work.new
+fixture.copy
+file.append WsBuildfile flags = MMD, MP
+
+run.build as cold
+@response cold
+  rc.ok
+@end
+
+# Tanam sampah legacy + penanda current.
+file.write .satria/workspace.state <<T
+T
+file.write .satria/workspace/core.build.fingerprint <<T
+T
+file.write .satria/workspace/core.ws.state <<T
+T
+file.write .satria/workspace/core.ws.lib.state <<T
+T
+file.write .satria/workspace/core.deps.cache <<T
+T
+file.write .satria/workspace/core.src <<T
+T
+file.write .satria/workspace/core.hdr/abc.txt <<T
+T
+file.write .satria/caches/paths.cache <<T
+T
+file.write .satria/build.state <<T
+T
+file.write .satria/build.lib.state <<T
+T
+file.write .satria/build.fingerprint <<T
+T
+file.write .satria/workspace/core.Buildfile <<T
+# current sentinel
+T
+
+run.build as sweep
+@response sweep
+  rc.ok
+  out.contains "Nothing to build"
+  out.matches "Cache valid *:"
+@end
+
+file.absent .satria/workspace.state
+file.absent .satria/workspace/core.build.fingerprint
+file.absent .satria/workspace/core.ws.state
+file.absent .satria/workspace/core.ws.lib.state
+file.absent .satria/workspace/core.deps.cache
+file.absent .satria/workspace/core.src
+file.absent .satria/workspace/core.hdr/abc.txt
+file.absent .satria/caches/paths.cache
+file.absent .satria/build.state
+file.absent .satria/build.lib.state
+file.absent .satria/build.fingerprint
+file.exists .satria/workspace/core.Buildfile
+
+# Clean juga menyapu state lama dan mempertahankan cache config.
+file.write .satria/workspace.state <<T
+T
+file.write .satria/workspace/core.build.fingerprint <<T
+T
+file.write .satria/workspace/core.ws.state <<T
+T
+file.write .satria/workspace/core.ws.lib.state <<T
+T
+file.write .satria/workspace/core.deps.cache <<T
+T
+file.write .satria/workspace/core.src <<T
+T
+file.write .satria/workspace/core.hdr/abc.txt <<T
+T
+file.write .satria/caches/paths.cache <<T
+T
+file.write .satria/build.state <<T
+T
+file.write .satria/build.lib.state <<T
+T
+file.write .satria/build.fingerprint <<T
+T
+
+run.cmd -w clean as clean
+@response clean
+  rc.ok
+@end
+file.absent .satria/workspace.state
+file.absent .satria/workspace/core.build.fingerprint
+file.absent .satria/workspace/core.ws.state
+file.absent .satria/workspace/core.ws.lib.state
+file.absent .satria/workspace/core.deps.cache
+file.absent .satria/workspace/core.src
+file.absent .satria/workspace/core.hdr/abc.txt
+file.absent .satria/caches/paths.cache
+file.absent .satria/build.state
+file.absent .satria/build.lib.state
+file.absent .satria/build.fingerprint
+file.exists .satria/workspace/core.Buildfile
+
+run.build as rebuild
+@response rebuild
+  rc.ok
+@end
+run.build as again
+@response again
+  out.contains "Nothing to build"
+  out.matches "Cache valid *:"
+@end
+
+# ============================ MODE SINGLE ============================
+work.new legacy_sweep-2
+file.write Buildfile <<T
+use project
+
+sources = src
+flags = Wall
+T
+file.write src/main.c <<T
+int main(void){return 0;}
+T
+
+run.cmd -j2 as scold
+@response scold
+  rc.ok
+@end
+
+file.write .satria/workspace/core.build.fingerprint <<T
+T
+file.write .satria/workspace/core.ws.state <<T
+T
+file.write .satria/workspace/core.ws.lib.state <<T
+T
+file.write .satria/workspace/core.deps.cache <<T
+T
+file.write .satria/workspace/core.src <<T
+T
+file.write .satria/workspace/core.hdr/abc.txt <<T
+T
+file.write .satria/caches/paths.cache <<T
+T
+file.write .satria/build.state <<T
+T
+file.write .satria/build.lib.state <<T
+T
+file.write .satria/build.fingerprint <<T
+T
+
+run.cmd -j2 as ssweep
+@response ssweep
+  rc.ok
+  out.contains "Nothing to build"
+@end
+file.absent .satria/workspace/core.build.fingerprint
+file.absent .satria/workspace/core.ws.state
+file.absent .satria/workspace/core.ws.lib.state
+file.absent .satria/workspace/core.deps.cache
+file.absent .satria/workspace/core.src
+file.absent .satria/workspace/core.hdr/abc.txt
+file.absent .satria/caches/paths.cache
+file.absent .satria/build.state
+file.absent .satria/build.lib.state
+file.absent .satria/build.fingerprint
+
+file.write .satria/workspace/core.build.fingerprint <<T
+T
+file.write .satria/workspace/core.ws.state <<T
+T
+file.write .satria/workspace/core.ws.lib.state <<T
+T
+file.write .satria/workspace/core.deps.cache <<T
+T
+file.write .satria/workspace/core.src <<T
+T
+file.write .satria/workspace/core.hdr/abc.txt <<T
+T
+file.write .satria/caches/paths.cache <<T
+T
+file.write .satria/build.state <<T
+T
+file.write .satria/build.lib.state <<T
+T
+file.write .satria/build.fingerprint <<T
+T
+
+run.cmd -j2 clean as sclean
+@response sclean
+  rc.ok
+@end
+file.absent .satria/workspace/core.build.fingerprint
+file.absent .satria/workspace/core.ws.state
+file.absent .satria/workspace/core.ws.lib.state
+file.absent .satria/workspace/core.deps.cache
+file.absent .satria/workspace/core.src
+file.absent .satria/workspace/core.hdr/abc.txt
+file.absent .satria/caches/paths.cache
+file.absent .satria/build.state
+file.absent .satria/build.lib.state
+file.absent .satria/build.fingerprint

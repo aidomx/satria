@@ -1,0 +1,72 @@
+# Port router_noop.sh: router opts.cache untuk jalur cache no-op (tanpa
+# gerbang workspace.state). Route hilang/rusak harus memaksa build normal,
+# lalu pulih sendiri setelah build.
+@suite workspace
+@fixture miniws
+@requires snap
+@purpose "Router opts.cache: no-op mandiri; route hilang/rusak dipulihkan build"
+
+work.new
+fixture.copy
+file.append WsBuildfile flags = MMD, MP
+time.tick
+
+run.build as cold
+@response cold
+  rc.ok
+@end
+file.contains .satria/opts.cache fingerprint$
+
+run.build as noop
+@response noop
+  out.contains "Nothing to build"
+  out.matches "Cache valid *:"
+@end
+
+# Gerbang legacy dihapus: no-op tetap diambil tanpa workspace.state.
+file.delete .satria/workspace.state
+run.build as nostate
+@response nostate
+  out.contains "Nothing to build"
+  out.matches "Cache valid *:"
+@end
+
+# Route hilang -> no-op tidak diambil, lalu router dipulihkan.
+run.exec sed -i -E "/fingerprint$/d" .satria/opts.cache as drop
+@response drop
+  rc.ok
+@end
+run.build as missing
+@response missing
+  out.not-contains "Nothing to build"
+@end
+file.contains .satria/opts.cache fingerprint$
+run.build as again
+@response again
+  out.contains "Nothing to build"
+  out.matches "Cache valid *:"
+@end
+
+# opts.cache rusak -> jalur normal, tidak crash.
+file.write .satria/opts.cache <<T
+garbage
+T
+run.build as corrupt
+@response corrupt
+  rc.ok
+  out.not-contains "Nothing to build"
+@end
+run.build as healed
+@response healed
+  out.contains "Nothing to build"
+  out.matches "Cache valid *:"
+@end
+
+# Edit sumber tetap terdeteksi.
+@set bade project(bade).source
+time.tick
+file.append {bade} "/* e */"
+run.build as edit
+@response edit
+  out.not-contains "Nothing to build"
+@end

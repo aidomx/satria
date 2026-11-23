@@ -15,6 +15,17 @@ discovery, jadi berkas `.sh` ini tidak lagi dieksekusi oleh `unit.sh`.
 | `version_alias.sh` | `../version_alias.test` | M0 |
 | `cdeps_key_reject.sh` | `../cdeps_key_reject.test` | M0 |
 | `wsbuildfile_legacy.sh` | `../wsbuildfile_legacy.test` | M0 |
+| `build_log.sh` | `../build_log.test` | M0 |
+| `cdeps_flag.sh` | `../cdeps_flag.test` | M0 |
+| `cdeps_group.sh` | `../cdeps_group.test` | M0 |
+| `crud_touch_delete.sh` | `../crud_touch_delete.test` | M0 |
+| `faststate_external_header.sh` | `../faststate_external_header.test` | M0 |
+| `legacy_sweep.sh` | `../legacy_sweep.test` | M0 |
+| `release_files_multiline.sh` | `../release_files_multiline.test` | — |
+| `router_noop.sh` | `../router_noop.test` | M0 |
+| `selective_noop_full.sh` | `../selective_noop_full.test` | M0 |
+| `semantic_header_workspace.sh` | `../semantic_header_workspace.test` | M0 |
+| `workspace_selective_target.sh` | `../workspace_selective_target.test` | M0 |
 
 `.sh` yang MASIH berjalan (port parsial atau fitur proses yang belum
 terekspresikan DSL) tetap di `../`:

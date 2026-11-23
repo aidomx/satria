@@ -1,0 +1,46 @@
+# Port selective_noop_full.sh: merge fingerprint per proyek setelah build
+# selektif harus membuat run penuh PERTAMA langsung HIT, sementara perubahan
+# proyek di luar closure tetap terdeteksi.
+@suite workspace
+@fixture miniws
+@requires cold
+@purpose "No-op penuh pertama setelah build selektif HIT; edit proyek luar closure terdeteksi"
+
+work.new
+fixture.copy
+work.clean all
+
+# 1. Build penuh dingin.
+run.build as cold
+@response cold
+  rc.ok
+@end
+
+# 2. Ubah sumber proyek closure -> build selektif.
+@set core project(core).source
+file.append {core} "/* core edit for O1 */"
+run.cmd -w core as sel
+@response sel
+  out.matches "OK .*{core}"
+@end
+
+# 3. Run penuh PERTAMA: harus HIT, bukan jalur penuh (bug O1).
+run.build as full1
+@response full1
+  out.contains "Nothing to build"
+  out.not-matches "OK .*(core|bade)/src/"
+@end
+
+# 4. Ubah proyek LUAR closure: run penuh berikutnya MISS & membangun bade.
+@set bade project(bade).source
+file.append {bade} "/* bade edit after merge */"
+run.build as full2
+@response full2
+  out.matches "OK .*{bade}"
+@end
+
+# 5. Run penuh ketiga: kembali HIT.
+run.build as full3
+@response full3
+  out.contains "Nothing to build"
+@end

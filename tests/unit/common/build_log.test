@@ -1,0 +1,87 @@
+# Port build_log.sh: build.log default-off, `--log`/`log`, toggle lewat
+# konfigurasi (startup.state), warning, error build, dan no-op yang tidak
+# menulis ulang log.
+@suite workspace
+@fixture miniws
+@requires cold
+@purpose "build.log: default off, --log, toggle konfigurasi, warning/error, no-op"
+
+work.new
+fixture.copy
+work.clean state
+@set eng project(core).source
+
+# Default tidak membuat log maupun relay, bahkan pada build dingin.
+run.build as cold
+@response cold
+  file.absent .satria/build.log
+@end
+
+file.append WsBuildfile "flags = Wall, Wextra, MMD, MP"
+file.append WsBuildfile log = true
+file.append {eng} "#warning BUILDLOG_UNIT_WARNING"
+run.build as on
+@response on
+  file.exists .satria/build.log
+  file.contains .satria/build.log BUILDLOG_UNIT_WARNING
+@end
+
+run.cmd -j2 --log as shown
+@response shown
+  out.contains BUILDLOG_UNIT_WARNING
+@end
+
+# No-op tidak menulis ulang log.
+@set before size(.satria/build.log)
+run.build as noop
+@set after size(.satria/build.log)
+@set same {before} == {after}
+file.write same.txt <<T
+{same}
+T
+file.contains same.txt ^1$
+
+# Sumber invalid: build gagal dan kegagalan tercatat di log.
+file.append {eng} "invalid buildlog syntax !!!"
+run.build as broken
+@response broken
+  rc.fail
+  file.contains .satria/build.log error:
+  file.contains .satria/build.log build failed
+@end
+run.cmd -j2 log as shownlog
+@response shownlog
+  out.contains "build failed"
+@end
+
+# Perubahan konfigurasi membatalkan startup.state tanpa clean; log=false
+# menghentikan penulisan log.
+run.exec sed -i "/^invalid buildlog syntax !!!$/d" {eng} as fix
+@response fix
+  rc.ok
+@end
+run.exec sed -i "s/log = true/log = false/" WsBuildfile as off
+@response off
+  rc.ok
+@end
+file.append {eng} "#warning BUILDLOG_DISABLED_WARNING"
+@set before size(.satria/build.log)
+run.build as disabled
+@set after size(.satria/build.log)
+@set same2 {before} == {after}
+file.write same2.txt <<T
+{same2}
+T
+file.contains same2.txt ^1$
+file.contains .satria/startup.state C log = false
+
+file.append {eng} "#warning BUILDLOG_REENABLED_WARNING"
+run.exec sed -i "s/log = false/log = true/" WsBuildfile as backon
+@response backon
+  rc.ok
+@end
+run.build as reenabled
+@response reenabled
+  file.contains .satria/build.log BUILDLOG_REENABLED_WARNING
+  file.contains .satria/startup.state C log = true
+@end
