@@ -9,7 +9,7 @@ watcher_init() {
   }
   [ "$BG" -eq 0 ] || die "-w hanya menampilkan status; jangan digabung dengan -b"
   [ "$CLEAN" -eq 0 ] || die "-w dan --clean tidak bisa digabung"
-  [ "${#SEL[@]}" -eq 0 ] || die "-w tidak menerima -t (watcher tidak memilih tes)"
+  [ "${#SEL[@]}" -eq 0 ] || die "-w tidak menerima -s/--select (watcher tidak memilih tes)"
 
   WTARGET="${POS[0]-}"
   case "$WTARGET" in */* | .*) die "nama target tidak valid: $WTARGET" ;; esac

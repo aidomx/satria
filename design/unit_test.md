@@ -44,7 +44,7 @@ Runner bertanggung jawab menyiapkan lingkungan pengujian, bukan menentukan selur
 
 Ruang lingkup v1 (keputusan):
 
-- CLI run: bash scripts/unit.sh <binary> <target> [-b] [-j N] [-o <log>] [-t <tes>]
+- CLI run: bash scripts/unit.sh <binary> <target> [-b] [-j N] [-o <log>] [-s <tes>[,<tes>...]]
 - CLI watcher: bash scripts/unit.sh -w [target]
 - Snapshot loader: `unit.sh` menyalin `unit_dev.sh` dan `lib/` ke `scripts/.unit.<pid>.d/` lalu menjalankan salinan itu di foreground. Edit `unit_dev.sh` atau `lib/unit_*.sh` saat ada run atau watcher berjalan tidak memengaruhi proses itu. Folder dihapus oleh proses yang memakainya (`drop_copy`); snapshot yatim dari proses yang dihentikan keras (SIGKILL) dibersihkan oleh `unit.sh` berikutnya bila PID-nya sudah tidak hidup.
 - -b wajib ada di v1. Preflight dijalankan sebelum proses dipindahkan ke background.
@@ -648,7 +648,7 @@ Implementasi mengikuti nomor bagian di atas. Runner: `scripts/unit_dev.sh` (dev,
 - [x] Klasifikasi kegagalan 3 kategori (§8): FAIL / PRE / infra (exit 2)
 - [x] Watcher `-w` (§9): read-only atas `log/` (`run.pid`, `run.env`, `bg.pid`, `plan.tsv`, `timing.tsv`, log run); registri multiwatch `watch/<pid>` (tanpa lock); fase `# Prepare` + `* build:` → `√ <HH:MM:SS> <ukuran>` (registri `snap/<pid>.pid`); `# Execution test`; per tes `[i/N]` + `* PASS/FAIL/PRE TIME` atau `* process` ms+persen+ukuran; `# Summary` + exit 0; `# Paused`
 - [x] Reporting (§10–11): ringkasan + `timing.tsv` per tes (tunggu vs kerja via shim sleep; 5 tes terlama), log per tes `log/unit.log` + `log/<tes>.log`
-- [x] Seleksi `-t <tes>` (ekstra): subset, snap hanya bila ada tes [snap] terpilih
+- [x] Seleksi `-s/--select <tes>[,<tes>...]` (ekstra): subset, snap hanya bila ada tes [snap] terpilih
 - [ ] CI dispatch `suite=tests/complexws` (masih didiskusikan)
 
 Batasan `-j` tiga lapis (out of band):

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # scripts/unit_dev.sh - runner unit test dev (design/unit_test.md)
 #
-#   bash scripts/unit_dev.sh <binary> <target> [-b] [-j N] [-o <log>] [-t <tes>]
+#   bash scripts/unit_dev.sh <binary> <target> [-b] [-j N] [-o <log>] [-s <tes>[,<tes>...]]
 #   bash scripts/unit_dev.sh start <binary> <target> [...]   # sama dengan atas
 #   bash scripts/unit_dev.sh stop <target>                   # kill run aktif
 #   bash scripts/unit_dev.sh pause <target>                  # berhenti setelah tes berjalan selesai
@@ -97,14 +97,21 @@ while [ $# -gt 0 ]; do
       JOBS="$2"
       shift 2
       ;;
+    -j[0-9]*)
+      JOBS="${1#-j}"
+      shift
+      ;;
     -o)
       [ $# -ge 2 ] || die "-o memerlukan path log"
       LOG="$2"
       shift 2
       ;;
-    -t)
-      [ $# -ge 2 ] || die "-t memerlukan nama tes"
-      SEL+=("$2")
+    -s | --select)
+      [ $# -ge 2 ] || die "-s/--select memerlukan nama tes"
+      _ifs="$IFS"
+      IFS=","
+      for _s in $2; do [ -n "$_s" ] && SEL+=("$_s"); done
+      IFS="$_ifs"
       shift 2
       ;;
     --clean)
@@ -130,18 +137,18 @@ if [ "$MODE" = "stop" ]; then
   [ "$WATCH" -eq 0 ] || die "stop tidak bisa digabung dengan -w"
   [ "$BG" -eq 0 ] || die "stop tidak bisa digabung dengan -b"
   [ "$CLEAN" -eq 0 ] || die "stop tidak bisa digabung dengan --clean"
-  [ "${#SEL[@]}" -eq 0 ] || die "stop tidak menerima -t"
+  [ "${#SEL[@]}" -eq 0 ] || die "stop tidak menerima -s/--select"
   stop_run
 elif [ "$MODE" = "pause" ]; then
   [ "$WATCH" -eq 0 ] || die "pause tidak bisa digabung dengan -w"
   [ "$BG" -eq 0 ] || die "pause tidak bisa digabung dengan -b"
   [ "$CLEAN" -eq 0 ] || die "pause tidak bisa digabung dengan --clean"
-  [ "${#SEL[@]}" -eq 0 ] || die "pause tidak menerima -t"
+  [ "${#SEL[@]}" -eq 0 ] || die "pause tidak menerima -s/--select"
   pause_run
 elif [ "$MODE" = "resume" ]; then
   [ "$WATCH" -eq 0 ] || die "resume tidak bisa digabung dengan -w"
   [ "$CLEAN" -eq 0 ] || die "resume tidak bisa digabung dengan --clean"
-  [ "${#SEL[@]}" -eq 0 ] || die "resume menolak -t — seleksi otomatis dari sisa plan"
+  [ "${#SEL[@]}" -eq 0 ] || die "resume menolak -s/--select — seleksi otomatis dari sisa plan"
   rm -f "$STAGE/targets/${POS[0]}/log/pause.flag" 2> /dev/null
   resume_run
 elif [ "$WATCH" -eq 1 ]; then

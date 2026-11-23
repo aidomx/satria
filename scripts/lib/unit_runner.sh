@@ -55,7 +55,7 @@ runner_background() {
   if [ "$BG" -eq 1 ] && [ -z "${UNIT_V1_CHILD:-}" ]; then
     set -m
     SELARGS=()
-    for s in "${SEL[@]}"; do SELARGS+=(-t "$s"); done
+    for s in "${SEL[@]}"; do SELARGS+=(-s "$s"); done
     UNIT_V1_CHILD=1 nohup bash "$0" "$BIN_IN" "$TNAME" -j "$JOBS" -o "$LOG" \
       "${SELARGS[@]}" > /dev/null 2>&1 &
     CPID=$!
@@ -197,7 +197,7 @@ runner_validate() {
       ok=0
       for t in "${COLD[@]}"; do [ "$t" = "$s" ] && ok=1 && break; done
       for t in "${SNAP[@]}"; do [ "$t" = "$s" ] && ok=1 && break; done
-      [ "$ok" -eq 1 ] || die "tes '-t $s' tidak ada di tests/unit/common atau tidak terdaftar di classes.conf"
+      [ "$ok" -eq 1 ] || die "tes '-s $s' tidak ada di tests/unit/common atau tidak terdaftar di classes.conf"
       for t in "${COLD[@]}"; do [ "$t" = "$s" ] && {
         NC+=("$t")
         break
@@ -207,7 +207,7 @@ runner_validate() {
         break
       }; done
     done
-    say "> Seleksi : ${#SEL[@]} tes (-t: ${SEL[*]}), cold $((${#SEL[@]} - ${#NS[@]})), snap ${#NS[@]}"
+    say "> Seleksi : ${#SEL[@]} tes (-s: ${SEL[*]}), cold $((${#SEL[@]} - ${#NS[@]})), snap ${#NS[@]}"
     if [ "${#NC[@]}" -gt 0 ]; then COLD=("${NC[@]}"); else COLD=(); fi
     if [ "${#NS[@]}" -gt 0 ]; then SNAP=("${NS[@]}"); else SNAP=(); fi
   fi
@@ -313,7 +313,7 @@ print proj "\t" src "\t" obj
   done
   # timing.prev = pengetahuan durasi yang terakumulasi: gabungan prev lama +
   # timing run terakhir (run terakhir menang bila nama sama — dibaca kedua,
-  # mengubah nilai). Gabungan, bukan salinan: run -t yang memilih subset
+  # mengubah nilai). Gabungan, bukan salinan: run -s yang memilih subset
   # tidak lagi menyempitkan cakupan percen watcher (problem: persen hanya
   # tampil untuk tes yang kebetulan ada di run terakhir).
   if [ -s "$LOGDIR/timing.tsv" ]; then

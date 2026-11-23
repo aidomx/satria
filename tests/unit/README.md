@@ -14,7 +14,7 @@ berakhir sebagai PRECONDITION bila fixture tidak memenuhinya.
 ## Menjalankan
 
 ```
-bash scripts/unit.sh bin/satria <target> [-b] [-j N] [-o <log>] [-t <tes>] [--clean]
+bash scripts/unit.sh bin/satria <target> [-b] [-j N] [-o <log>] [-s <tes>[,<tes>...]] [--clean]
 bash scripts/unit.sh -w [target]
 ```
 
@@ -25,7 +25,7 @@ bash scripts/unit.sh -w [target]
 
 ```
 bash scripts/unit.sh bin/satria complexws -j 2                 # seluruh suite
-bash scripts/unit.sh bin/satria complexws -j 2 -t cache_noop   # satu tes
+bash scripts/unit.sh bin/satria complexws -j 2 -s cache_noop   # satu tes
 bash scripts/unit.sh -w                                        # watcher: satu-satunya run aktif
 bash scripts/unit.sh -w complexws                              # watcher satu target (Ctrl-C)
 bash scripts/unit.sh bin/satria rupaws --clean                 # hapus staging target

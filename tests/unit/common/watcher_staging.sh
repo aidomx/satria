@@ -355,8 +355,8 @@ echo "PASS watcher_staging: tidak ada run aktif menuntut target disebut"
 # --- argumen yang tidak sah ---------------------------------------------------
 UNIT_STAGE="$st" bash "$RUNNER" -w demo -b > /dev/null 2>&1 \
   && fail "-w digabung -b diterima"
-UNIT_STAGE="$st" bash "$RUNNER" -w demo -t alpha > /dev/null 2>&1 \
-  && fail "-w digabung -t diterima"
+UNIT_STAGE="$st" bash "$RUNNER" -w demo -s alpha > /dev/null 2>&1 \
+  && fail "-w digabung -s diterima"
 UNIT_STAGE="$st" bash "$RUNNER" -w demo lain > /dev/null 2>&1 \
   && fail "-w dengan dua argumen diterima"
 echo "PASS watcher_staging: argumen tidak sah ditolak"
