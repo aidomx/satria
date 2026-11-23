@@ -401,13 +401,14 @@ assert_exec() { # $1=obj $2=aksi $3=argumen(sudah resolve) $4=klausa
       else
         [ "$o" -ne 0 ] && ok "$klausa" || no "$klausa" "$o" "bukan 0"
       fi ;;
-    out.contains|out.not-contains|out.matches)
+    out.contains|out.not-contains|out.matches|out.not-matches)
       o=$(label_out "$label") || return
       args=$(unesc "$(unq "$args")")
       case "$aksi" in
         contains)      grep -qF -- "$args" "$o" && ok "$klausa" || no "$klausa" "tidak ada" "$args" ;;
         not-contains)  grep -qF -- "$args" "$o" && no "$klausa" "ada" "tiada $args" || ok "$klausa" ;;
         matches)       grep -qE -- "$args" "$o" && ok "$klausa" || no "$klausa" "tidak cocok" "$args" ;;
+        not-matches)   grep -qE -- "$args" "$o" && no "$klausa" "cocok" "tiada $args" || ok "$klausa" ;;
       esac ;;
     out.equals)
       read -r -a AB <<<"$args"

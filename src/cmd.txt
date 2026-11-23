@@ -366,25 +366,59 @@ Not supported on Windows (uses LD_PRELOAD/dlsym).
 ---endtrace
 
 ---test
-Run the repo's unit tests (delegation to scripts/unit.sh)
+Run the repo's unit tests (native runner, M4d)
 
-  satria test [binary] <target> [-b] [-j N] [-o LOG] [-t TEST] [--clean]
+  satria test [binary] <target> [-b] [-j N] [-o LOG] [-s TEST[,TEST...]] [--clean]
 
-All arguments are passed to scripts/unit.sh. If the first argument is not an
-option, a unit_dev mode word (start/stop/pause/resume), or a path to an
-existing executable, the running satria binary itself is inserted as
-<binary> — so `satria test miniws` means `satria test bin/satria miniws`.
-A repo-relative binary path given from a subdirectory is absolutized
-(unit.sh resolves <binary> against the current directory).
+The default run is native and in-process: satria stages tests/unit,
+classifies classes.conf, builds the fixture and cold snapshot, discovers
+projects from the compdb, and executes the selected tests without invoking
+scripts/unit.sh. The leading <binary> is optional — the running satria
+binary itself is pinned into the staging and used to run the tests, so
+`satria test miniws` is enough. Background `-b`, watcher `-w/--watch`, and
+the stop/pause/resume modes are not ported yet and still delegate to
+scripts/unit.sh (bash); `start` is accepted as a synonym for the default run.
 
   satria test miniws            Full miniws sweep (cold + snap)
-  satria test miniws -t cache_noop        Single test (binary = satria itself)
-  satria test bin/satria miniws -b        Explicit binary, baseline run
+  satria test miniws -s cache_noop        Single test
+  satria test miniws -s cache_noop,version_alias   Comma-separated selection
+  satria test bin/satria miniws -b        Background run (still bash)
   satria test miniws --clean              Clean staging first
 
-The repo root is found from the running binary (bin/../), so `satria test`
-works from any directory inside the repo. The exit code of unit.sh is the
-exit code of satria. Not available on Windows.
+The repo root is the current directory when it contains tests/unit, else
+the running binary's parent (bin/..), so `satria test` works from any
+directory inside the repo. The exit code of the runner is the exit code of
+satria. Not available on Windows (except the native `--parse` and the
+POSIX-only native paths below).
+
+Native DSL (design/unit_test_dsl.md):
+
+  satria test --parse <file.test>         Print parser events (TSV)
+  satria test --parse --check <file>      Validate syntax only; rc 0/1
+  satria test --parse --suite <dir>       Validate every *.test in dir
+  satria test <file.test>                 Execute one .test without bash
+
+  satria test --run <target> [-j N] [-s TEST[,TEST...]] [-o LOG] [--clean]
+                                          Native full sweep of a target
+
+`--run` is the native runner (M4c): it stages tests/unit, classifies
+classes.conf, builds the fixture and cold snapshot, discovers projects from
+the compdb, then runs every selected test foreground — .test/.t through the
+C DSL executor, .sh through sh. The satria binary running the command is
+pinned into the staging and used to execute tests. Staging defaults to
+/tmp/satria-unit (override UNIT_STAGE); logs, timing.tsv, plan.tsv and
+run.env land in targets/<target>/log. A .test/.t first argument without an
+option selects the single-file executor below.
+
+`satria test <file.test>` implements the DSL evaluator/executor (M4b)
+in-process: expressions,
+selectors, file/work/fixture actions, blocks, responses and verdicts are
+handled natively, and `run.*` spawns the satria binary directly (no shell).
+It needs UNIT_REPO (default: cwd) and honours SATRIA, UNIT_TMP (default
+/tmp/satria-dsl), UNIT_JOBS, UNIT_CLASS, UNIT_FIXTURE, UNIT_DISCOVERY.
+Fixture copies drop stale build artifacts; when UNIT_DISCOVERY is absent and
+the test uses project() selectors, discovery is generated from the fixture
+with `satria -w -g compdb` (compile_commands.json → sources.tsv).
 ---endtest
 
 ---bench

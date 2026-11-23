@@ -99,7 +99,7 @@ static const char *actionsFor(const char *obj) {
   if (strcmp(obj, "run") == 0) return "build cmd exec bg stop wait tool";
   if (strcmp(obj, "stage") == 0) return "set log";
   if (strcmp(obj, "text") == 0) return "count aggregate";
-  if (strcmp(obj, "out") == 0) return "contains not-contains matches equals";
+  if (strcmp(obj, "out") == 0) return "contains not-contains matches not-matches equals";
   if (strcmp(obj, "rc") == 0) return "ok fail";
   if (strcmp(obj, "mtime") == 0) return "changed unchanged";
   return NULL;

@@ -38,7 +38,7 @@ OBJ_AKSI_time='tick mark'
 OBJ_AKSI_run='build cmd exec bg stop wait tool'
 OBJ_AKSI_stage='set log'
 OBJ_AKSI_text='count aggregate'
-OBJ_AKSI_out='contains not-contains matches equals'
+OBJ_AKSI_out='contains not-contains matches not-matches equals'
 OBJ_AKSI_rc='ok fail'
 OBJ_AKSI_mtime='changed unchanged'
 
