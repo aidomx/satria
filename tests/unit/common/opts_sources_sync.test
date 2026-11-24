@@ -1,0 +1,173 @@
+# Port opts_sources_sync.sh: sambungan dua arah opts.cache <-> sources.cache
+# (design/startup.md §4).
+#   opts -> sources: route `sources` berstempel nanodetik; perubahan
+#     sources.cache (touch, isi dalam detik sama, hapus) menolak no-op sampai
+#     run sukses menyegarkan route.
+#   sources -> opts: run sukses (merge P maupun re-walk) menyegarkan SEMUA
+#     route di opts.cache sehingga no-op kembali diambil run berikutnya.
+@suite workspace
+@fixture miniws
+@requires snap
+@purpose "Sinkron opts<->sources: route ns, perubahan sources menolak no-op, run sukses resync"
+
+# ============================= MODE WORKSPACE =============================
+work.new
+fixture.copy
+file.append WsBuildfile flags = MMD, MP
+
+run.build as cold
+@response cold
+  rc.ok
+@end
+time.tick
+# route `sources` dengan time > 10^18 = stempel nanodetik
+run.exec awk '$7=="sources" && $5+0 > 1000000000000000000 {found=1} END {exit !found}' .satria/opts.cache as ns
+@response ns
+  rc.ok
+@end
+
+run.build as noop1
+@response noop1
+  rc.ok
+  out.contains "Nothing to build"
+  out.contains "Cache valid"
+@end
+
+# arah opts -> sources: touch menolak no-op, run sukses resync
+file.touch .satria/sources.cache
+run.build as touched
+@response touched
+  out.not-contains "Nothing to build"
+@end
+run.build as resynced
+@response resynced
+  out.contains "Nothing to build"
+  out.contains "Cache valid"
+@end
+
+# sources -> opts: sumber baru -> sources.cache berubah -> run sukses -> no-op
+file.write bade/src/z_sync.c <<T
+int z_sync(void){return 1;}
+T
+run.build as newsrc
+@response newsrc
+  out.not-contains "Nothing to build"
+@end
+file.contains .satria/sources.cache z_sync
+run.build as newsync
+@response newsync
+  out.contains "Nothing to build"
+  out.contains "Cache valid"
+@end
+
+# regresi H1: isi sources.cache berubah, ukuran & detik mtime sama, ns beda
+file.copy work(.satria/sources.cache) bk
+run.exec python3 repo(tests/unit/lib/meta_tools.py) corrupt-same-second .satria/sources.cache as corrupt
+@response corrupt
+  rc.ok
+@end
+run.build as h1
+@response h1
+  out.not-contains "Nothing to build"
+@end
+file.same .satria/sources.cache bk
+run.build as h1back
+@response h1back
+  out.contains "Nothing to build"
+  out.contains "Cache valid"
+@end
+
+# indeks dihapus: run sukses membangun ulang + route konsisten
+file.delete .satria/sources.cache
+run.build as gone
+@response gone
+  out.not-contains "Nothing to build"
+@end
+file.contains .satria/sources.cache ^SATRIASRC2
+run.build as goneback
+@response goneback
+  out.contains "Nothing to build"
+  out.contains "Cache valid"
+@end
+
+# ============================ MODE SINGLE-PROJECT ============================
+work.new opts_sources_sync-2
+file.write Buildfile <<T
+use project
+
+sources = src
+T
+file.write src/main.c <<T
+int main(void){return 0;}
+T
+
+run.cmd -j2 as scold
+@response scold
+  rc.ok
+@end
+file.contains .satria/sources.cache ^SATRIASRC2
+run.exec awk '$7=="sources" && $5+0 > 1000000000000000000 {found=1} END {exit !found}' .satria/opts.cache as sns
+@response sns
+  rc.ok
+@end
+
+time.tick
+time.mark .satria/opts.cache as o0
+run.cmd -j2 as snoop
+@response snoop
+  rc.ok
+@end
+mtime.unchanged o0
+
+# arah opts -> sources
+file.touch .satria/sources.cache
+time.mark .satria/opts.cache as o1
+run.cmd -j2 as stouch
+@response stouch
+  rc.ok
+@end
+mtime.changed o1
+time.mark .satria/opts.cache as o2
+run.cmd -j2 as sresync
+@response sresync
+  rc.ok
+@end
+mtime.unchanged o2
+
+# regresi H1
+file.copy work(.satria/sources.cache) bk
+run.exec python3 repo(tests/unit/lib/meta_tools.py) corrupt-same-second .satria/sources.cache as scorrupt
+@response scorrupt
+  rc.ok
+@end
+time.mark .satria/opts.cache as o3
+run.cmd -j2 as sh1
+@response sh1
+  rc.ok
+@end
+mtime.changed o3
+file.same .satria/sources.cache bk
+time.mark .satria/opts.cache as o4
+run.cmd -j2 as sh1back
+@response sh1back
+  rc.ok
+@end
+mtime.unchanged o4
+
+# arah sources -> opts: sumber baru
+file.write src/z2.c <<T
+int z2(void){return 2;}
+T
+time.mark .satria/opts.cache as o5
+run.cmd -j2 as snew
+@response snew
+  rc.ok
+@end
+mtime.changed o5
+file.contains .satria/sources.cache z2.c
+time.mark .satria/opts.cache as o6
+run.cmd -j2 as snewback
+@response snewback
+  rc.ok
+@end
+mtime.unchanged o6

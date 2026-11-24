@@ -1,0 +1,303 @@
+# Port watcher_staging.sh: `-w` memantau staging sintetis (design §9).
+#   - header (PID, staging, interval, target + PID run, pilihan otomatis)
+#   - entri tes selesai dari timing.tsv, summary sekali saat RUN_ENDED
+#   - non-TTY tanpa baris "process" / escape
+#   - `-w <target>` menyempitkan cakupan; auto memilih satu-satunya run aktif
+#   - multi-watch (lock per watcher), lock basi dibersihkan
+#   - run mati tanpa RUN_ENDED tidak mengarang summary
+#   - beberapa/nol run aktif menuntut target; argumen tidak sah ditolak
+@suite project
+@requires snap
+@purpose "Watcher staging: header/entri/summary, multi-watch, lock basi, pemilihan target"
+
+work.new
+@set st work(stage)
+file.write stage/targets/demo/log/plan.tsv <<T
+1	alpha	cold
+2	beta	cold
+T
+file.write stage/targets/demo/log/timing.tsv <<T
+operasi	fase	ms	pass	fail	pre	sleep_ms	work_ms
+alpha	cold	1000	3	0	0	0	1000
+T
+file.write stage/targets/demo/log/run.log <<T
+> Running beta.sh [cold]...
+T
+
+# PID run aktif (sleep) + manifest run.env
+run.execbg sleep 60 as rp
+@set rpid pid(rp)
+time.stamp as ts
+file.write stage/targets/demo/log/run.pid <<T
+{rpid}
+T
+file.write stage/targets/demo/log/run.env <<T
+RUN_STARTED={ts}
+RUN_TARGET=demo
+RUN_TESTS_COLD=2
+RUN_TESTS_SNAP=0
+RUN_LOG={st}/targets/demo/log/run.log
+T
+
+# target `lain` sudah selesai
+file.write stage/targets/lain/log/timing.tsv <<T
+operasi	fase	ms	pass	fail	pre	sleep_ms	work_ms
+gamma	cold	500	1	0	0	0	500
+T
+file.write stage/targets/lain/log/run.log <<T
+T
+file.write stage/targets/lain/log/run.env <<T
+RUN_STARTED={ts}
+RUN_ENDED={ts}
+RUN_ELAPSED_MS=1000
+RUN_TARGET=lain
+RUN_TESTS_COLD=1
+RUN_TESTS_SNAP=0
+RUN_LOG={st}/targets/lain/log/run.log
+T
+
+env.set UNIT_STAGE={st}
+env.set UNIT_WATCH_INTERVAL=1
+
+# --- tanpa argumen: tepat satu run aktif -> dipilih otomatis ---
+run.bg test -w as w1
+@while not matches(w1, Dipilih)
+time.sleep 0.2
+@end
+@response w1
+  out.matches "Target   : demo - {rpid}"
+  out.contains "Dipilih otomatis"
+  out.contains "[1/2] alpha"
+  out.matches "^\\* PASS: 3 FAIL: 0 PRE: 0"
+  out.not-contains lain
+  out.not-contains "\\* process:"
+@end
+run.stop w1 term
+run.wait w1 20
+
+# --- -w <target>: hanya target itu ---
+run.bg test -w demo as w2
+@while not matches(w2, alpha)
+time.sleep 0.2
+@end
+@response w2
+  out.contains "[1/2] alpha"
+  out.not-contains lain
+  out.not-contains "\\* process:"
+@end
+run.stop w2 term
+run.wait w2 20
+
+# --- multi-watch: dua watcher hidup, lock masing-masing ---
+run.bg test -w demo as m1
+@while not matches(m1, demo)
+time.sleep 0.2
+@end
+run.bg test -w demo as m2
+@while not matches(m2, demo)
+time.sleep 0.2
+@end
+@set p1 pid(m1)
+@set p2 pid(m2)
+file.exists stage/watch/{p1}
+file.exists stage/watch/{p2}
+run.exec kill -0 {p1} as alive1
+@response alive1
+  rc.ok
+@end
+run.exec kill -0 {p2} as alive2
+@response alive2
+  rc.ok
+@end
+@response m2
+  out.contains "Watcher lain"
+@end
+run.stop m2 term
+run.wait m2 20
+file.absent stage/watch/{p2}
+run.exec kill -0 {p1} as alive1b
+@response alive1b
+  rc.ok
+@end
+run.stop m1 term
+run.wait m1 20
+@assert glob(stage/watch/*) == 0
+
+# --- lock basi (PID mati) dibersihkan saat watcher baru dimulai ---
+run.execbg sleep 1 as dead
+@set dp pid(dead)
+run.wait dead 10
+file.write stage/watch/{dp} <<T
+demo
+T
+run.bg test -w as w3
+@while not matches(w3, demo)
+time.sleep 0.2
+@end
+@response w3
+  out.contains "Target   : demo"
+@end
+file.absent stage/watch/{dp}
+run.stop w3 term
+run.wait w3 20
+
+# --- run selesai: entri terakhir + summary sekali ---
+run.stop rp term
+run.wait rp 10
+file.delete stage/targets/demo/log/run.pid
+file.write stage/targets/demo/log/timing.tsv <<T
+operasi	fase	ms	pass	fail	pre	sleep_ms	work_ms
+alpha	cold	1000	3	0	0	0	1000
+beta	cold	1000	2	0	0	0	1000
+T
+file.write stage/targets/demo/log/run.log <<T
+> Running beta.sh [cold]...
+> Selesai beta [cold] 1.000s
+T
+file.write stage/targets/demo/log/run.env <<T
+RUN_STARTED={ts}
+RUN_TARGET=demo
+RUN_TESTS_COLD=2
+RUN_TESTS_SNAP=0
+RUN_LOG={st}/targets/demo/log/run.log
+RUN_ENDED={ts}
+RUN_ELAPSED_MS=75000
+T
+run.bg test -w demo as w4
+@while not matches(w4, Summary)
+time.sleep 0.2
+@end
+@response w4
+  out.contains "[2/2] beta"
+  out.matches "^\\* PASS: 2 FAIL: 0 PRE: 0"
+  out.contains "# Summary"
+  out.contains "2/2 selesai, total 00:01:15"
+  out.matches "^\\* PASS: 5 FAIL: 0 PRE: 0"
+@end
+run.wait w4 30
+@set nsum count(.out.w4.txt, ^# Summary)
+@set once {nsum} == 1
+file.write once.txt <<T
+{once}
+T
+file.contains once.txt ^1$
+@assert glob(stage/watch/*) == 0
+
+# --- run mati tanpa RUN_ENDED: tidak mengarang summary ---
+run.execbg sleep 1 as dead2
+@set dp2 pid(dead2)
+run.wait dead2 10
+file.write stage/targets/mati/log/run.pid <<T
+{dp2}
+T
+file.write stage/targets/mati/log/run.env <<T
+RUN_STARTED={ts}
+RUN_TARGET=mati
+RUN_TESTS_COLD=1
+RUN_TESTS_SNAP=0
+RUN_LOG={st}/targets/mati/log/run.log
+T
+file.write stage/targets/mati/log/plan.tsv <<T
+1	alpha	cold
+T
+file.write stage/targets/mati/log/timing.tsv <<T
+operasi	fase	ms	pass	fail	pre	sleep_ms	work_ms
+T
+file.write stage/targets/mati/log/run.log <<T
+T
+run.bg test -w mati as w5
+@while not matches(w5, mati)
+time.sleep 0.2
+@end
+time.sleep 2
+@set nsum2 count(.out.w5.txt, ^# Summary)
+@set nosum {nsum2} == 0
+file.write nosum.txt <<T
+{nosum}
+T
+file.contains nosum.txt ^1$
+run.stop w5 term
+run.wait w5 20
+
+# --- beberapa run aktif: tanpa target ditolak, dengan target diterima ---
+run.execbg sleep 60 as dua
+@set pdua pid(dua)
+run.execbg sleep 60 as tiga
+@set ptiga pid(tiga)
+file.write stage/targets/dua/log/run.pid <<T
+{pdua}
+T
+file.write stage/targets/dua/log/run.env <<T
+RUN_STARTED={ts}
+RUN_TARGET=dua
+RUN_TESTS_COLD=2
+RUN_TESTS_SNAP=0
+RUN_LOG={st}/targets/dua/log/run.log
+T
+file.write stage/targets/dua/log/timing.tsv <<T
+operasi	fase	ms	pass	fail	pre	sleep_ms	work_ms
+T
+file.write stage/targets/dua/log/run.log <<T
+T
+file.write stage/targets/tiga/log/run.pid <<T
+{ptiga}
+T
+file.write stage/targets/tiga/log/run.env <<T
+RUN_STARTED={ts}
+RUN_TARGET=tiga
+RUN_TESTS_COLD=2
+RUN_TESTS_SNAP=0
+RUN_LOG={st}/targets/tiga/log/run.log
+T
+file.write stage/targets/tiga/log/timing.tsv <<T
+operasi	fase	ms	pass	fail	pre	sleep_ms	work_ms
+T
+file.write stage/targets/tiga/log/run.log <<T
+T
+
+run.cmd test -w as e1
+@response e1
+  rc.fail
+  out.contains "sebutkan yang mau dipantau"
+  out.contains dua
+  out.contains tiga
+@end
+
+run.bg test -w dua as w6
+@while not matches(w6, dua)
+time.sleep 0.2
+@end
+@response w6
+  out.contains "Target   : dua - {pdua}"
+  out.not-contains "Target   : tiga"
+@end
+run.stop w6 term
+run.wait w6 20
+run.stop dua term
+run.stop tiga term
+run.wait dua 10
+run.wait tiga 10
+file.delete stage/targets/dua/log/run.pid
+file.delete stage/targets/tiga/log/run.pid
+
+# --- tidak ada run aktif: ditolak dengan daftar kandidat ---
+run.cmd test -w as e2
+@response e2
+  rc.fail
+  out.contains "tidak ada run aktif"
+  out.contains demo
+@end
+
+# --- argumen tidak sah ---
+run.cmd test -w demo -b as e3
+@response e3
+  rc.fail
+@end
+run.cmd test -w demo -s alpha as e4
+@response e4
+  rc.fail
+@end
+run.cmd test -w demo lain as e5
+@response e5
+  rc.fail
+@end

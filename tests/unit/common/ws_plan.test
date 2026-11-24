@@ -1,0 +1,96 @@
+# Port ws_plan.sh: scheduler plan (P4, design/router_centric.md) — induk
+# menyusun rencana per fase dan executor menjalankan tepat rencana itu.
+# Rencana aktif secara default sejak selesai diuji; SATRIA_WS_PLAN=0 adalah
+# jalan keluar ke jalur lama.
+@suite workspace
+@fixture miniws
+@requires cold
+@purpose "Scheduler plan: default aktif, fork paralel, opt-out, single-project"
+
+fixture.copy
+file.append WsBuildfile flags = MMD, MP
+
+# Cold build DEFAULT (tanpa env): kedua fase terverifikasi penuh.
+env.unset SATRIA_WS_PLAN
+run.build as cold
+@response cold
+  rc.ok
+  out.not-contains "ws-plan:"
+  out.not-contains "ws-plan: link batch"
+  out.not-contains "di luar rencana"
+@end
+@assert glob(.satria/ws-plan-*) == 0
+@assert files(.satria/router-stage) == 0
+
+# Jalur paralel (fork): penanda ditulis anak, diverifikasi induk.
+run.exec cp project(bade).binary bade.before
+file.append project(bade).source "int ws_plan_link_probe = 1;"
+env.set SATRIA_WS_PAR=1
+run.build as par
+@response par
+  rc.ok
+  out.not-contains "ws-plan:"
+  out.not-contains "di luar rencana"
+@end
+@assert !same(bade.before, project(bade).binary)
+@assert glob(.satria/ws-plan-*) == 0
+@assert files(.satria/router-stage) == 0
+
+# Fase 1: tanpa workspace gate, scheduler tetap membawa verdict fast-state.
+env.set SATRIA_CACHE_NOOP=0
+run.build as fast
+@response fast
+  rc.ok
+  out.not-contains "ws-plan:"
+@end
+@assert files(.satria/router-stage) == 0
+
+# Opt-out: jalur lama tetap tersedia (nol penanda, nol output plan).
+env.set SATRIA_WS_PLAN=0
+env.unset SATRIA_WS_PAR
+env.unset SATRIA_CACHE_NOOP
+time.tick
+file.append project(bade).source "/* q */"
+run.build as plain
+@response plain
+  rc.ok
+  out.not-contains "ws-plan"
+@end
+@assert glob(.satria/ws-plan-*) == 0
+
+# Single-project: rencana default tidak mengubah jalur cache. Stage
+# single-project tetap eksperimen (SATRIA_WS_STAGE_SINGLE) karena stage yang
+# tidak digabung saat gagal menghapus kemajuan compile parsial.
+work.new wsplan-single
+file.write Buildfile <<T
+use project
+
+sources = src
+T
+file.write src/main.c <<T
+int main(void){return 0;}
+T
+run.cmd -j2 as s1
+@response s1
+  rc.ok
+@end
+@assert files(.satria/router-stage) == 0
+file.contains .satria/opts.cache fingerprint
+
+run.cmd -j2 as s2
+@response s2
+  rc.ok
+  out.contains "Nothing to build"
+@end
+@assert files(.satria/router-stage) == 0
+
+time.tick
+file.write src/main.c <<T
+int main(void){return 1;}
+T
+run.cmd -j2 as s3
+@response s3
+  rc.ok
+  out.contains "1 compiled"
+@end
+@assert files(.satria/router-stage) == 0

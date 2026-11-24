@@ -171,7 +171,7 @@ static void benchUsage(void) {
         "                          `satria trace` (requires trace=true)\n"
         "  artifact=true           tulis results/view/work log\n"
         "  keep=false              simpan workspace setelah selesai\n"
-        "  rolling=true            urutan A/B bergantian per repetisi (abba)\n"
+        "  rolling=true            urutan tool dibalik bergantian per repetisi (abba)\n"
         "  bin=a,b                 binary satria A/B yang dibandingkan\n"
         "  jobs=N                  job paralel (default: jumlah core)\n"
         "  compiler=gcc            nilai `compiler =` di Buildfile\n"
@@ -1266,6 +1266,14 @@ int cmdBench(const char *const argv[], int argc) {
     printf("Project   : %d source · %d header · gcc · gnu11\n", b.source, b.header);
   }
   printf("Directory : %s\n", b.workdir);
+  if (b.ntools > 1) {
+    if (!b.rolling)
+      printf("Order     : grouped (rolling=false)\n");
+    else if (b.runs < 2)
+      printf("Order     : grouped (rolling=true butuh runs>=2 untuk bergantian)\n");
+    else
+      printf("Order     : abba (urutan %d tool dibalik tiap repetisi genap)\n", b.ntools);
+  }
   printf("Versions  :\n");
   for (int i = 0; i < b.ntools; i++)
     printf("  %-11s : %s\n", b.tools[i].label, b.tools[i].version[0] ? b.tools[i].version : "?");
@@ -1355,7 +1363,7 @@ int cmdBench(const char *const argv[], int argc) {
       const char *scen = order[si];
       if (!benchHaveScenario(&b, scen)) continue;
       for (int r = 1; r <= b.runs; r++) {
-        bool reverse = b.rolling && b.ntools == 2 && (r % 2 == 0);
+        bool reverse = b.rolling && b.ntools > 1 && (r % 2 == 0);
         for (int oi = 0; oi < b.ntools; oi++) {
           int i = reverse ? b.ntools - 1 - oi : oi;
           BenchTool *t = &b.tools[i];
@@ -1475,7 +1483,7 @@ int cmdBench(const char *const argv[], int argc) {
       }
 
       for (int r = 1; r <= b.runs; r++) {
-        bool reverse = b.rolling && b.ntools == 2 && (r % 2 == 0);
+        bool reverse = b.rolling && b.ntools > 1 && (r % 2 == 0);
         for (int oi = 0; oi < b.ntools; oi++) {
           int i = reverse ? b.ntools - 1 - oi : oi;
           BenchTool *t = &b.tools[i];

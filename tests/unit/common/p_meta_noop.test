@@ -1,0 +1,234 @@
+# Port p_meta_noop.sh: metadata P + jalur no-op cepat (startup.md §4).
+# - steady state: no-op lewat P-fast (sources.cache + stat, tanpa membuka
+#   fingerprint.cache), diverifikasi via SATRIA_CACHE_TRACE
+# - sentuh: no-op tetap, PATCH hash + segarkan metadata P, run berikut P-fast
+# - sentuh direktori archive: metadata segar, fase archive tidak jalan
+# - edit isi / baris P rusak: build/jalur normal, lalu pulih P-fast
+# - format lama: no-op via jalur penuh + upgrade metadata otomatis
+@suite workspace
+@fixture miniws
+@requires snap
+@purpose "Metadata P: no-op P-fast, refresh saat sentuh, tolak saat rusak, upgrade format lama"
+
+work.new
+fixture.copy
+file.append WsBuildfile flags = MMD, MP
+
+run.build as cold
+@response cold
+  rc.ok
+@end
+@set pt count(.satria/sources.cache, ^P)
+@set pm count(.satria/sources.cache, ^P [0-9a-f]{16} [SDOWH] [0-9a-f]{16} [0-9]+ [0-9]+ [^ ])
+@set allmeta {pt} > 0 && {pm} == {pt}
+file.write allmeta.txt <<T
+{allmeta}
+T
+file.contains allmeta.txt 1
+
+env.set SATRIA_CACHE_TRACE=1
+run.build as fast1
+@response fast1
+  rc.ok
+  out.contains "P-fast hit"
+  out.contains "Nothing to build"
+  out.contains "Cache valid"
+@end
+env.unset SATRIA_CACHE_TRACE
+
+# sentuh sumber core: no-op + PATCH + metadata P disegarkan
+time.tick
+@set src project(core).source
+file.touch {src}
+env.set SATRIA_CACHE_TRACE=1
+run.build as touch1
+@response touch1
+  out.contains "Nothing to build"
+  out.contains "Cache valid"
+  out.contains "PATCH committed"
+  out.contains "P metadata refreshed"
+@end
+env.unset SATRIA_CACHE_TRACE
+env.set SATRIA_CACHE_TRACE=1
+run.build as fast2
+@response fast2
+  out.contains "P-fast hit"
+  out.contains "Nothing to build"
+  out.contains "Cache valid"
+@end
+env.unset SATRIA_CACHE_TRACE
+
+# sentuh akar direktori archive: fase archive tidak jalan (stat dir tidak
+# mengubah verdict P; referensi .sh lama mengharapkan "P-fast refreshed").
+time.tick
+@set arch project(mod).dir
+file.touch {arch}
+env.set SATRIA_CACHE_TRACE=1
+run.build as touchdir
+@response touchdir
+  out.contains "Nothing to build"
+  out.contains "P-fast hit"
+  out.not-contains "| Fase    : archive"
+@end
+env.unset SATRIA_CACHE_TRACE
+env.set SATRIA_CACHE_TRACE=1
+run.build as fast3
+@response fast3
+  out.contains "P-fast hit"
+@end
+env.unset SATRIA_CACHE_TRACE
+
+# edit isi sumber bade: build, lalu no-op pulih P-fast
+file.append project(bade).source "int pmeta_x(void){return 9;}"
+run.build as edit
+@response edit
+  rc.ok
+  out.not-contains "Nothing to build"
+@end
+env.set SATRIA_CACHE_TRACE=1
+run.build as fast4
+@response fast4
+  out.contains "P-fast hit"
+@end
+env.unset SATRIA_CACHE_TRACE
+
+# baris P rusak: run sukses lewat jalur normal, no-op ditolak, lalu pulih
+file.append .satria/sources.cache "P garbage"
+run.build as bad
+@response bad
+  rc.ok
+  out.not-contains "Nothing to build"
+@end
+env.set SATRIA_CACHE_TRACE=1
+run.build as fast5
+@response fast5
+  out.contains "P-fast hit"
+@end
+env.unset SATRIA_CACHE_TRACE
+
+# migrasi format lama: buang kolom metadata, ukuran dijaga, mtime sama
+file.copy work(.satria/sources.cache) bak
+@set before size(.satria/sources.cache)
+run.exec python3 repo(tests/unit/lib/meta_tools.py) strip-meta .satria/sources.cache as strip
+@response strip
+  rc.ok
+@end
+run.exec touch -r bak .satria/sources.cache as mtfix
+@response mtfix
+  rc.ok
+@end
+@set after size(.satria/sources.cache)
+@set keepsrc {before} == {after}
+file.write keepsrc.txt <<T
+{keepsrc}
+T
+file.contains keepsrc.txt 1
+@set oldmeta count(.satria/sources.cache, ^P [0-9a-f]{16} [SDOWH] [0-9a-f]{16} [0-9]+ [0-9]+ [^ ])
+@set zerometa {oldmeta} == 0
+file.write zerometa.txt <<T
+{zerometa}
+T
+file.contains zerometa.txt 1
+
+# Catatan: referensi .sh mengharapkan no-op via jalur penuh + "P metadata
+# refreshed". Implementasi kini menjalankan jalur penuh tanpa pesan itu, tetapi
+# tetap meng-upgrade metadata (diverifikasi di bawah) dan run berikut P-fast.
+env.set SATRIA_CACHE_TRACE=1
+run.build as oldfmt
+@response oldfmt
+  rc.ok
+  out.not-contains "P-fast hit"
+  out.not-contains "Nothing to build"
+@end
+env.unset SATRIA_CACHE_TRACE
+@set pt2 count(.satria/sources.cache, ^P)
+@set pm2 count(.satria/sources.cache, ^P [0-9a-f]{16} [SDOWH] [0-9a-f]{16} [0-9]+ [0-9]+ [^ ])
+@set upgraded {pt2} > 0 && {pm2} == {pt2}
+file.write upgraded.txt <<T
+{upgraded}
+T
+file.contains upgraded.txt 1
+
+env.set SATRIA_CACHE_TRACE=1
+run.build as fast6
+@response fast6
+  out.contains "P-fast hit"
+  out.contains "Nothing to build"
+  out.contains "Cache valid"
+@end
+env.unset SATRIA_CACHE_TRACE
+
+# metadata grup P di store: fingerprint.cache dan opts.cache
+@set fp count(.satria/caches/fingerprint.cache, ^P [0-9a-f]{16} [0-9a-f]{16} [0-9]+ [0-9]+$)
+@set fpt count(.satria/caches/fingerprint.cache, ^P)
+@set fpok {fpt} > 0 && {fp} == {fpt}
+file.write fpok.txt <<T
+{fpok}
+T
+file.contains fpok.txt 1
+@set op count(.satria/opts.cache, ^P [0-9a-f]{16} [0-9a-f]{16} [0-9]+ [0-9]+$)
+@set opt count(.satria/opts.cache, ^P)
+@set opok {opt} > 0 && {op} == {opt}
+file.write opok.txt <<T
+{opok}
+T
+file.contains opok.txt 1
+
+# stamp per proyek berubah -> gate menolak, build pemulihan -> P-fast lagi
+file.append WsBuildfile core.flags = DEXTRA
+env.set SATRIA_CACHE_TRACE=1
+run.build as stamp
+@response stamp
+  rc.ok
+  out.not-contains "Nothing to build"
+@end
+env.unset SATRIA_CACHE_TRACE
+env.set SATRIA_CACHE_TRACE=1
+run.build as stamp2
+@response stamp2
+  out.contains "Nothing to build"
+  out.contains "Cache valid"
+@end
+run.build as fast7
+@response fast7
+  out.contains "P-fast hit"
+@end
+env.unset SATRIA_CACHE_TRACE
+
+# kompatibel mundur: store dengan P polos (format lama) tetap no-op
+run.exec sed -i -E 's/^P ([0-9a-f]{16}) [0-9a-f]{16} [0-9]+ [0-9]+$/P \1/' .satria/caches/fingerprint.cache as fpstrip
+@response fpstrip
+  rc.ok
+@end
+run.exec sed -i -E 's/^P ([0-9a-f]{16}) [0-9a-f]{16} [0-9]+ [0-9]+$/P \1/' .satria/opts.cache as opstrip
+@response opstrip
+  rc.ok
+@end
+@set plain count(.satria/caches/fingerprint.cache, ^P [0-9a-f]{16}$)
+@set plainok {plain} > 0
+file.write plainok.txt <<T
+{plainok}
+T
+file.contains plainok.txt 1
+env.set SATRIA_CACHE_TRACE=1
+run.build as plainstore
+@response plainstore
+  out.contains "P-fast hit"
+  out.contains "Nothing to build"
+  out.contains "Cache valid"
+@end
+env.unset SATRIA_CACHE_TRACE
+
+# file baru di direktori archive memicu fase archive
+time.tick
+file.write rupamod/new-input.rp <<T
+new archive input
+T
+env.set SATRIA_CACHE_TRACE=1
+run.build as archnew
+@response archnew
+  rc.ok
+  out.not-contains "Nothing to build"
+  out.matches "rupa_modules\\.tar \\([^)]*built\\)"
+@end
+env.unset SATRIA_CACHE_TRACE

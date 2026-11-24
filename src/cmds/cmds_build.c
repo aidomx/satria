@@ -607,12 +607,20 @@ int cmdBuildEx(int jobs, const char *buildfilePath, bool libOnly) {
   }
   startupPhaseEnd(true);
 
-  /* Router-centric untuk single-project (pilot P4): executor tetap menulis
-     cache grup, tetapi lewat stage yang digabung proses ini sesudah pass.
-     Induk yang sama kemudian menerapkan intent route/metadata, sehingga
-     deps/lib/embed/fingerprint/opts kembali punya satu penulis. */
+  /* Router-centric untuk single-project (eksperimen P4): executor menulis
+     cache grup lewat stage yang digabung proses ini sesudah pass, sehingga
+     deps/lib/embed/fingerprint/opts kembali punya satu penulis.
+
+     TIDAK aktif secara default: build single-project tidak punya penulis
+     paralel, dan stage yang tidak digabung saat build gagal menghapus
+     kemajuan compile parsial (fingerprint object yang sudah OK ikut hilang ->
+     build berikutnya mengompilasi ulang semuanya, bertentangan dengan
+     kontrak resume build). Jalur lama yang menyimpan state per object tetap
+     dipakai; eksperimen ini dibuka eksplisit lewat SATRIA_WS_STAGE_SINGLE=1. */
   bool txn = false;
-  if (!wsModeActive() && workspaceRouterPilotActive()) {
+  const char *stageSingle = getenv("SATRIA_WS_STAGE_SINGLE");
+  if (!wsModeActive() && workspaceRouterPilotActive() && stageSingle && *stageSingle &&
+      strcmp(stageSingle, "0") != 0) {
     txn = csStageBegin();
     if (txn) csStageSetProjectAddr(cmdsCacheProjAddr());
   }

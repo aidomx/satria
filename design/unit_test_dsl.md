@@ -139,13 +139,14 @@ Kaidah penulisan:
 | `fixture.copy` | M0 | Salin fixture ke dir kerja (`cp -a`) | cache_noop, cdeps_group, crud_touch_delete, … |
 | `work.new [nama]` | M0 | Dir kerja bersih `$UNIT_TMP/<nama>` + trap | boilerplate semua tes (default: nama berkas) |
 | `work.clean all\|state` | M0 | Buang artefak — **hanya [cold]**; `all` = build bin lib modules .satria, `state` = .satria | selective_noop_full, cdeps_flag (all), build_log (state) |
-| `file.write <path> <<T … T` | M0 | Tulis berkas via heredoc — penutup `T` opsional (tanpa penutup = berakhir di EOF); heredoc hanya sah di sini | report_binaries_uptodate, faststate_external_header |
+| `file.write <path> <<T … T` | M0 | Tulis berkas via heredoc — penutup `T` opsional (tanpa penutup = berakhir di EOF); heredoc hanya sah di sini; TAB literal didukung (di-escape di jejak event lalu dikembalikan) | report_binaries_uptodate, faststate_external_header, watcher_staging (plan/timing TSV) |
 | `file.append <path> <teks>` | M0 | Tambah baris — konfigurasi MAUPUN mutasi sumber | cache_noop (`flags = MMD, MP`), cdeps_group, workspace_selective_target |
 | `file.touch <path>` | M0 | Ubah mtime saja → PATCH stamp tanpa rebuild | crud_touch_delete (update) |
 | `file.delete <path>` | M0 | Hapus berkas/sumber | crud_touch_delete (delete) |
 | `file.copy <src> <dst> [lf\|crlf]` | M1 | Salin + konversi akhiran baris | cmdhelp_crlf (`awk` ke CRLF) |
-| `env.set <VAR>=<nilai>` / `env.unset` | M1 | Env untuk run berikut | NO_COLOR (umum), SATRIA_CACHE_NOOP=0, SATRIA_CACHE_TRACE |
+| `env.set <VAR>=<nilai>` / `env.unset` | M1 | Env untuk run berikut; nilai boleh `{var}`/selektor (mis. `work(stage)` absolut) | NO_COLOR (umum), SATRIA_CACHE_NOOP=0, SATRIA_CACHE_TRACE, UNIT_STAGE |
 | `time.tick` | M0 | Tunggu tick mtime (bukan `sleep 1`) | `wait_tick` |
+| `time.stamp as <n>` | M4 | Rekam stempel ISO-8601 UTC ke variabel | watcher_staging (`RUN_STARTED`/`RUN_ENDED` sintetis) |
 | `time.mark <path> as <n>` | M1 | Rekam mtime berkas | embed_stamp_skip (`cp emb.orig` + stat) |
 | `run.build [as <label>]` | M0 | Run satria mode ini (`-w` di workspace) + `-j$UNIT_JOBS` | `"$SAT" -j2 -w`, `"$SAT" -j2` |
 | `run.cmd <args…> [as <label>]` | M0 | Panggilan satria verbatim | `version`, `-w -g compdb`, `help`, `trace` |
@@ -427,10 +428,10 @@ run.cmd watch as w
 | embed_stamp_skip | cold* | workspace | M1 | contoh §terjemahan (time.mark/mtime) |
 | p_meta_noop | snap | workspace | M1 | `env.set SATRIA_CACHE_TRACE` + contains |
 | cmdhelp_crlf | snap | — | M1 | `file.copy crlf` + escape `\r` |
-| build_resume | cold | project | M2 | `@for 1..30`, interpolasi, fail/fix — A–C di `build_resume_abc.test`; D (Ctrl+C) tetap di `.sh` (kalibrasi timing tak terekspresikan DSL) |
-| background | cold | project,workspace | M3 | `run.bg`, `@while` polling, replay watch — subset DSL di `background_watch.test`; SIGSTOP/kalibrasi Ctrl+C tetap di `.sh` |
-| watcher_staging | snap | — | M3 | tetap `.sh` (proses-latar non-satria + sinyal); `stage.set/log` didemonstrasi di kit |
-| trace_summary | cold* | workspace | M3 | `text.count/aggregate` — subset DSL di `trace_summary_basic.test`; paritas hitungan `top` (ekstraksi kunci) tetap di `.sh` |
+| build_resume | cold | project | M2 | A–C di `build_resume_abc.test`, D (Ctrl+C) di `build_resume_d.test` (`run.bg`/`run.stop`/`run.wait`, sumber berat) |
+| background | cold | project,workspace | M3 | `run.bg`, `proc.signal <pidfile> stop/cont`, replay watch, PID hidup memblokir — port penuh |
+| watcher_staging | snap | — | M3 | port penuh: `run.execbg sleep` sebagai PID run, `time.stamp` untuk run.env, `matches(<label>)` membaca output run latar selagi berjalan (`@while` polling), `proc.signal <pidfile>`/`run.stop term` |
+| trace_summary | cold* | workspace | M3 | port penuh di `trace_summary.test`: paritas top via `run.exec` berantai (awk/sort/uniq/head) + `text.count` |
 | trace_src_sync | snap | — | M3 | `run.tool` + `file.same` + `repo()` — port penuh; `.sh` asli di `arsip/` |
 
 `*` = klasifikasi "sementara cold" di classes.conf. Sampai milestone-nya
@@ -494,7 +495,7 @@ menjadi runner asli, tanpa bash sama sekali. Tes tetap berkas `.test`/`.t`
 | M4a parser | `scripts/lib/parser.sh` → `src/test/parser.c` | kit parser (positif + negatif) diport jadi uji unit C; jejak event TSV identik byte-per-byte dengan parser bash |
 | M4b evaluator+eksekutor (✓) | `tests/unit/lib/dsl.sh` → `src/test/eval.c` + `exec.c` (konvensi `EV`/`CUR`, tabel `obj.aksi` → fungsi C) | kit konforman `tests/unit/dsl/` 14/14 dijalankan runner C, hasil verdict identik — `tests/unit/dsl/parity.sh` |
 | M4c runner/discovery (✓) | `lib/unit_runner.sh` → `src/test/runner.c`: discovery `.test`>`.t`>`.sh` + dedupe, `classes.conf`, staging/snapshot, `-j`, log/timing | sweep miniws via runner C = 524 asersi / 32 tes, log & timing.tsv setara |
-| M4d `satria test` native (sebagian ✓) | delegasi `cmdTest` (src/test.c) diganti pemanggilan runner C langsung (in-process, tanpa exec) | jalur run default in-process, `satria test miniws` 524/32 rc 0 tanpa `scripts/unit.sh`; sisa: `-b`, `-w`, stop/pause/resume, arsip bash |
+| M4d `satria test` native (✓) | delegasi `cmdTest` (src/test.c) diganti pemanggilan runner C langsung (in-process, tanpa exec) | jalur run default in-process; `-b` fork/setsid, `-w` watcher, dan `stop`/`pause`/`resume` native (`pause.flag`, kill run tree, plan−timing); `satria test miniws -j4` 605/32 rc 0 tanpa `scripts/unit.sh`; sisa: arsip `unit.sh`/`unit_dev.sh` |
 
 Catatan rancangan:
 
@@ -504,10 +505,12 @@ Catatan rancangan:
 - **Runner C tetap mengisolasi kerja per tes** (staging/UNIT_TMP/kontrak cold
   vs snap) — semantik `classes.conf` dan guard "tes [snap] tidak boleh
   menghapus .satria" dipertahankan apa adanya.
-- **Fitur proses `.sh` sisa** (background D/Ctrl+C, trace_summary paritas
-  `top`, watcher_staging) diekspresikan di DSL C (`run.stop` = sinyal INT,
-  `text.aggregate` penuh, sinyal + kalibrasi waktu) atau diberi jalan keluar
-  eksplisit sebelum arsip bash.
+- **Fitur proses `.sh` terselesaikan**: background/Ctrl+C (`run.bg` +
+  `run.stop` = sinyal INT + `proc.signal <pidfile> stop/cont`), trace_summary
+  paritas `top` (`run.exec` berantai awk/sort/uniq/head), dan watcher_staging
+  (`run.execbg sleep` + `time.stamp` + `matches(<label>)` atas output run
+  latar yang masih berjalan). Tidak ada lagi `.sh` di `common/`; semua di
+  `arsip/`.
 - **Klaim "tanpa bash" diverifikasi**: unit test repo sendiri (miniws +
   complexws) dijalankan dengan binary yang tidak menyentuh sh/bash —
   dites dengan `satria trace` (tidak ada exec bash).
@@ -561,11 +564,11 @@ resmi untuk tes di `tests/unit/common`.
 - [x] M2 pilot: `build_resume_abc.test` (A–C, 8/8 via `unit.sh`) + fragmen `tests/unit/fragmen/toolchain.test` (`@return` ternary, dikonsumsi `@include … as` di kit) — `build_resume.sh` tetap berjalan (kasus D Ctrl+C: kalibrasi + sinyal timing, tetap `.sh`); satria keluar rc 0 walau compile/link gagal, jadi asersi pakai hitungan `OK ` + keberadaan binary
 - [x] Contoh acuan `example.test` + `example.t` (8/8 via `unit.sh`) — nama sama `.test` > `.t` > `.sh`, discovery mendeduplikasi supaya keduanya bisa hidup berdampingan
 - [x] M3: `run.bg/stop/wait`, `stage`, `text.count/aggregate`, `run.tool` — `run.bg` memakai `exec` dalam subshell (PID latar = satria; sinyal benar); `run.stop` = SIGINT, `run.wait [label] [batas]` rekam rc; `run.tool` cwd=UNIT_REPO; `stage.set <berkas> <isi>`/`stage.log <berkas> <teks>`; `text.count … [as <nama>]` (pola tanpa spasi — kutip tak diproses), `text.aggregate <src> <dst>`. Bug laten ditemukan: assignment elemen array me-reset `$?` → `RC[label]` selalu 0; semua rc kini direkam via `_rc=$?` — kit `tests/unit/dsl/` 14/14
-- [x] M3 pilot: `trace_src_sync.test` penuh via `run.tool` (2/2, port utuh); `trace_summary_basic.test` (8/8 — paritas hitungan `top` tetap di `.sh`); `background_watch.test` (14/14 — spawn/startup/watch saat berjalan/ditolak setelah selesai; SIGSTOP + Ctrl+C tetap di `background.sh`); `watcher_staging` tetap `.sh` (proses-latar non-satria) — sweep miniws penuh 348 asersi / 29 tes, 0 gagal
+- [x] M3 pilot: `trace_src_sync.test` penuh via `run.tool` (2/2, port utuh); `trace_summary_basic.test` (8/8) dan `trace_summary.test` (14/14, termasuk paritas hitungan `top`); `background_watch.test` (14/14) dan `background.test` (54/54, SIGSTOP/SIGCONT via `proc.signal`); `watcher_staging.test` (39/39, staging sintetis + multi-watch/lock basi via `run.execbg sleep`, `time.stamp`, `matches(<label>)` live) — sweep miniws penuh 605 asersi / 32 tes, 0 gagal
 - [x] Arsip `.sh` yang sudah tergantikan port `.test` penuh ke `tests/unit/common/arsip/` (cache_noop, report_binaries_uptodate, cmdhelp_crlf, embed_stamp_skip, embed_getembed, trace_src_sync, version_alias, cdeps_key_reject, wsbuildfile_legacy) — discovery `.test` > `.t` > `.sh` membuat mereka tak pernah dieksekusi lagi; `.sh` yang masih berjalan tetap di `common/`
 - [x] Contoh acuan `example.test` untuk penulis tes baru (lihat butir M2 pilot)
 - [x] `satria test` fase 1 (delegasi, tanpa porting): parsing standalone-break (pola `trace`) + `src/test.c` menemukan root repo dari exe (`/proc/self/exe`, fallback cwd bila `scripts/unit.sh` ada di cwd) lalu exec `bash scripts/unit.sh <args…>`; shorthand `satria test miniws` — binary satria sendiri disisipkan bila argumen pertama bukan opsi/kata mode/path binary, dan path binary relatif-repo dari subdirektori diabsolutkan (unit.sh me-resolve relatif cwd); rc unit.sh = rc satria; sweep miniws via `satria test miniws` 348/29, rc 0; `help test` tersedia
 - [x] M4a: parser → C (`src/test/parser.c`, CLI `src/test/parser_cli.c`) — `satria test --parse [--check|--suite]` native tanpa delegasi bash; uji unit C `tests/unit/test_parser.c` (37 cek: jejak positif, heredoc/CRLF/EOF, seluruh error bernomor baris) + paritas byte-per-byte `tests/unit/parser/parity.sh` 81/81 (stdout/stderr/rc) atas kit parser, `common/*.test|*.t`, kit DSL, fragmen, `--check`, `--suite`, dan berkas hilang
 - [x] M4b: evaluator + eksekutor → C (`src/test/eval.c`, `src/test/exec.c`) — `satria test <file.test>` menjalankan DSL native tanpa bash (proses `run.*` fork+exec, regex ERE internal, selektor/ekspresi/variabel/blok/verdict); paritas `tests/unit/dsl/parity.sh` 14/14 (lulus/gagal, baris PASS/FAIL, PRECONDITION, rc). `fixture.copy` menjaga struktur direktori dan membuang artefak build; bila `UNIT_DISCOVERY` tidak diisi, discovery dibuat dari fixture (`satria -w -g compdb` → `sources.tsv`). Diverifikasi pada tes repo: `cache_noop` 27/27, `embed_getembed` 24/24 (setelah `run.exec` tidak lagi dibungkus binary satria)
 - [x] M4c: runner/discovery/klasifikasi → C (`src/test/runner.c`) — `satria test --run <target> [-j N] [-s tes[,tes...]]`; staging `test.state`, klasifikasi `classes.conf`, fixture tanpa artefak, snapshot cold, discovery compdb (`sources.tsv`), eksekusi cold→snap (`.test`/`.t` lewat eksekutor C, `.sh` lewat sh), log per tes, `timing.tsv`/`plan.tsv`/`run.env`, ringkasan + top 5; runner hanya foreground (belum `-b`/`-w`/pause/resume). Sweep miniws via runner C: **PASS=524 FAIL=0 PRE=0 tes=32**, rc 0 (skrip bash masih ~406/32 sebelum perbaikan label `out.equals`/`out.contains`); `watcher_staging` tetap .sh (sleep ~213 s)
-- [~] M4d: `satria test` native in-process — jalur run default (`satria test [binary] <target> [...]`) memanggil `testRunnerMain` langsung di proses cmdTest, tanpa exec `scripts/unit.sh`; binary satria yang berjalan di-pin ke staging; root repo dari cwd (`tests/unit`) atau parent binary, tidak lagi dari keberadaan `unit.sh`; `start` = run. Sweep miniws `satria test miniws -j4` → 524/32, rc 0, tanpa `unit.sh`. Sisa: `-b`, `-w/--watch`, stop/pause/resume masih delegasi bash; arsip `unit.sh`/`unit_dev.sh`/`lib/unit_*.sh` dan verifikasi "tanpa bash" via `satria trace` belum
+- [x] M4d: `satria test` native in-process — jalur run default memanggil `testRunnerMain` tanpa exec `scripts/unit.sh`; `-b` (fork+setsid, PID/log/Stop, trap SIGTERM/INT/HUP), `-w/--watch` (header, auto-pilih target, entri tes, summary), serta `stop`/`pause`/`resume` native (`testRunnerControl`: pause.flag → `RUN_PAUSED=1`, stop = kill tree + simpan plan/timing, resume = plan−timing dengan binary dari `run.env`). Sweep miniws `satria test miniws -j4` → 605/32, rc 0, tanpa `unit.sh`; primitif M4d: `time.stamp`, `matches(<label>)` untuk run latar (tanpa `hasRc`), `env.set` mengekspansi `{var}`/selektor, heredoc TAB di jejak event; sisa: arsip `unit.sh`/`unit_dev.sh`/`lib/unit_*.sh`

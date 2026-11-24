@@ -1,0 +1,186 @@
+# Port background.sh: background build + watch (design/background.md).
+#   - spawn tidak mencetak blok startup; rekamannya di .satria/background.startup
+#   - watch me-replay startup, menampilkan progres, menutup dengan summary+status
+#   - watch setelah build selesai ditolak
+#   - run warm membuang rekaman lama; no-op dilayani inline
+#   - PID hidup: build berikut & clean ditolak
+@suite workspace
+@fixture miniws
+@requires cold
+@purpose "Background: spawn senyap, watch replay+status, tolak setelah selesai, PID hidup memblokir"
+
+# ============================= WORKSPACE =============================
+work.new
+fixture.copy
+file.append WsBuildfile flags = MMD, MP
+file.append WsBuildfile background = true
+
+run.build as spawn
+@response spawn
+  rc.ok
+  out.not-contains "Project :"
+  out.not-matches ^startup$
+@end
+file.exists .satria/workspace.pid
+@assert size(.satria/background.startup) > 0
+file.contains .satria/background.startup discovery
+
+# watch terpasang SAAT build berjalan (child dibekukan agar deterministik)
+proc.signal .satria/workspace.pid stop
+run.bg -j2 -w watch as w
+time.sleep 1
+proc.signal .satria/workspace.pid cont
+run.wait w 120
+@response w
+  rc.ok
+  out.matches ^startup$
+  out.contains discovery
+  out.contains "> progress :"
+  out.contains "> status : success"
+  out.contains Summary
+@end
+time.sleep 1
+file.absent .satria/workspace.pid
+@assert size(.satria/background.log) > 0
+file.contains .satria/background.log Summary
+
+# watch baru setelah run final: ditolak
+run.cmd -j2 -w watch as done
+@response done
+  rc.fail
+  out.contains "tidak ada build background"
+@end
+run.cmd -j2 -w watch --full as donefull
+@response donefull
+  rc.fail
+  out.contains "tidak ada build background"
+@end
+
+# warm: sumber berubah, startup.state sudah ada -> tanpa blok startup, rekaman dibuang
+time.tick
+file.append bade/src/bade.c "/* perubahan uji background */"
+run.build as warm
+@response warm
+  rc.ok
+  out.not-matches ^startup$
+@end
+file.absent .satria/background.startup
+
+proc.signal .satria/workspace.pid stop
+run.bg -j2 -w watch --full as full
+time.sleep 1
+proc.signal .satria/workspace.pid cont
+run.wait full 120
+@response full
+  rc.ok
+  out.contains "> status : success"
+  out.contains Summary
+@end
+time.sleep 1
+
+# no-op: dijawab inline, tanpa child
+run.build as noop
+@response noop
+  rc.ok
+  out.contains "Nothing to build"
+  out.contains "Cache valid"
+@end
+file.absent .satria/workspace.pid
+
+# PID hidup: build berikut ditolak, clean diblokir
+# Sumber berat: memastikan child masih berjalan saat dibekukan (deterministik
+# juga pada sweep paralel).
+time.tick
+@for j in 1..1000
+file.append core/src/heavy_bg.c static int hb{j}(int a){int s=a; s+=a*{j}; return s;}
+@end
+run.build as spawn2
+@response spawn2
+  rc.ok
+@end
+proc.signal .satria/workspace.pid stop
+run.build as dup
+@response dup
+  rc.fail
+  out.contains "Background build is already running"
+@end
+run.cmd -j2 -w clean as blocked
+@response blocked
+  rc.fail
+  out.contains diblokir
+@end
+proc.signal .satria/workspace.pid cont
+time.sleep 4
+
+# watch tanpa build sama sekali
+file.delete .satria/workspace.pid
+file.delete .satria/background.status
+run.cmd -j2 -w watch as none
+@response none
+  rc.fail
+  out.contains "tidak ada build background"
+@end
+
+# ============================= SATU PROYEK =============================
+work.new background-2
+file.write Buildfile <<T
+use project
+
+background = true
+T
+file.write src/main.c <<T
+#include <stdio.h>
+int main(void) { puts("bg"); return 0; }
+T
+
+run.cmd -j2 as sspawn
+@response sspawn
+  rc.ok
+  out.not-matches ^startup$
+@end
+@assert size(.satria/background.startup) > 0
+file.contains .satria/background.startup loading configuration
+file.exists .satria/build.pid
+
+proc.signal .satria/build.pid stop
+run.bg -j2 watch as sw
+time.sleep 1
+proc.signal .satria/build.pid cont
+run.wait sw 120
+@response sw
+  rc.ok
+  out.matches ^startup$
+  out.contains "> status : success"
+@end
+time.sleep 1
+file.absent .satria/build.pid
+@assert size(.satria/background.log) > 0
+
+run.cmd -j2 watch as sdone
+@response sdone
+  rc.fail
+  out.contains "tidak ada build background"
+@end
+
+run.cmd -j2 as snoop
+@response snoop
+  rc.ok
+  out.contains "Nothing to build"
+@end
+file.absent .satria/build.pid
+
+# clean diblokir selama build background berjalan
+time.tick
+file.append src/main.c "/* uji clean */"
+run.cmd -j2 as sspawn2
+@response sspawn2
+  rc.ok
+@end
+proc.signal .satria/build.pid stop
+run.cmd -j2 clean as sclean
+@response sclean
+  rc.fail
+  out.contains diblokir
+@end
+proc.signal .satria/build.pid cont
+time.sleep 2

@@ -7,8 +7,10 @@ berakhir sebagai PRECONDITION bila fixture tidak memenuhinya.
 
 | Berkas | Isi |
 | --- | --- |
-| `common/` | Semua tes (`*.sh`), dijalankan untuk target apa pun |
+| `common/` | Semua tes (`*.test`, DSL native), dijalankan untuk target apa pun — tidak ada lagi `.sh` aktif |
+| `common/arsip/` | Skrip `.sh` asli yang sudah diport penuh ke `.test` (acuan, tidak dijalankan) |
 | `lib/layout.sh` | Helper fixture-aware (sumber proyek, binary, arsip, PRECONDITION) |
+| `lib/meta_tools.py` | Rekayasa state cache presisi untuk `.test` (`strip-meta`, `corrupt-same-second`) |
 | `classes.conf` | Klasifikasi tiap tes: `[cold]` atau `[snap]` — wajib, runner menolak tes yang tidak terdaftar |
 
 ## Menjalankan
@@ -55,8 +57,7 @@ Saat run berakhir (`RUN_ENDED`), `# Summary` dicetak sekali. Run yang mati tanpa
 watcher memilih target satu-satunya run aktif — jadi selama cuma satu run
 berjalan, `-w` cukup tanpa nama target. Bila ada beberapa run aktif maupun nol
 run aktif, `-w` berhenti dan menyebut kandidatnya: sebut salah satu, mis.
-`-w complexws`. Hanya satu watcher per staging (lock `$UNIT_STAGE/watch.pid`);
-Ctrl-C menghapus lock. Interval poll: `UNIT_WATCH_INTERVAL` (detik, default 1).
+`-w complexws`. Beberapa watcher boleh berjalan bersamaan; masing-masing memegang lock sendiri di `$UNIT_STAGE/watch/<pid>` (berisi target), dan lock basi (PID mati) dibersihkan saat watcher baru mulai. Ctrl-C menghapus lock milik watcher itu. Interval poll: `UNIT_WATCH_INTERVAL` (detik, default 1).
 Watcher berjalan di foreground dan tidak menerima `<binary>`, `-b`, `--clean`,
 atau `-t`. Di non-TTY (mis. output dialihkan ke berkas) hanya entri selesai dan
 summary yang ditulis.

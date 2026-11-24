@@ -11,6 +11,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifndef _WIN32
+#include <glob.h>
+#endif
 
 /* ==================== util kecil ==================== */
 
@@ -1294,8 +1297,19 @@ int dslEval(DslCtx *c, const char *expr, char *out, size_t outn) {
 
 static char *readRunOut(DslCtx *c, const char *label) {
   DslRun *r = runFind(c, label);
-  if (!r || !r->out || !r->hasRc) return NULL;
+  /* Run latar boleh dibaca selagi berjalan (polling watcher via @while). */
+  if (!r || !r->out) return NULL;
   return dslReadFile(r->out, NULL);
+}
+
+static int countFilesRec(const char *dir) {
+  List dirs = {0}, files = {0};
+  fsListDir(dir, &dirs, &files);
+  int n = files.count;
+  for (int i = 0; i < dirs.count; i++) n += countFilesRec(dirs.items[i]);
+  listFree(&dirs);
+  listFree(&files);
+  return n;
 }
 
 static char *predEval(DslCtx *c, const char *name, const char *args) {
@@ -1387,6 +1401,64 @@ static char *predEval(DslCtx *c, const char *name, const char *args) {
     free(t1);
     free(t2);
     return dupS(same ? "1" : "0");
+  }
+  if (strcmp(name, "pid") == 0) {
+    DslRun *r = runFind(c, a1);
+    char buf[32];
+    if (!r || r->pid <= 0) return dupS("");
+    snprintf(buf, sizeof(buf), "%d", r->pid);
+    return dupS(buf);
+  }
+  if (strcmp(name, "line") == 0) {
+    char path[SATRIA_MAX_PATH];
+    dslWPath(c, a1, path, sizeof(path));
+    size_t len = 0;
+    char *txt = dslReadFile(path, &len);
+    int found = 0, n = 1;
+    if (txt) {
+      char *p = txt;
+      while (*p) {
+        char *e = strchr(p, '\n');
+        size_t l = e ? (size_t)(e - p) : strlen(p);
+        char *one = dupN(p, l);
+        if (one) {
+          if (dslRegexSearch(a2, one)) {
+            found = n;
+            free(one);
+            break;
+          }
+          free(one);
+        }
+        if (!e) break;
+        p = e + 1;
+        n++;
+      }
+    }
+    free(txt);
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%d", found);
+    return dupS(buf);
+  }
+  if (strcmp(name, "files") == 0) {
+    char path[SATRIA_MAX_PATH];
+    dslWPath(c, a1, path, sizeof(path));
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%d", fsDirExists(path) ? countFilesRec(path) : 0);
+    return dupS(buf);
+  }
+  if (strcmp(name, "glob") == 0) {
+    int cnt = 0;
+#ifndef _WIN32
+    char full[SATRIA_MAX_PATH];
+    dslWPath(c, a1, full, sizeof(full));
+    glob_t g;
+    memset(&g, 0, sizeof(g));
+    if (glob(full, 0, NULL, &g) == 0) cnt = (int)g.gl_pathc;
+    globfree(&g);
+#endif
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%d", cnt);
+    return dupS(buf);
   }
   dslErr(c, 2, "predikat tak dikenal: %s(...)", name);
   return NULL;

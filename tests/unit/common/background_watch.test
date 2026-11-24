@@ -13,8 +13,10 @@ file.append WsBuildfile background = true
 
 run.bg -j2 -w as bg
 
-# spawn: kontrol kembali segera; startup direkam (cold), PID tertulis
-@while not exists(.satria/background.startup)
+# spawn: kontrol kembali segera; startup direkam (cold), PID tertulis.
+# Tunggu PID (penanda yang diasersi), bukan startup: rekaman startup ditulis
+# induk sesaat SEBELUM bgSpawn menulis PID, jadi startup saja masih racy.
+@while not exists(.satria/workspace.pid)
   time.tick
 @end
 file.exists .satria/workspace.pid

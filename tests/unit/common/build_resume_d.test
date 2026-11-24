@@ -1,0 +1,40 @@
+# Port bagian D build_resume.sh: Ctrl+C di tengah build menyimpan progres;
+# build ulang melanjutkan, bukan mengulang dari awal.
+@suite project
+@purpose "Resume build: Ctrl+C di tengah build menyimpan progres (D)"
+
+work.new rd
+file.write Buildfile <<T
+use project
+T
+file.write src/main.c <<T
+int main(void){return 0;}
+T
+
+# 8 berkas berat: cukup besar agar build -j1 bertahan > 1 detik.
+@for i in 1..8
+@for j in 1..1200
+file.append src/f{i}.c static int h{i}_{j}(int a){int s=a; for(int k=0;k<3;k++) s+=k*{j}; return s;}
+@end
+file.append src/f{i}.c int f{i}(void){{return 0;}}
+@end
+
+run.bg -j1 as d1
+time.sleep 0.5
+run.stop d1
+run.wait d1 120
+@set stopped rc(d1) == 130
+file.write dstop.txt <<T
+{stopped}
+T
+file.contains dstop.txt 1
+
+run.cmd -j1 as d2
+@response d2
+  rc.ok
+@end
+@set done count(.out.d2.txt, OK[ ]) < 9
+file.write dd.txt <<T
+{done}
+T
+file.contains dd.txt 1

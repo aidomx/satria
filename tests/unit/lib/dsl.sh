@@ -226,6 +226,17 @@ ev_pred() { # $1=nama predikat $2=argumen dipisah ',' (top-level) → EV=nilai
                c=$(stat -c %y "${MTIME[$a1]}" 2>/dev/null)
                [ -n "$c" ] && [ "$c" = "${MTIME_T[$a1]:-}" ] && EV=1 ;;
     same)      { cmp -s "$(wpath "$a1")" "$(wpath "$a2")"; } && EV=1 || EV=0 ;;
+    pid)       EV=${BGPID[$(unq "$a1")]:-} ;;
+    line)      EV=0; f=$(wpath "$a1")
+               [ -f "$f" ] && EV=$(grep -nE -m1 -- "$(unq "$a2")" "$f" | cut -d: -f1)
+               : "${EV:=0}" ;;
+    glob)      EV=0; local gl
+               gl=$(cd "$WORK" && compgen -G "$(unq "$a1")" | wc -l | tr -d ' ')
+               EV=${gl:-0} ;;
+    files)     EV=0
+               [ -d "$(wpath "$a1")" ] &&
+                 EV=$(find "$(wpath "$a1")" -type f 2> /dev/null | wc -l | tr -d ' ')
+               EV=${EV:-0} ;;
     *) die "predikat tak dikenal: $name(...)" ;;
   esac
 }
@@ -458,6 +469,12 @@ dir_exec() { # $1=direktif $2=argumen
       [ "$rcgv" -eq 3 ] && precond "@guard: $rest"
       [ "$rcgv" -eq 0 ] || die "@guard evaluasi gagal: $rest"
       ev_truthy "$gv" || precond "@guard salah: $rest" ;;
+    assert)
+      local av rca=0
+      av=$(ev_expr "$rest") || rca=$?
+      [ "$rca" -eq 3 ] && precond "@assert: $rest"
+      [ "$rca" -eq 0 ] || die "@assert evaluasi gagal: $rest"
+      if ev_truthy "$av"; then ok "@assert $rest"; else no "@assert $rest" "$av" "benar"; fi ;;
     set)
       local sv rcsv=0
       sv=$(ev_expr "${rest#* }") || rcsv=$?
@@ -528,11 +545,12 @@ stmt_exec() { # $1=obj $2=aksi $3=argumen mentah $4=baris
     env.set)     export "${args%%=*}=${args#*=}" ;;
     env.unset)   unset "${args%%=*}" 2>/dev/null || true ;;
     time.tick)   tick ;;
+    time.sleep)  sleep "$args" ;;
     time.mark)
       local p=${args%%" as "*} n=${args##*" as "}
       MTIME[$n]=$(wpath "$p")
       MTIME_T[$n]=$(stat -c %y "$(wpath "$p")") ;;
-    run.build|run.cmd|run.exec|run.bg|run.wait|run.stop|run.tool)
+    run.build|run.cmd|run.exec|run.bg|run.execbg|run.wait|run.stop|run.tool)
       [ -x "$SATRIA" ] || precond "binary satria tidak ada: $SATRIA (set SATRIA=...)"
       local -a A=()
       read -r -a A <<<"$args"
@@ -559,6 +577,12 @@ stmt_exec() { # $1=obj $2=aksi $3=argumen mentah $4=baris
         ( cd "$WORK" && exec "$SATRIA" "${A[@]}" ) > "$rf" 2>&1 &
         BGPID[$label]=$!
         OUT[$label]=$rf
+      elif [ "$obj.$aksi" = run.execbg ]; then
+        [ ${#A[@]} -gt 0 ] || die "run.execbg butuh program"
+        local rf="$WORK/.out.$label.txt"
+        ( cd "$WORK" && exec "${A[0]}" "${A[@]:1}" ) > "$rf" 2>&1 &
+        BGPID[$label]=$!
+        OUT[$label]=$rf
       elif [ "$obj.$aksi" = run.wait ]; then
         local wl=${A[0]:-last} lim=${A[1]:-120} n=0 _rc
         [ -n "${BGPID[$wl]:-}" ] || die "run.wait: tidak ada proses latar '$wl' (run.bg dulu)"
@@ -568,9 +592,9 @@ stmt_exec() { # $1=obj $2=aksi $3=argumen mentah $4=baris
         done
         wait "${BGPID[$wl]}"; _rc=$?; RC[$wl]=$_rc
       elif [ "$obj.$aksi" = run.stop ]; then
-        local sl=${A[0]:-last}
+        local sl=${A[0]:-last} sgn=${A[1]:-INT}
         [ -n "${BGPID[$sl]:-}" ] || die "run.stop: tidak ada proses latar '$sl'"
-        kill -INT "${BGPID[$sl]}" 2> /dev/null || true
+        kill -s "$sgn" "${BGPID[$sl]}" 2> /dev/null || true
       elif [ "$obj.$aksi" = run.tool ]; then
         [ ${#A[@]} -gt 0 ] || die "run.tool butuh skrip"
         local ts=${A[0]} rf="$WORK/.out.$label.txt"
@@ -583,6 +607,14 @@ stmt_exec() { # $1=obj $2=aksi $3=argumen mentah $4=baris
         [ ${#A[@]} -gt 0 ] || die "run.cmd butuh argumen"
         do_run "$label" "${A[@]}"
       fi ;;
+    proc.signal) # <pid|berkas-pid> <int|term|stop|cont|kill>
+      local pt=${args%% *} ps=${args#* } pid=''
+      [ "$ps" = "$args" ] && die "bentuk: proc.signal <pid|berkas-pid> <int|term|stop|cont|kill>"
+      case "$pt" in
+        ''|*[!0-9]*) [ -f "$(wpath "$pt")" ] && pid=$(head -1 "$(wpath "$pt")") ;;
+        *) pid=$pt ;;
+      esac
+      [ -n "$pid" ] && kill -s "$ps" "$pid" 2> /dev/null || true ;;
     stage.set)   # <berkas> <isi> — rekaman staging sintetis (kontrak run)
       local sp=${args%% *} sc
       sc=$(unesc "$(unq "${args#* }")")

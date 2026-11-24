@@ -8,3 +8,8 @@
    CLI: `satria test --run <target> [-j N] [-s tes[,tes...]] [-o log] [--clean]`. */
 
 int testRunnerMain(int argc, const char *const *argv, const char *root, const char *bin);
+
+/* Kendali run (M4d, native): `stop|pause|resume <target>`.
+   `mode` = "stop"/"pause"/"resume"; memakai staging UNIT_STAGE (default
+   /tmp/satria-unit). `root` = root repo (untuk resume memanggil runner). */
+int testRunnerControl(const char *mode, const char *target, const char *root);

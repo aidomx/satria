@@ -17,8 +17,8 @@
 
 /* ---- kosakata (design/unit_test_dsl.md) ---------------------------------- */
 #define HDRS "suite fixture purpose requires keep"
-#define SINGLES "include guard return set get find"
-#define OBJS "work fixture file env time run stage text out rc mtime"
+#define SINGLES "include guard return set get find assert"
+#define OBJS "work fixture file env time run stage text proc out rc mtime"
 
 /* ---- tipe dasar ----------------------------------------------------------- */
 
@@ -95,10 +95,11 @@ static const char *actionsFor(const char *obj) {
   if (strcmp(obj, "file") == 0)
     return "write append touch delete copy exists absent same contains";
   if (strcmp(obj, "env") == 0) return "set unset";
-  if (strcmp(obj, "time") == 0) return "tick mark";
-  if (strcmp(obj, "run") == 0) return "build cmd exec bg stop wait tool";
+  if (strcmp(obj, "time") == 0) return "tick mark sleep stamp";
+  if (strcmp(obj, "run") == 0) return "build cmd exec bg execbg stop wait tool";
   if (strcmp(obj, "stage") == 0) return "set log";
   if (strcmp(obj, "text") == 0) return "count aggregate";
+  if (strcmp(obj, "proc") == 0) return "signal";
   if (strcmp(obj, "out") == 0) return "contains not-contains matches not-matches equals";
   if (strcmp(obj, "rc") == 0) return "ok fail";
   if (strcmp(obj, "mtime") == 0) return "changed unchanged";
@@ -281,6 +282,12 @@ static void handleDirective(Parser *p, char *l) {
     } else if (strcmp(d, "@guard") == 0) {
       if (!*rest) {
         errAt(p, p->line, "bentuk: @guard <ekspresi>");
+        free(copy);
+        return;
+      }
+    } else if (strcmp(d, "@assert") == 0) {
+      if (!*rest) {
+        errAt(p, p->line, "bentuk: @assert <ekspresi>");
         free(copy);
         return;
       }
@@ -570,7 +577,24 @@ int testParseDsl(FILE *in, bool trace, FILE *traceOut, FILE *errOut) {
         free(p.heredoc);
         p.heredoc = NULL;
       } else {
-        emitFields(&p, "TEXT", p.line, (const char *const[]){buf}, 1);
+        /* Jejak event berkolom TAB: escape TAB di isi heredoc agar tidak
+           terpotong saat dibaca eksekutor. */
+        size_t need = len * 2 + 1;
+        char *esc = malloc(need);
+        if (esc) {
+          size_t o = 0;
+          for (size_t i = 0; i < len; i++) {
+            if (buf[i] == '\t') {
+              esc[o++] = '\\';
+              esc[o++] = 't';
+            } else {
+              esc[o++] = buf[i];
+            }
+          }
+          esc[o] = '\0';
+          emitFields(&p, "TEXT", p.line, (const char *const[]){esc}, 1);
+          free(esc);
+        }
       }
       continue;
     }

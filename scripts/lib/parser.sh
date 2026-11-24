@@ -20,7 +20,7 @@
 #   ENDB  <baris> <direktif>                    @end
 #   STMT  <baris> <objek> <aksi> <argumen>
 #   OPEN  <baris> heredoc <marker>              mulai isi berkas
-#   TEXT  <baris> <isi>                         baris isi (apa adanya)
+#   TEXT  <baris> <isi>                         baris isi (TAB di-escape \t)
 #   CLOSE <baris> heredoc <marker>              baris penutup marker
 #   CMT   <baris> <teks>
 
@@ -28,16 +28,17 @@ set -u
 
 # ---- kosakata (design/unit_test_dsl.md) ------------------------------------
 HDRS='suite fixture purpose requires keep'
-SINGLES='include guard return set get find'
-OBJS='work fixture file env time run stage text out rc mtime'
+SINGLES='include guard return set get find assert'
+OBJS='work fixture file env time run stage text proc out rc mtime'
 OBJ_AKSI_work='new clean'
 OBJ_AKSI_fixture='copy'
 OBJ_AKSI_file='write append touch delete copy exists absent same contains'
 OBJ_AKSI_env='set unset'
-OBJ_AKSI_time='tick mark'
-OBJ_AKSI_run='build cmd exec bg stop wait tool'
+OBJ_AKSI_time='tick mark sleep stamp'
+OBJ_AKSI_run='build cmd exec bg execbg stop wait tool'
 OBJ_AKSI_stage='set log'
 OBJ_AKSI_text='count aggregate'
+OBJ_AKSI_proc='signal'
 OBJ_AKSI_out='contains not-contains matches not-matches equals'
 OBJ_AKSI_rc='ok fail'
 OBJ_AKSI_mtime='changed unchanged'
@@ -108,6 +109,8 @@ handle_directive() { # $1 = @kata, $2 = sisa argumen
           fi ;;
         @guard)
           [ -n "$rest" ] || { err_at "$LINE" "bentuk: @guard <ekspresi>"; return; } ;;
+        @assert)
+          [ -n "$rest" ] || { err_at "$LINE" "bentuk: @assert <ekspresi>"; return; } ;;
         @return)
           : ;;  # ekspresi opsional — fleksibel: fragmen = nilai, badan = berhenti
         @set)
@@ -194,7 +197,9 @@ parse_file() { # $1 = berkas, $2 = mode (trace|check) — mode tak dipakai, MODE
       if [ "$l" = "$HEREDOC" ]; then
         emitf 'CLOSE\t%s\theredoc\t%s' "$LINE" "$HEREDOC"; HEREDOC=''
       else
-        emitf 'TEXT\t%s\t%s' "$LINE" "$l"
+        # Jejak berkolom TAB: escape TAB agar isi tidak terpotong.
+        esc=$(printf '%s' "$l" | sed 's/	/\\t/g')
+        emitf 'TEXT\t%s\t%s' "$LINE" "$esc"
       fi
       continue
     fi

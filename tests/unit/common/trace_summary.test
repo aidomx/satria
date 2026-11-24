@@ -1,0 +1,71 @@
+# Port trace_summary.sh: `satria trace` setara pipeline manual pada log
+# gaya-strace (total akses = wc -l; hitungan teratas = sort|uniq -c|sort -rn).
+@suite workspace
+@fixture miniws
+@requires cold
+@purpose "satria trace: ringkasan, format, total akses, raw, tracer, paritas top"
+
+fixture.copy
+work.clean all
+run.build as cold
+@response cold
+  rc.ok
+@end
+
+# 1) satria trace berjalan, rc child diteruskan (0 pada no-op)
+run.cmd -j2 trace --out work(t.log) -- -w core as tr
+@response tr
+  rc.ok
+  out.contains "> trace   : "
+@end
+@assert size(t.log) > 0
+
+# 2) format gaya-strace: tiap baris <op>(...) = <hasil>
+text.count t.log ^[a-z_0-9]+\(.+\).= as fmt
+@set fmtok {fmt} == lines(t.log)
+file.write fmt.txt <<T
+{fmtok}
+T
+file.contains fmt.txt ^1$
+
+# 3) total akses = wc -l log
+@set m lines(t.log)
+file.contains .out.tr.txt trace   : {m} akses
+
+# 4) hitungan teratas = key op+path sort|uniq -c|sort -rn (bukan asumsi baris 1)
+run.exec awk '{ i=index($0,"("); if(i<=1) next; op=substr($0,1,i-1); rest=substr($0,i+1); q=index(rest,"\""); p="-"; if(q>0){ rest2=substr(rest,q+1); r=index(rest2,"\""); if(r>1) p=substr(rest2,1,r-1) } print op "\t" p }' t.log as keys
+@response keys
+  rc.ok
+@end
+run.exec sort .out.keys.txt as sorted
+@response sorted
+  rc.ok
+@end
+run.exec uniq -c .out.sorted.txt as uniqc
+@response uniqc
+  rc.ok
+@end
+run.exec sort -rn .out.uniqc.txt as toprank
+@response toprank
+  rc.ok
+@end
+run.exec head -1 .out.toprank.txt as top1
+@response top1
+  rc.ok
+@end
+run.exec awk 'FNR==NR{ cnt=$1; want=$0; sub(/^ +/,"",want); sub(/^[^ ]+ /,"",want); next } /^  top [0-9]+  :/{intop=1; next} intop{ if ($0 !~ /^  +[0-9]+ /){intop=0; next} c=$1; op=$6; path=$7; for(i=8;i<=NF;i++) path=path " " $i; if (op "\t" path == want){ if (c==cnt) ok=1; intop=0 } } END{ exit !ok }' .out.top1.txt .out.tr.txt as toppar
+@response toppar
+  rc.ok
+@end
+
+# 5) --raw memutar isi log setelah ringkasan
+run.cmd -j2 trace --raw --out work(t2.log) -- -w core as tr2
+text.count .out.tr2.txt ^[a-z_0-9]+\( as raw
+@set rawok {raw} == lines(t2.log)
+file.write raw.txt <<T
+{rawok}
+T
+file.contains raw.txt ^1$
+
+# 6) tracer tersimpan di .satria/trace
+file.exists .satria/trace/openat_trace.so

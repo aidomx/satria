@@ -15,6 +15,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #if defined(_WIN32)
 
@@ -289,6 +290,20 @@ static int spawnWait(char *const argv[], const char *cwd, const char *outPath, i
 
 /* ==================== aksi ==================== */
 
+/* Parser meng-escape TAB di isi heredoc sebagai \t; kembalikan di sini. */
+static void unescTabs(const char *s, char *out, size_t n) {
+  size_t o = 0;
+  for (const char *p = s; *p && o + 1 < n; p++) {
+    if (p[0] == '\\' && p[1] == 't') {
+      out[o++] = '\t';
+      p++;
+    } else {
+      out[o++] = *p;
+    }
+  }
+  out[o] = '\0';
+}
+
 static void writeFileHeredoc(Run *r, const char *args, int *ip) {
   DslCtx *c = r->c;
   char raw[DSL_VAL];
@@ -317,9 +332,10 @@ static void writeFileHeredoc(Run *r, const char *args, int *ip) {
   if (fp) {
     while (i < r->ev->n && !(strcmp(r->ev->v[i].tag, "CLOSE") == 0)) {
       if (strcmp(r->ev->v[i].tag, "TEXT") == 0) {
-        char val[DSL_VAL];
+        char val[DSL_VAL], text[DSL_VAL];
         dslInterp(c, r->ev->v[i].a ? r->ev->v[i].a : "", val, sizeof(val));
-        fputs(val, fp);
+        unescTabs(val, text, sizeof(text));
+        fputs(text, fp);
         fputc('\n', fp);
       }
       i++;
@@ -665,7 +681,14 @@ static void runStmt(Run *r, const char *aksi, char *args) {
     const char *sl = n > 0 ? tok[0] : "last";
     DslRun *run = runAdd(r, sl);
     if (!run || !run->pid) dieMsg(r, "run.stop: tidak ada proses latar '%s'", sl);
-    kill(run->pid, SIGINT);
+    int signo = SIGINT;
+    if (n > 1) {
+      if (strcmp(tok[1], "term") == 0) signo = SIGTERM;
+      else if (strcmp(tok[1], "stop") == 0) signo = SIGSTOP;
+      else if (strcmp(tok[1], "cont") == 0) signo = SIGCONT;
+      else if (strcmp(tok[1], "kill") == 0) signo = SIGKILL;
+    }
+    kill(run->pid, signo);
     free(tok);
     return;
   }
@@ -679,9 +702,9 @@ static void runStmt(Run *r, const char *aksi, char *args) {
 
   char *argv[512];
   int ac = 0;
-  /* run.exec menjalankan program tes itu sendiri; build/cmd/bg adalah
-     argumen untuk binary satria. */
-  if (strcmp(aksi, "exec") != 0) argv[ac++] = c->satria;
+  /* run.exec/run.execbg menjalankan program tes itu sendiri; build/cmd/bg
+     adalah argumen untuk binary satria. */
+  if (strcmp(aksi, "exec") != 0 && strcmp(aksi, "execbg") != 0) argv[ac++] = c->satria;
   char jb[32];
   if (strcmp(aksi, "build") == 0) {
     snprintf(jb, sizeof(jb), "-j%d", c->jobs);
@@ -708,8 +731,8 @@ static void runStmt(Run *r, const char *aksi, char *args) {
 
   const char *cwd = c->work;
   int first = 0;
-  if (strcmp(aksi, "exec") == 0) {
-    if (n < 1) dieMsg(r, "run.exec butuh program");
+  if (strcmp(aksi, "exec") == 0 || strcmp(aksi, "execbg") == 0) {
+    if (n < 1) dieMsg(r, "run.%s butuh program", aksi);
     argv[ac++] = tok[0];
     first = 1;
   } else if (strcmp(aksi, "bg") == 0) {
@@ -718,7 +741,7 @@ static void runStmt(Run *r, const char *aksi, char *args) {
     dieMsg(r, "run.cmd butuh argumen");
   }
 
-  if (strcmp(aksi, "bg") != 0) {
+  if (strcmp(aksi, "bg") != 0 && strcmp(aksi, "execbg") != 0) {
     for (int i = first; i < n; i++) argv[ac++] = tok[i];
     argv[ac] = NULL;
     run->rc = spawnWait(argv, cwd, outPath, NULL, false);
@@ -998,7 +1021,12 @@ static void stmtExec(Run *r, Ev *e, int *ip) {
       char *eq = strchr(args, '=');
       if (eq) {
         *eq = '\0';
-        setenv(args, eq + 1, 1);
+        /* Nilai boleh memakai {var}/selektor (mis. work(stage) absolut). */
+        char val[DSL_VAL];
+        if (dslResolve(c, eq + 1, val, sizeof(val)) == 0)
+          setenv(args, val, 1);
+        else
+          setenv(args, eq + 1, 1);
       }
     } else if (strcmp(e->b, "unset") == 0) {
       unsetenv(args);
@@ -1009,6 +1037,23 @@ static void stmtExec(Run *r, Ev *e, int *ip) {
   if (strcmp(e->a, "time") == 0) {
     if (strcmp(e->b, "tick") == 0) {
       tickWait(r);
+    } else if (strcmp(e->b, "sleep") == 0) {
+      double sec = atof(args);
+      if (sec > 0) procSleepMs((int)(sec * 1000.0));
+    } else if (strcmp(e->b, "stamp") == 0) {
+      /* Stempel ISO-8601 UTC untuk staging sintetis (RUN_STARTED/RUN_ENDED). */
+      char tmp[DSL_VAL];
+      copyStr(tmp, sizeof(tmp), args);
+      char *as = strstr(tmp, " as ");
+      char *name = as ? firstToken(as + 4)
+                      : (!strncmp(tmp, "as ", 3) ? firstToken(tmp + 3) : NULL);
+      if (!name || !*name) return;
+      time_t now = time(NULL);
+      struct tm tm;
+      gmtime_r(&now, &tm);
+      char buf[32];
+      strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", &tm);
+      dslVarSet(c, name, buf);
     } else if (strcmp(e->b, "mark") == 0) {
       char tmp[DSL_VAL];
       copyStr(tmp, sizeof(tmp), args);
@@ -1037,6 +1082,36 @@ static void stmtExec(Run *r, Ev *e, int *ip) {
 
   if (strcmp(e->a, "run") == 0) {
     runStmt(r, e->b, args);
+    return;
+  }
+
+  if (strcmp(e->a, "proc") == 0) {
+    char tmp[DSL_VAL];
+    copyStr(tmp, sizeof(tmp), args);
+    char *sp = strchr(tmp, ' ');
+    if (!sp) dieMsg(r, "bentuk: proc.signal <pid|berkas-pid> <int|term|stop|cont|kill>");
+    *sp = '\0';
+    char *sig = sp + 1;
+    while (*sig == ' ') sig++;
+    char full[SATRIA_MAX_PATH];
+    dslWPath(c, tmp, full, sizeof(full));
+    int pid = 0;
+    if (fsFileExists(full)) {
+      size_t len = 0;
+      char *txt = dslReadFile(full, &len);
+      if (txt) {
+        pid = atoi(txt);
+        free(txt);
+      }
+    } else {
+      pid = atoi(tmp);
+    }
+    int signo = SIGTERM;
+    if (strcmp(sig, "int") == 0) signo = SIGINT;
+    else if (strcmp(sig, "stop") == 0) signo = SIGSTOP;
+    else if (strcmp(sig, "cont") == 0) signo = SIGCONT;
+    else if (strcmp(sig, "kill") == 0) signo = SIGKILL;
+    if (pid > 0) kill(pid, signo);
     return;
   }
 
@@ -1257,6 +1332,15 @@ static void dirExec(Run *r, Ev *e) {
       snprintf(msg, sizeof(msg), "@guard salah: %s", rest);
       precondition(r, msg);
     }
+    return;
+  }
+  if (strcmp(d, "assert") == 0) {
+    char val[DSL_VAL];
+    evalOrPrecond(r, rest, val, sizeof(val));
+    char clause[DSL_VAL + 32];
+    snprintf(clause, sizeof(clause), "@assert %s", rest);
+    if (dslTruthy(val)) pass(r, clause);
+    else fail(r, clause, val, "benar");
     return;
   }
   if (strcmp(d, "set") == 0) {

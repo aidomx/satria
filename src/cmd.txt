@@ -26,7 +26,7 @@ satria init -w           Create WsBuildfile (workspace template)
 satria clean             Remove build artifacts
 satria profile <ctx>     Measure operation costs (see: help profile)
 satria trace [opts] -- <args>  Trace file access via LD_PRELOAD (see: help trace)
-satria test <args>          Run unit tests via scripts/unit.sh (see: help test)
+satria test <args>          Run unit tests (native runner, see: help test)
 satria bench [--workspace] [-f key=value ...]  Benchmark in C (see: help bench)
 satria -w                Build all projects in workspace (WsBuildfile)
 satria -w <name>         Build <name> and its dependencies
@@ -369,21 +369,29 @@ Not supported on Windows (uses LD_PRELOAD/dlsym).
 Run the repo's unit tests (native runner, M4d)
 
   satria test [binary] <target> [-b] [-j N] [-o LOG] [-s TEST[,TEST...]] [--clean]
+  satria test -w [target]
+  satria test stop|pause|resume <target>
 
 The default run is native and in-process: satria stages tests/unit,
 classifies classes.conf, builds the fixture and cold snapshot, discovers
 projects from the compdb, and executes the selected tests without invoking
 scripts/unit.sh. The leading <binary> is optional — the running satria
 binary itself is pinned into the staging and used to run the tests, so
-`satria test miniws` is enough. Background `-b`, watcher `-w/--watch`, and
-the stop/pause/resume modes are not ported yet and still delegate to
-scripts/unit.sh (bash); `start` is accepted as a synonym for the default run.
+`satria test miniws` is enough. Everything is native: background `-b`,
+watcher `-w/--watch`, and run control `stop`/`pause`/`resume <target>`
+(graceful pause flag, kill run tree, resume plan minus timing). `start` is
+accepted as a synonym for the default run.
 
   satria test miniws            Full miniws sweep (cold + snap)
   satria test miniws -s cache_noop        Single test
   satria test miniws -s cache_noop,version_alias   Comma-separated selection
-  satria test bin/satria miniws -b        Background run (still bash)
+  satria test miniws -b                   Background run (native fork; PID/log/Stop)
+  satria test -w                           Watch the only active run (native)
+  satria test -w miniws                    Watch one target (Ctrl-C)
   satria test miniws --clean              Clean staging first
+  satria test pause miniws                Pause before the next test
+  satria test stop miniws                 Terminate the run tree (plan kept)
+  satria test resume miniws               Run the remaining plan
 
 The repo root is the current directory when it contains tests/unit, else
 the running binary's parent (bin/..), so `satria test` works from any

@@ -6,11 +6,11 @@
        → fixture target tests/<nama> (tanpa artefak build)
        → snapshot cold sekali untuk tes [snap]
        → discovery compdb (satria -w -g compdb → sources.tsv)   → tes .test/.t lewat eksekutor DSL C (`satria test <file>`), tes .sh lewat sh
-   → log per tes, timing.tsv, plan.tsv, run.env, ringkasan.
+   → log per tes, timing.tsv, plan.tsv, run.env, ringkasan, pause/stop/resume.
 
    CLI: `satria test --run <target> [-j N] [-s tes[,tes...]] [-o log] [--clean]`.
-   Belum termasuk (M4d): background/pause/resume, watcher, dan pemanggilan
-   in-process — runner ini memanggil binary yang di-pin sebagai child. */
+   Termasuk `-b` (fork+setsid), `-w/--watch`, dan kendali run native
+   `stop`/`pause`/`resume` (flag pause.flag, kill run tree, plan−timing). */
 
 #include "runner.h"
 
@@ -39,6 +39,8 @@ int testRunnerMain(int argc, const char *const *argv, const char *root, const ch
 
 #else
 
+#include <ctype.h>
+#include <dirent.h>
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -80,6 +82,7 @@ typedef struct {
   List cold, snap; /* urutan classes.conf */
   int pass, fail, pre, total;
   List results;
+  int paused;
 } Ctx;
 
 static Ctx g;
@@ -272,6 +275,55 @@ static bool readPidFile(const char *path, pid_t *pid) {
   fclose(fp);
   if (ok) *pid = (pid_t)v;
   return ok;
+}
+
+/* ==================== pause/resume: plan − timing ==================== */
+
+/* Nilai kolom ke-`col` (1-based) pada baris TSV. */
+static bool tsvCol(const char *line, int col, char *out, size_t n) {
+  const char *p = line;
+  for (int c = 1; c < col; c++) {
+    p = strchr(p, '\t');
+    if (!p) return false;
+    p++;
+  }
+  const char *e = strchr(p, '\t');
+  size_t len = e ? (size_t)(e - p) : strlen(p);
+  while (len && (p[len - 1] == '\n' || p[len - 1] == '\r')) len--;
+  if (!len || len + 1 > n) return false;
+  memcpy(out, p, len);
+  out[len] = '\0';
+  return true;
+}
+
+/* Nama tes di plan.tsv yang belum muncul di timing.tsv (kecuali snap-build). */
+static void remainingList(const char *logdir, List *out) {
+  char timing[XBUF], plan[XBUF];
+  joinPath(timing, sizeof(timing), logdir, "timing.tsv");
+  joinPath(plan, sizeof(plan), logdir, "plan.tsv");
+  List done = {0};
+  char line[1024];
+  FILE *fp = fopen(timing, "r");
+  if (fp) {
+    int ln = 0;
+    while (fgets(line, sizeof(line), fp)) {
+      char name[256];
+      if (++ln == 1) continue; /* header */
+      if (!tsvCol(line, 1, name, sizeof(name))) continue;
+      if (strcmp(name, "snap-build") != 0) listAddUnique(&done, name);
+    }
+    fclose(fp);
+  }
+  fp = fopen(plan, "r");
+  if (fp) {
+    while (fgets(line, sizeof(line), fp)) {
+      char name[256];
+      if (!tsvCol(line, 2, name, sizeof(name))) continue;
+      if (!listHas(&done, name)) listAdd(out, name);
+    }
+    fclose(fp);
+  }
+  listFree(&done);
 }
 
 /* ==================== staging ==================== */
@@ -901,6 +953,16 @@ static void runTest(const char *name, const char *mode, bool dsl) {
   listAdd(&g.results, result);
 }
 
+/* `satria test pause <target>` menulis pause.flag; runner berhenti tepat
+   sebelum tes berikutnya (tes yang sedang berjalan dibiarkan selesai). */
+static bool pauseRequested(void) {
+  char p[XBUF];
+  joinPath(p, sizeof(p), g.logdir, "pause.flag");
+  if (!fsFileExists(p)) return false;
+  unlink(p);
+  return true;
+}
+
 static int cmpWork(const void *a, const void *b) {
   const Row *x = a, *y = b;
   return (x->workMs < y->workMs) - (x->workMs > y->workMs);
@@ -909,6 +971,10 @@ static int cmpWork(const void *a, const void *b) {
 static int runAll(void) {
   long long t0 = (long long)portMonoMs();
   for (int i = 0; i < g.cold.count; i++) {
+    if (pauseRequested()) {
+      g.paused = 1;
+      break;
+    }
     char testPath[XBUF];
     snprintf(testPath, sizeof(testPath), "%s/common/%s.test", g.stage, g.cold.items[i]);
     bool dsl = fsFileExists(testPath);
@@ -918,7 +984,11 @@ static int runAll(void) {
     }
     runTest(g.cold.items[i], "cold", dsl);
   }
-  for (int i = 0; i < g.snap.count; i++) {
+  for (int i = 0; !g.paused && i < g.snap.count; i++) {
+    if (pauseRequested()) {
+      g.paused = 1;
+      break;
+    }
     char testPath[XBUF];
     snprintf(testPath, sizeof(testPath), "%s/common/%s.test", g.stage, g.snap.items[i]);
     bool dsl = fsFileExists(testPath);
@@ -927,6 +997,29 @@ static int runAll(void) {
       dsl = fsFileExists(testPath);
     }
     runTest(g.snap.items[i], "snap", dsl);
+  }
+
+  char timing[XBUF];
+  joinPath(timing, sizeof(timing), g.logdir, "timing.tsv");
+
+  /* Pause: run berhenti terkendali tanpa RUN_ENDED — watcher tahu dari
+     RUN_PAUSED=1 bahwa run belum selesai. */
+  if (g.paused) {
+    char runenv[XBUF];
+    joinPath(runenv, sizeof(runenv), g.logdir, "run.env");
+    FILE *rf = fopen(runenv, "a");
+    if (rf) {
+      fputs("RUN_PAUSED=1\n", rf);
+      fclose(rf);
+    }
+    List rem = {0};
+    remainingList(g.logdir, &rem);
+    sayf("==========================================\n");
+    sayf("Paused : %d tes selesai, sisa %d — lanjutkan dengan: satria test resume %s\n",
+         g.total, rem.count, g.tname);
+    listFree(&rem);
+    sayf("Timing : %s\n", timing);
+    return 0;
   }
 
   long long elapsed = (long long)portMonoMs() - t0;
@@ -959,8 +1052,6 @@ static int runAll(void) {
     sayf("  %-30s %-5s kerja %7.3f s  tunggu %6.3f s  total %7.3f s\n", sorted[i].name,
          sorted[i].mode, sorted[i].workMs / 1000.0, sorted[i].sleepMs / 1000.0,
          sorted[i].ms / 1000.0);
-  char timing[XBUF];
-  joinPath(timing, sizeof(timing), g.logdir, "timing.tsv");
   sayf("Timing : %s\n", timing);
   sayf("Log    : %s\n", g.log);
   return g.fail == 0 ? 0 : 1;
@@ -1005,8 +1096,8 @@ int testRunnerMain(int argc, const char *const *argv, const char *root, const ch
     } else if (strcmp(a, "-w") == 0 || strcmp(a, "--watch") == 0) {
       watch = true;
     } else if (strcmp(a, "-h") == 0 || strcmp(a, "--help") == 0) {
-      printf("pemakaian: satria test --run <target> [-j N] [-s tes[,tes...]] [-o log] "
-             "[--clean] [-b] | -w [target]\n");
+      printf("pemakaian: satria test <target> [-j N] [-s tes[,tes...]] [-o log] "
+             "[--clean] [-b] | -w [target] | stop|pause|resume <target>\n");
       listFree(&sel);
       return 0;
     } else if (a[0] == '-') {
@@ -1153,6 +1244,189 @@ int testRunnerMain(int argc, const char *const *argv, const char *root, const ch
   listFree(&g.snap);
   listFree(&g.results);
   return rc;
+}
+
+/* ==================== kendali run: stop/pause/resume ==================== */
+
+static bool pidAlive(long pid) { return pid > 0 && kill((pid_t)pid, 0) == 0; }
+
+static long pidInFile(const char *path) {
+  pid_t p = 0;
+  return readPidFile(path, &p) ? (long)p : 0;
+}
+
+#if defined(__linux__)
+/* Rekursif membunuh keturunan (padanan kill_children bash): baca ppid dari
+   /proc/<pid>/stat — nama proses bisa memuat ')' jadi parse setelah ')' terakhir. */
+static void killChildTree(pid_t parent) {
+  DIR *d = opendir("/proc");
+  if (!d) return;
+  struct dirent *e;
+  while ((e = readdir(d))) {
+    if (!isdigit((unsigned char)e->d_name[0])) continue;
+    char path[512], buf[512];
+    snprintf(path, sizeof(path), "/proc/%s/stat", e->d_name);
+    FILE *fp = fopen(path, "r");
+    if (!fp) continue;
+    long ppid = 0;
+    if (fgets(buf, sizeof(buf), fp)) {
+      char *rp = strrchr(buf, ')');
+      if (!rp || sscanf(rp + 1, " %*c %ld", &ppid) != 1) ppid = 0;
+    }
+    fclose(fp);
+    if (ppid == (long)parent) {
+      pid_t kid = (pid_t)atol(e->d_name);
+      killChildTree(kid);
+      kill(kid, SIGKILL);
+    }
+  }
+  closedir(d);
+}
+#else
+static void killChildTree(pid_t parent) { (void)parent; }
+#endif
+
+static void envValue(const char *path, const char *key, char *out, size_t n) {
+  out[0] = '\0';
+  FILE *fp = fopen(path, "r");
+  if (!fp) return;
+  char line[2048];
+  size_t kl = strlen(key);
+  while (fgets(line, sizeof(line), fp)) {
+    if (strncmp(line, key, kl) != 0 || line[kl] != '=') continue;
+    char *v = line + kl + 1;
+    size_t len = strlen(v);
+    while (len && (v[len - 1] == '\n' || v[len - 1] == '\r')) v[--len] = '\0';
+    copyStr(out, n, v);
+    break;
+  }
+  fclose(fp);
+}
+
+int testRunnerControl(const char *mode, const char *target, const char *root) {
+  if (!target || !*target) {
+    fprintf(stderr, "Error: %s perlu <target>\n", mode);
+    return 2;
+  }
+  if (strchr(target, '/') || target[0] == '.') {
+    fprintf(stderr, "Error: nama target tidak valid: %s\n", target);
+    return 1;
+  }
+  const char *st = getenv("UNIT_STAGE");
+  char stage[SATRIA_MAX_PATH];
+  copyStr(stage, sizeof(stage), (st && *st) ? st : "/tmp/satria-unit");
+  char tdir[XBUF], logdir[XBUF + 512];
+  char pidp[XBUF + 1024], bgp[XBUF + 1024], flag[XBUF + 1024];
+  snprintf(tdir, sizeof(tdir), "%s/targets/%s", stage, target);
+  if (!fsDirExists(tdir)) {
+    fprintf(stderr, "Error: target belum pernah dijalankan: %s\n", tdir);
+    return 1;
+  }
+  snprintf(logdir, sizeof(logdir), "%s/log", tdir);
+  if (!fsDirExists(logdir)) {
+    fprintf(stderr, "Error: tidak ada log run di %s\n", logdir);
+    return 1;
+  }
+  snprintf(pidp, sizeof(pidp), "%s/run.pid", logdir);
+  snprintf(bgp, sizeof(bgp), "%s/bg.pid", logdir);
+  snprintf(flag, sizeof(flag), "%s/pause.flag", logdir);
+
+  if (strcmp(mode, "pause") == 0) {
+    long rpid = pidInFile(pidp);
+    if (!pidAlive(rpid)) {
+      fprintf(stderr,
+              "Error: tidak ada run aktif di target %s — pause hanya untuk run yang "
+              "sedang berjalan\n",
+              target);
+      return 1;
+    }
+    FILE *fp = fopen(flag, "w");
+    if (fp) fclose(fp);
+    printf("> Pause : ditandai (pid %ld) — berhenti setelah tes berjalan selesai\n", rpid);
+    printf("> Pause : lanjutkan dengan: satria test resume %s\n", target);
+    return 0;
+  }
+
+  if (strcmp(mode, "stop") == 0) {
+    long rpid = pidInFile(pidp);
+    if (!pidAlive(rpid)) rpid = pidInFile(bgp);
+    if (!pidAlive(rpid)) {
+      fprintf(stderr, "Error: tidak ada run aktif di target %s\n", target);
+      return 1;
+    }
+    List rem = {0};
+    remainingList(logdir, &rem);
+    int nsisa = rem.count;
+    listFree(&rem);
+    killChildTree((pid_t)rpid);
+    kill((pid_t)rpid, SIGTERM);
+    usleep(200000);
+    if (pidAlive(rpid)) kill((pid_t)rpid, SIGKILL);
+    unlink(pidp);
+    unlink(bgp);
+    char snapPid[XBUF + 64];
+    snprintf(snapPid, sizeof(snapPid), "%s/snap/%ld.pid", stage, rpid);
+    unlink(snapPid);
+    printf("> Stop : run %s (pid %ld) dihentikan\n", target, rpid);
+    if (nsisa > 0)
+      printf("> Stop : sisa %d tes — lanjutkan dengan: satria test resume %s\n", nsisa,
+             target);
+    return 0;
+  }
+
+  /* resume */
+  long rpid = pidInFile(pidp);
+  if (pidAlive(rpid)) {
+    fprintf(stderr,
+            "Error: run masih aktif di target %s (pid %ld) — hentikan dulu: satria test "
+            "stop %s\n",
+            target, rpid, target);
+    return 1;
+  }
+  char planp[XBUF + 1024], envp[XBUF + 1024];
+  snprintf(planp, sizeof(planp), "%s/plan.tsv", logdir);
+  snprintf(envp, sizeof(envp), "%s/run.env", logdir);
+  if (!fsFileExists(planp)) {
+    fprintf(stderr, "Error: belum ada plan untuk di-resume: jalankan run biasa dulu\n");
+    return 1;
+  }
+  if (!fsFileExists(envp)) {
+    fprintf(stderr, "Error: belum ada run.env untuk di-resume: jalankan run biasa dulu\n");
+    return 1;
+  }
+  List rem = {0};
+  remainingList(logdir, &rem);
+  if (rem.count == 0) {
+    printf("> Resume : semua tes sudah selesai di target %s — tidak ada yang dijalankan\n",
+           target);
+    listFree(&rem);
+    return 0;
+  }
+  char binp[SATRIA_MAX_PATH];
+  envValue(envp, "RUN_ORIGINAL", binp, sizeof(binp));
+  if (!binp[0] || access(binp, X_OK) != 0) envValue(envp, "RUN_BINARY", binp, sizeof(binp));
+  if (!binp[0] || access(binp, X_OK) != 0) {
+    fprintf(stderr, "Error: binary run sebelumnya tidak ditemukan — jalankan run biasa\n");
+    listFree(&rem);
+    return 1;
+  }
+  printf("> Resume : sisa %d tes di %s (", rem.count, target);
+  char csv[8192];
+  size_t off = 0;
+  csv[0] = '\0';
+  for (int i = 0; i < rem.count; i++) {
+    int w = snprintf(csv + off, sizeof(csv) - off, "%s%s", i ? "," : "", rem.items[i]);
+    if (w < 0 || (size_t)w >= sizeof(csv) - off) break;
+    off += (size_t)w;
+    printf("%s%s", i ? " " : "", rem.items[i]);
+  }
+  printf(")\n");
+  listFree(&rem);
+  const char *av[3];
+  av[0] = target;
+  av[1] = "-s";
+  av[2] = csv;
+  return testRunnerMain(3, av, root, binp);
 }
 
 #endif /* _WIN32 */

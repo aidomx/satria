@@ -1,0 +1,198 @@
+# Port report_artifact.sh: report.blob + artifact.cache (startup.md §9/§10).
+# - build sukses membentuk keduanya; no-op memutar laporan tersimpan
+# - release aktif: no-op berlaku, validasi via artifact.cache; artefak/input
+#   berubah membatalkan no-op; sentuh artefak tetap no-op (PATCH hash)
+# - release.optimize: tarball gzip valid, nilai tak valid ditolak
+# - single-project ikut membentuk kedua berkas
+@suite workspace
+@fixture miniws
+@requires cold
+@purpose "report.blob/artifact.cache: terbentuk saat build, diputar saat no-op, menjaga no-op release"
+
+# ===================== workspace: report.blob =====================
+work.new
+fixture.copy
+file.append WsBuildfile flags = MMD, MP
+
+run.build as cold
+@response cold
+  rc.ok
+@end
+file.exists .satria/report.blob
+@assert size(.satria/report.blob) > 0
+file.contains .satria/report.blob Status     : Success
+file.contains .satria/report.blob ^STATUS$
+file.contains .satria/report.blob Cache valid *: .satria/caches/fingerprint.cache
+file.contains .satria/report.blob ^LAST BUILD SUMMARY$
+file.contains .satria/report.blob Total time :
+file.contains .satria/report.blob Libraries  : [0-9]* generated
+file.contains .satria/report.blob Binaries   : [0-9]* linked
+file.exists .satria/artifact.cache
+
+run.build as noop
+@response noop
+  rc.ok
+  out.contains "Nothing to build"
+  out.contains "Status     : Success"
+@end
+@set sline line(.out.noop.txt, Status     : Success)
+@set nline line(.out.noop.txt, Nothing to build)
+@set order {sline} > 0 && {nline} > 0 && {nline} < {sline}
+file.write order.txt <<T
+{order}
+T
+file.contains order.txt 1
+
+# ===================== workspace + release: release + artifact =====================
+work.new report_artifact-2
+fixture.copy
+work.clean all
+file.write core/src/cmd.txt <<T
+perintah-test
+T
+file.append WsBuildfile release.name = rupa
+file.append WsBuildfile release.version = 0.2.4
+file.append WsBuildfile release.files = core/src/cmd.txt
+file.append WsBuildfile release.output = dist/{name}-v{version}.tar.gz
+file.append WsBuildfile release.format = tar
+file.append WsBuildfile release.compress = gzip
+file.append WsBuildfile release.checksum = sha256
+
+run.build as relcold
+@response relcold
+  rc.ok
+@end
+file.contains .satria/report.blob Releases   : 1 created
+@assert count(.satria/artifact.cache, dist/rupa-v) > 0
+file.contains .satria/artifact.cache cmd.txt
+file.contains .satria/artifact.cache rupa_modules.tar
+
+run.build as relnoop
+@response relnoop
+  rc.ok
+  out.contains "Nothing to build"
+  out.contains "Cache valid"
+  out.contains "Releases   : 1 created"
+@end
+
+# artefak dihapus -> batal no-op + dibangun ulang + hit lagi
+@find tars dist/*.tar.gz
+@for p in {tars}
+file.delete {p}
+@end
+@assert glob(dist/*.tar.gz) == 0
+run.build as relgone
+@response relgone
+  rc.ok
+  out.not-contains "Nothing to build"
+@end
+@assert glob(dist/*.tar.gz) > 0
+run.build as relback
+@response relback
+  out.contains "Nothing to build"
+  out.contains "Cache valid"
+@end
+
+# input release (di luar fingerprint) berubah isi -> batal no-op + release ulang
+file.append core/src/cmd.txt perubahan-test
+run.build as reledit
+@response reledit
+  rc.ok
+  out.not-contains "Nothing to build"
+  out.contains "# Release"
+  out.matches "rupa-v[0-9.]+\\.tar\\.gz \\([^)]*built\\)"
+@end
+run.build as relsync
+@response relsync
+  out.contains "Nothing to build"
+  out.contains "Cache valid"
+@end
+
+# sentuh artefak (stempel beda, isi sama) -> PATCH, no-op tetap diambil
+time.tick
+@find tars2 dist/*.tar.gz
+@for p in {tars2}
+file.touch {p}
+@end
+run.build as reltouch
+@response reltouch
+  rc.ok
+  out.contains "Nothing to build"
+  out.contains "Cache valid"
+@end
+
+# ===================== release.optimize: gzip -1 dua langkah =====================
+work.new report_artifact-3
+fixture.copy
+work.clean all
+file.write core/src/cmd.txt <<T
+perintah-test
+T
+file.append WsBuildfile release.name = rupa
+file.append WsBuildfile release.version = 0.3.0
+file.append WsBuildfile release.files = core/src/cmd.txt
+file.append WsBuildfile release.output = dist/{name}-v{version}.tar.gz
+file.append WsBuildfile release.format = tar
+file.append WsBuildfile release.compress = gzip
+file.append WsBuildfile release.checksum = sha256
+file.append WsBuildfile release.optimize = true
+
+run.build as optcold
+@response optcold
+  rc.ok
+@end
+run.exec tar tzf dist/rupa-v0.3.0.tar.gz as opttar
+@response opttar
+  rc.ok
+@end
+@assert size(dist/rupa-v0.3.0.tar.gz) > 0
+file.contains .satria/report.blob Releases   : 1 created
+file.contains .satria/artifact.cache cmd.txt
+
+file.append WsBuildfile release.optimize = maybe
+run.build as optbad
+@response optbad
+  out.contains "optimize 'maybe' tidak valid"
+@end
+run.exec sed -i '/release.optimize = maybe/d' WsBuildfile as optfix
+@response optfix
+  rc.ok
+@end
+run.build as optnorm
+@response optnorm
+  rc.ok
+@end
+run.build as optnoop
+@response optnoop
+  out.contains "Nothing to build"
+  out.contains "Cache valid"
+@end
+run.exec tar tzf dist/rupa-v0.3.0.tar.gz as opttar2
+@response opttar2
+  rc.ok
+@end
+
+# ===================== single-project =====================
+work.new report_artifact-4
+file.write Buildfile <<T
+use project
+
+sources = src
+T
+file.write src/main.c <<T
+int main(void){return 0;}
+T
+
+run.cmd -j2 as scold
+@response scold
+  rc.ok
+@end
+file.exists .satria/report.blob
+@assert size(.satria/report.blob) > 0
+file.exists .satria/artifact.cache
+
+run.cmd -j2 as snnoop
+@response snnoop
+  rc.ok
+  out.contains "Status     : Success"
+@end
