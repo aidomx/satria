@@ -302,13 +302,9 @@ static void benchTouchNewer(const char *path, const char *ref) {
   }
   struct timespec ts[2] = {now, now};
   struct stat st;
-  if (ref && stat(ref, &st) == 0) {
-    fprintf(stderr, "[DEBUG MTIME:PATH] %s\n", path);
-    fprintf(stderr, "[DEBUG MTIME:REF] %s\n", ref);
+  if (ref && stat(ref, &st) == 0) {    
     long long nowNs = (long long)now.tv_sec * 1000000000LL + now.tv_nsec;
     long long refNs = (long long)st.st_mtim.tv_sec * 1000000000LL + st.st_mtim.tv_nsec;
-
-    fprintf(stderr, "[DEBUG MTIME:MATCH] %d\n", nowNs <= refNs);
 
     if (nowNs <= refNs) {
       ts[1].tv_sec = st.st_mtim.tv_sec;
