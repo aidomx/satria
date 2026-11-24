@@ -6,6 +6,7 @@
 #include "../cmds/cmds_internal.h" /* cmdsLegacyStateSweep: pembersihan state lama */
 #include "../cache/router.h" /* optsSourcesRouteSync: sinkron sources <-> opts */
 #include "../cache/artifact.h" /* fase 3: artifact.cache diputuskan induk */
+#include "../runners/runners.h" /* runnerWantParallel: precompute rencana */
 #include "../log/report_blob.h" /* detail laporan no-op (design/startup.md §10) */
 #include "../log/build_report.h" /* Build Report workspace (design/build_report.md) */
 #include "../log/build_log.h"
@@ -581,7 +582,10 @@ static int wsRunCore(const char *cmd, int jobs, const char *only, const char *re
        dependensi persis perilaku lama. Alasan & ukuran gain (gap
        hedit/libhdr bench/ws.sh) ada di komentar modul ws_batch.c. */
     profMark("ws-plan-lib-pre");
-    wsPlanBegin(&m, work, wcount, true);
+    /* Precompute verdict hanya bila runner paralel: serial memvalidasi per
+       proyek tepat sebelum eksekusi (verdict di depan langsung basi saat
+       dependensi membangun lebih dulu). */
+    wsPlanBegin(&m, work, wcount, true, runnerWantParallel(wcount, jobs));
     profMark("ws-plan-lib-begin");
     rc = wsRunBatch(&m, work, wcount, jobs, cmd, wsDir, true, false);
     profMark("ws-plan-lib-batch");
@@ -598,7 +602,7 @@ static int wsRunCore(const char *cmd, int jobs, const char *only, const char *re
       for (int i = 0; i < wcount; i++)
         if (!wsProjectArchiveOnly(&m.projects[work[i].idx])) bin[bn++] = work[i];
       profMark("ws-plan-bin-pre");
-      wsPlanBegin(&m, bin, bn, false);
+      wsPlanBegin(&m, bin, bn, false, runnerWantParallel(bn, jobs));
       profMark("ws-plan-bin-begin");
       /* Fase binary tetap satu batch seperti jalur non-plan: compile+link per
          proyek dijalankan runner. Versi pilot sebelumnya memecah compile-only

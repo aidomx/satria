@@ -224,10 +224,13 @@ int wsRunBatch(const WsModel *m, const WsWork *batch, int n, int jobs, const cha
 /* compileOnly: jalankan pass compile lalu buang tail tanpa link. */
 int wsRunProject(const WsModel *m, const char *name, const char *cmd, int jobs, bool libOnly,
                  bool compileOnly);
-/* Rencana scheduler (eksperimen P4, design/router_centric.md): induk +
-   verifikasi read-only pasca-eksekusi. Nonaktif tanpa SATRIA_WS_PLAN. */
+/* Rencana scheduler (P4, design/router_centric.md): induk + verifikasi
+   read-only pasca-eksekusi. Aktif default; SATRIA_WS_PLAN=0 mematikannya.
+   `precompute` hanya true untuk runner paralel — serial memvalidasi tepat
+   sebelum proyeknya dieksekusi (lihat ws_plan.c). */
 bool wsPlanActive(void);
-void wsPlanBegin(const WsModel *m, const WsWork *work, int n, bool libOnly);
+void wsPlanBegin(const WsModel *m, const WsWork *work, int n, bool libOnly,
+                 bool precompute);
 bool wsPlanAdmit(const char *name, bool libOnly);
 void wsPlanEnd(int rc);
 int wsPlanFastConsume(const char *name, bool libOnly); /* 1 hit, 0 miss, -1 fallback */

@@ -8,9 +8,15 @@
    pasca-eksekusi bahwa yang berjalan persis seperti rencana. Fase 1 P4 akan
    mengisi rencana ini dengan keputusan router (route/group/fast-state).
 
-   Pilot ini read-only: keputusan build, cache, dan penulisan state tidak
-   berubah. Aktif hanya bila SATRIA_WS_PLAN diset (bukan "0"). Tanpa env
-   itu seluruh fungsi menjadi no-op (satu getenv ter-cache per proses).
+   Rencana aktif secara default sejak P4 selesai diuji; `SATRIA_WS_PLAN=0`
+   (atau `off`/`false`) mematikan seluruh jalur baru sebagai fallback.
+   Keputusan build, cache, dan penulisan state tetap identik dengan jalur
+   lama (invarian §4 design/router_centric.md).
+
+   Verdict route/fast-state hanya dihitung di depan batch bila runner akan
+   paralel. Runner serial (foreground default) memvalidasi per proyek di
+   executor seperti jalur lama: precompute di depan hanya menggandakan kerja
+   ketika proyek dependensi membangun lebih dulu dan membuat verdict basi.
 */
 #include "ws_internal.h"
 
@@ -28,6 +34,9 @@ typedef struct {
 static WsPlanEntry g_plan[WS_MAX_PROJECTS];
 static int g_planN = 0;
 static int g_planEnv = -1; /* -1 belum dibaca, 0 off, 1 on */
+/* Verdict fast-state/route tersedia dari precompute? Runner serial tidak
+   precompute — executor memakai jalur validasi lama (consume = -1). */
+static bool g_planHaveVerdict = false;
 /* Proyek yang benar-benar membangun membuat verdict fast-state proyek lain
    berpotensi basi. Hit berikutnya jatuh ke validasi executor (perilaku lama). */
 static bool g_planDirty = false;
@@ -35,7 +44,10 @@ static bool g_planDirty = false;
 static bool wsPlanOn(void) {
   if (g_planEnv < 0) {
     const char *v = getenv("SATRIA_WS_PLAN");
-    g_planEnv = (v && *v && strcmp(v, "0") != 0) ? 1 : 0;
+    /* Default aktif; nilai 0/off/false adalah satu-satunya jalan keluar. */
+    bool off = v && (strcmp(v, "0") == 0 || strcmp(v, "off") == 0 ||
+                     strcmp(v, "false") == 0);
+    g_planEnv = off ? 0 : 1;
   }
   return g_planEnv == 1;
 }
@@ -140,13 +152,21 @@ static void wsPlanMarker(int i, char *out, size_t cap) {
   snprintf(out, cap, ".satria/ws-plan-%d", i);
 }
 
-/* Fase 1 P4: scheduler menghitung route + verdict fast-state SEBELUM batch.
-   Verdict dipakai executor sehingga ia tidak memanggil router/validasi lagi.
-   Bila ada proyek yang benar-benar membangun, hit berikutnya tidak dipercaya
-   (g_planDirty) — executor memvalidasi ulang seperti jalur lama. */
-void wsPlanBegin(const WsModel *m, const WsWork *work, int n, bool libOnly) {
+/* Fase 1 P4: scheduler menghitung route + verdict fast-state SEBELUM batch
+   saat runner paralel (precompute=true). Verdict dipakai executor sehingga ia
+   tidak memanggil router/validasi lagi. Bila ada proyek yang benar-benar
+   membangun, hit berikutnya tidak dipercaya (g_planDirty) — executor
+   memvalidasi ulang seperti jalur lama.
+
+   precompute=false (runner serial): rencana tetap dibentuk untuk verifikasi
+   penanda, tetapi verdict tidak dihitung di depan. Serial memvalidasi tepat
+   sebelum proyeknya dieksekusi, jadi precompute hanya menduplikasi kerja
+   yang langsung basi begitu proyek dependensi membangun. */
+void wsPlanBegin(const WsModel *m, const WsWork *work, int n, bool libOnly,
+                 bool precompute) {
   g_planN = 0;
   g_planDirty = false;
+  g_planHaveVerdict = false;
   if (!wsPlanOn()) return;
   if (n > WS_MAX_PROJECTS) n = WS_MAX_PROJECTS;
   /* Buang penanda basi dari run yang berhenti paksa: verifikasi tidak boleh
@@ -162,22 +182,25 @@ void wsPlanBegin(const WsModel *m, const WsWork *work, int n, bool libOnly) {
     g_plan[i].routeOk = false;
     g_plan[i].fastOk = false;
   }
-  WsPlanWire *wire = n > 0 ? calloc((size_t)n, sizeof(*wire)) : NULL;
-  bool parallel = false;
-  if (wire) {
+  if (precompute) {
+    WsPlanWire *wire = n > 0 ? calloc((size_t)n, sizeof(*wire)) : NULL;
+    bool parallel = false;
+    if (wire) {
 #ifndef _WIN32
-    if (n >= 2 && !envOff("SATRIA_WSPLAN_PAR")) parallel = wsPlanFork(m, work, n, libOnly, wire);
+      if (n >= 2 && !envOff("SATRIA_WSPLAN_PAR"))
+        parallel = wsPlanFork(m, work, n, libOnly, wire);
 #endif
-    if (!parallel)
-      for (int i = 0; i < n; i++) wsPlanComputeOne(m, work, i, libOnly, &wire[i]);
-    for (int i = 0; i < n; i++) {
-      g_plan[i].fastOk = wire[i].fast != 0;
-      g_plan[i].routeOk = wire[i].route != 0;
+      if (!parallel)
+        for (int i = 0; i < n; i++) wsPlanComputeOne(m, work, i, libOnly, &wire[i]);
+      for (int i = 0; i < n; i++) {
+        g_plan[i].fastOk = wire[i].fast != 0;
+        g_plan[i].routeOk = wire[i].route != 0;
+      }
+      g_planHaveVerdict = true;
     }
-  } else {
     /* Alokasi gagal: tetap beri rencana, verdict jatuh ke fallback executor. */
+    free(wire);
   }
-  free(wire);
   g_planN = n;
 }
 
@@ -191,6 +214,7 @@ static WsPlanEntry *wsPlanFind(const char *name, bool libOnly) {
 /* 1 = hit terverifikasi scheduler, 0 = miss terverifikasi, -1 = tidak ada /
    verdict basi -> executor memakai jalur validasi lama. */
 int wsPlanFastConsume(const char *name, bool libOnly) {
+  if (!g_planHaveVerdict) return -1;
   WsPlanEntry *e = wsPlanFind(name, libOnly);
   if (!e) return -1;
   if (e->fastOk && g_planDirty) return -1;
