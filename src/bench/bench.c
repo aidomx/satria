@@ -1247,7 +1247,7 @@ int cmdBench(const char *const argv[], int argc) {
     snprintf(newPath, sizeof(newPath), "%s:%s", b.wrapdir, old ? old : "");
     setenv("PATH", newPath, 1);
   }
-  setenv("SATRIA_WS_PAR", "1", 1);
+  setenv("SATRIA_WSPLAN_PAR", "1", 1);
   /* Meson memilih compiler dari CC; samakan dengan `compiler =` di Buildfile. */
   if (!b.workspace && b.compilers[0] && !strchr(b.compilers, ','))
     setenv("CC", b.compilers, 1);
