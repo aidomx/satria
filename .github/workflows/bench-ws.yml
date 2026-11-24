@@ -46,9 +46,6 @@ on:
         required: true
         default: 20
 
-  # Tag rilis (v*) yang di-push pengguna memicu uji benchmark otomatis —
-  # event `release: published` yang dibuat GITHUB_TOKEN di release.yml
-  # TIDAK memicu workflow lain (GitHub memblokir rekursi).
   push:
     tags:
       - "v*"
@@ -61,9 +58,6 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 180
     env:
-      # Fallback untuk trigger push tag (input workflow kosong di event itu).
-      # Boolean TIDAK boleh `x || default`: false ikut falsy, jadi pakai
-      # perbandingan eksplisit.
       BENCH_TOOLS: ${{ inputs.tools || 'cmake,satria' }}
       BENCH_ARTIFACTS: ${{ inputs.artifacts == false && 'false' || 'true' }}
       BENCH_STRACE: ${{ inputs.strace == true && 'true' || 'false' }}
@@ -76,10 +70,27 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # --- OPTIMASI 1: Caching (Opsional, lebih efektif di Self-Hosted Runner) ---
+      - name: Cache apt packages
+        uses: actions/cache@v4
+        with:
+          path: /var/cache/apt/archives
+          key: ${{ runner.os }}-apt-cache-${{ hashFiles('**/apt-packages.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-apt-cache-
+
+      # --- OPTIMASI 2: Conditional Install ---
       - name: Install benchmark dependencies
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends build-essential cmake ninja-build
+          
+          # Cek apakah 'cmake' ada di dalam variabel BENCH_TOOLS
+          if [[ "$BENCH_TOOLS" == *"cmake"* ]]; then
+            echo "::notice::Installing cmake and ninja-build for tool: $BENCH_TOOLS"
+            sudo apt-get install -y --no-install-recommends cmake ninja-build
+          else
+            echo "::notice::Skipping cmake/ninja installation (tools=$BENCH_TOOLS)"
+          fi
 
       - name: Bootstrap satria
         run: |
@@ -97,13 +108,13 @@ jobs:
             free -h
             df -h .
             gcc --version | head -1
-            cmake --version
+            # Tampilkan versi cmake hanya jika diinstal
+            if [[ "$BENCH_TOOLS" == *"cmake"* ]]; then
+              cmake --version | head -1
+            fi
             bin/satria version || true
           } | tee benchmark-results/runner.txt
 
-      # Benchmark berjalan penuh di C: `satria bench --workspace` (src/bench).
-      # Warmup/audit/rolling built-in; audit kerja per skenario selalu jalan
-      # (dilaporkan di Detailed Validation Log), tidak ada lagi bench/ws.sh.
       - name: Measure workspace benchmark (bin/satria bench --workspace)
         shell: bash
         run: |
