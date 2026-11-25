@@ -917,6 +917,430 @@ void cmdsEmitCapture(ProcHandle *h, bool unitOk) {
   free(buf);
 }
 
+/* ================= arsip statis inkremental (armap GNU) ================= */
+
+/*
+ * `ar rcs` membaca dan menulis ulang SELURUH arsip, dan `ranlib` sama
+ * mahalnya. Pada arsip 5.000 anggota di proot satu object yang berubah
+ * berbiaya ~13-14 dtk, padahal hanya beberapa anggota berbeda. Fungsi di
+ * bawah menulis arsip baru dengan menyalin blok anggota yang tidak berubah
+ * apa adanya dan membangun ulang tabel simbol (armap GNU, anggota "/") dari
+ * dua sumber murah:
+ *   - nama simbol anggota lama, dipetakan lewat offset header di armap, dan
+ *   - `nm -g --defined-only` untuk anggota yang berubah saja.
+ * Berlaku hanya bila set & urutan anggota sama dengan build sebelumnya
+ * (dijamin pemanggil lewat incrementalStatic), header masih memakai format
+ * GNU 32-bit, dan nama anggota cocok dengan basename object. Kondisi lain
+ * (MSVC, macOS, arsip rusak, objek LTO, nm gagal) -> false dan pemanggil
+ * memakai `ar rcs` seperti biasa.
+ */
+
+typedef struct {
+  size_t off; /* offset header anggota di arsip lama */
+  size_t size;
+  int obj;    /* indeks object, -1 untuk armap / string table */
+  bool isIdx; /* anggota armap lama (dibuang, diganti armap baru) */
+} ArMember;
+
+typedef struct {
+  const char *name;
+  int obj;
+  int seq; /* urutan sisip: menjaga urutan simbol di dalam satu anggota */
+} ArSymEnt;
+
+static uint32_t arBe32(const unsigned char *p) {
+  return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) | ((uint32_t)p[2] << 8) |
+         (uint32_t)p[3];
+}
+
+/* Nama anggota: "name/" polos atau "/<offset>" ke anggota string table "//". */
+static bool arMemberName(const unsigned char *base, const ArMember *m, size_t strOff,
+                         size_t strSize, char *out, size_t cap) {
+  char raw[17];
+  memcpy(raw, base + m->off, 16);
+  raw[16] = '\0';
+  for (int k = 15; k >= 0 && raw[k] == ' '; k--) raw[k] = '\0';
+  size_t n = strlen(raw);
+  if (n && raw[0] == '/') {
+    if (n < 2 || raw[1] < '0' || raw[1] > '9') return false;
+    unsigned long so = strtoul(raw + 1, NULL, 10);
+    if (!strSize || so >= strSize) return false;
+    const char *s = (const char *)(base + strOff + so);
+    size_t lim = strSize - so;
+    const char *nl = memchr(s, '\n', lim);
+    size_t len = nl ? (size_t)(nl - s) : lim;
+    while (len && (s[len - 1] == '/' || s[len - 1] == '\r')) len--;
+    if (len == 0 || len >= cap) return false;
+    memcpy(out, s, len);
+    out[len] = '\0';
+    return true;
+  }
+  while (n && raw[n - 1] == '/') raw[--n] = '\0';
+  if (n == 0 || n >= cap) return false;
+  memcpy(out, raw, n + 1);
+  return true;
+}
+
+/* Simbol global yang didefinisikan satu object, via nm (hanya object berubah). */
+static bool arNmSymbols(const char *obj, List *names) {
+  if (strpbrk(obj, " \t\r\n'\"\\")) return false;
+  char cmd[SATRIA_MAX_PATH * 2 + 48];
+  int n = snprintf(cmd, sizeof(cmd), "nm -g --defined-only '%s'", obj);
+  if (n < 0 || (size_t)n >= sizeof(cmd)) return false;
+  ProcHandle h;
+  if (!procStartCapture(cmd, &h)) return false;
+  ProcHandle *fin = NULL;
+  if (procWaitAny(&h, 1, &fin) < 0 || !fin || !fin->ok) {
+    size_t drop = 0;
+    free(procCaptureTake(&h, &drop));
+    return false;
+  }
+  size_t len = 0;
+  char *buf = procCaptureTake(&h, &len);
+  if (!buf) return true;
+  bool ok = true;
+  size_t i = 0;
+  while (i < len) {
+    size_t e = i;
+    while (e < len && buf[e] != '\n') e++;
+    size_t b = e;
+    if (b > i && buf[b - 1] == '\r') b--;
+    size_t a = i;
+    while (a < b && (buf[a] == ' ' || buf[a] == '\t')) a++;
+    /* Nama simbol = token terakhir; baris tanpa kolom tipe (mis. "file:")
+       dilewati karena t == a. */
+    size_t t = b;
+    while (t > a && buf[t - 1] != ' ' && buf[t - 1] != '\t') t--;
+    if (t > a && b > t) {
+      char sym[SATRIA_MAX_PATH * 2];
+      size_t sl = b - t;
+      if (sl >= sizeof(sym)) {
+        ok = false;
+        break;
+      }
+      memcpy(sym, buf + t, sl);
+      sym[sl] = '\0';
+      listAdd(names, sym);
+    }
+    i = e + 1;
+  }
+  free(buf);
+  return ok;
+}
+
+/* `ar` menyusun armap menurut urutan anggota (lalu urutan simbol di dalam
+   anggota), bukan abjad. Tiru itu agar isi arsip identik dengan hasil ar. */
+static int arSymEntCmp(const void *a, const void *b) {
+  const ArSymEnt *x = a, *y = b;
+  if (x->obj != y->obj) return x->obj - y->obj;
+  return x->seq - y->seq;
+}
+
+/* Cari anggota yang header-nya berada tepat di offset `off` (anggota urut
+   menaik di file, jadi binary search cukup). */
+static int arOwnerAt(const ArMember *mem, size_t nmem, uint32_t off) {
+  size_t lo = 0, hi = nmem;
+  while (lo < hi) {
+    size_t mid = lo + (hi - lo) / 2;
+    if (mem[mid].off == off) return mem[mid].obj;
+    if (mem[mid].off < off)
+      lo = mid + 1;
+    else
+      hi = mid;
+  }
+  return -1;
+}
+
+/*
+ * Tulis ulang arsip statis secara inkremental. `changed` = object yang lebih
+ * baru dari arsip (dipakai pemanggil untuk incrementalStatic).
+ */
+/* Batas anggota berubah: tiap object berubah memanggil `nm` sekali. Di atas
+   batas ini `ar rcs` (satu proses untuk seluruh arsip) lebih murah daripada
+   ratusan spawn nm — perubahan header besar tetap memakai jalur lama. */
+#define AR_REWRITE_MAX_CHANGED 128
+
+static bool arRewriteIndexed(const char *archive, const List *objs, const List *changed) {
+  if (changed->count <= 0 || changed->count > AR_REWRITE_MAX_CHANGED) return false;
+  void *map = NULL;
+  size_t mapSize = 0;
+  if (!fsMapRead(archive, &map, &mapSize) || mapSize < 68) return false;
+  const unsigned char *base = map;
+
+  ArMember *mem = NULL;
+  size_t nmem = 0, memCap = 0;
+  int *oldCount = NULL;
+  bool *isChg = NULL;
+  ArSymEnt *sym = NULL;
+  List owned = {0};
+  unsigned char *ibuf = NULL;
+  size_t *objOff = NULL;
+  const ArMember **objMem = NULL;
+  int nobj = 0;
+  bool ok = false;
+
+  if (memcmp(base, "!<arch>\n", 8) != 0) goto done;
+
+  /* 1) Parsing anggota lama. */
+  size_t idxOff = 0, idxSize = 0, strOff = 0, strSize = 0;
+  bool haveIdx = false;
+  size_t p = 8;
+  bool isIdx = false;
+  while (p < mapSize) {
+    if (p + 60 > mapSize || memcmp(base + p + 58, "`\n", 2) != 0) goto done;
+    const unsigned char *h = base + p;
+    char sz[11];
+    memcpy(sz, h + 48, 10);
+    sz[10] = '\0';
+    char *endp = NULL;
+    long long msz = strtoll(sz, &endp, 10);
+    if (endp == sz || msz < 0) goto done;
+    size_t usz = (size_t)msz;
+    if (p + 60 + usz > mapSize) goto done;
+    if (nmem == memCap) {
+      size_t nc = memCap ? memCap * 2 : 64;
+      ArMember *nm = realloc(mem, nc * sizeof(*nm));
+      if (!nm) goto done;
+      mem = nm;
+      memCap = nc;
+    }
+    int obj = -1;
+    const unsigned char *hn = base + p;
+    isIdx = false;
+    if (hn[0] == '/' && hn[1] == '/') {
+      strOff = p + 60;
+      strSize = usz;
+    } else if (hn[0] == '/' && (hn[1] == ' ' || hn[1] == '\0')) {
+      if (haveIdx) goto done; /* armap ganda: arsip tak dikenal */
+      idxOff = p;
+      idxSize = usz;
+      haveIdx = true;
+      isIdx = true;
+    } else if (hn[0] == '/') {
+      goto done; /* /SYM64/: arsip > 4 GB, tidak didukung */
+    } else {
+      obj = nobj++;
+    }
+    mem[nmem].off = p;
+    mem[nmem].size = usz;
+    mem[nmem].obj = obj;
+    mem[nmem].isIdx = isIdx;
+    nmem++;
+    p += 60 + usz + (usz & 1);
+  }
+  if (p != mapSize || !haveIdx || idxSize < 4) goto done;
+  if (nobj != objs->count) goto done;
+
+  /* 2) Nama anggota harus sama dengan basename object pada urutan yang sama. */
+  objMem = calloc((size_t)nobj, sizeof(*objMem));
+  if (!objMem) goto done;
+  for (size_t k = 0; k < nmem; k++)
+    if (mem[k].obj >= 0) objMem[mem[k].obj] = &mem[k];
+  for (int i = 0; i < nobj; i++) {
+    char name[SATRIA_MAX_PATH];
+    if (!objMem[i] || !arMemberName(base, objMem[i], strOff, strSize, name, sizeof(name)))
+      goto done;
+    if (strcmp(name, objMemberName(objs->items[i])) != 0) goto done;
+  }
+
+  /* 3) Parsing armap lama: offset header per simbol + nama. */
+  const unsigned char *ib = base + idxOff + 60;
+  size_t nsyms = arBe32(ib);
+  if (nsyms > (idxSize - 4) / 4) goto done;
+  const unsigned char *sOff = ib + 4;
+  const char *sName = (const char *)(ib + 4 + (size_t)4 * nsyms);
+  size_t sNameLen = idxSize - 4 - (size_t)4 * nsyms;
+
+  oldCount = calloc((size_t)nobj, sizeof(*oldCount));
+  isChg = calloc((size_t)nobj, sizeof(*isChg));
+  objOff = calloc((size_t)nobj, sizeof(*objOff));
+  if (!oldCount || !isChg || !objOff) goto done;
+
+  /* Offset di armap harus menunjuk tepat ke header anggota (urutan file). */
+  size_t namePos = 0;
+  for (size_t i = 0; i < nsyms; i++) {
+    int found = arOwnerAt(mem, nmem, arBe32(sOff + 4 * i));
+    if (found < 0) goto done;
+    if (namePos >= sNameLen) goto done;
+    size_t nl = 0;
+    while (namePos + nl < sNameLen && sName[namePos + nl] != '\0') nl++;
+    if (namePos + nl >= sNameLen) goto done;
+    namePos += nl + 1;
+    oldCount[found]++;
+  }
+
+  for (int i = 0; i < changed->count; i++)
+    for (int k = 0; k < nobj; k++)
+      if (strcmp(objs->items[k], changed->items[i]) == 0) isChg[k] = true;
+
+  /* 4) Susun tabel simbol baru: lama (anggota tetap) + nm (anggota berubah). */
+  size_t symCap = nsyms + 64, nsym = 0;
+  sym = malloc(symCap * sizeof(*sym));
+  if (!sym) goto done;
+  namePos = 0;
+  for (size_t i = 0; i < nsyms; i++) {
+    int obj = arOwnerAt(mem, nmem, arBe32(sOff + 4 * i));
+    size_t nl = 0;
+    while (namePos + nl < sNameLen && sName[namePos + nl] != '\0') nl++;
+    const char *nm = sName + namePos;
+    namePos += nl + 1;
+    if (obj < 0 || isChg[obj]) continue; /* simbol anggota berubah diganti nm */
+    sym[nsym].name = nm;
+    sym[nsym].obj = obj;
+    sym[nsym].seq = (int)nsym;
+    nsym++;
+  }
+  for (int i = 0; i < nobj; i++) {
+    if (!isChg[i]) continue;
+    int before = owned.count;
+    if (!arNmSymbols(objs->items[i], &owned)) goto done;
+    int added = owned.count - before;
+    /* Object lama punya simbol tapi nm kosong: objek LTO/format asing -> ar. */
+    if (oldCount[i] > 0 && added == 0) goto done;
+    for (int k = before; k < owned.count; k++) {
+      if (nsym == symCap) {
+        size_t nc = symCap * 2;
+        ArSymEnt *ns = realloc(sym, nc * sizeof(*ns));
+        if (!ns) goto done;
+        sym = ns;
+        symCap = nc;
+      }
+      sym[nsym].name = owned.items[k];
+      sym[nsym].obj = i;
+      sym[nsym].seq = (int)nsym;
+      nsym++;
+    }
+  }
+  if (nsym > 0) qsort(sym, nsym, sizeof(*sym), arSymEntCmp);
+
+  /* 5) Tata letak baru: armap lebih dulu, lalu anggota lama berurutan. */
+  size_t namesBytes = 0;
+  for (size_t i = 0; i < nsym; i++) namesBytes += strlen(sym[i].name) + 1;
+  if (nsym > (size_t)0x3fffffff || namesBytes > (size_t)0x3fffffff) goto done;
+  size_t idxBody = 4 + 4 * nsym + namesBytes;
+  size_t cur = 8 + 60 + idxBody + (idxBody & 1);
+  if (cur > 0xffffffffull) goto done;
+
+  size_t *newSize = calloc(nmem, sizeof(*newSize));
+  size_t *newOff = calloc(nmem, sizeof(*newOff));
+  if (!newSize || !newOff) {
+    free(newSize);
+    free(newOff);
+    goto done;
+  }
+  for (size_t k = 0; k < nmem; k++) {
+    if (mem[k].isIdx) continue; /* armap lama diganti armap di depan */
+    size_t sz = mem[k].size;
+    if (mem[k].obj >= 0) objOff[mem[k].obj] = cur;
+    if (mem[k].obj >= 0 && isChg[mem[k].obj]) {
+      long long fs = fsFileSize(objs->items[mem[k].obj]);
+      if (fs < 0 || (unsigned long long)fs > 0xffffffffull) {
+        free(newSize);
+        free(newOff);
+        goto done;
+      }
+      sz = (size_t)fs;
+    }
+    newSize[k] = sz;
+    newOff[k] = cur;
+    cur += 60 + sz + (sz & 1);
+    if (cur > 0xffffffffull) {
+      free(newSize);
+      free(newOff);
+      goto done;
+    }
+  }
+
+  ibuf = malloc(idxBody);
+  if (!ibuf) {
+    free(newSize);
+    free(newOff);
+    goto done;
+  }
+  ibuf[0] = (unsigned char)(nsym >> 24);
+  ibuf[1] = (unsigned char)(nsym >> 16);
+  ibuf[2] = (unsigned char)(nsym >> 8);
+  ibuf[3] = (unsigned char)nsym;
+  size_t at = 4;
+  for (size_t i = 0; i < nsym; i++, at += 4) {
+    uint32_t so = (uint32_t)objOff[sym[i].obj];
+    ibuf[at] = (unsigned char)(so >> 24);
+    ibuf[at + 1] = (unsigned char)(so >> 16);
+    ibuf[at + 2] = (unsigned char)(so >> 8);
+    ibuf[at + 3] = (unsigned char)so;
+  }
+  for (size_t i = 0; i < nsym; i++) {
+    size_t nl = strlen(sym[i].name) + 1;
+    memcpy(ibuf + at, sym[i].name, nl);
+    at += nl;
+  }
+
+  /* 6) Tulis arsip baru (tmp + rename, linker tak pernah lihat setengah jadi). */
+  char tmp[SATRIA_MAX_PATH * 2 + 8];
+  int tn = snprintf(tmp, sizeof(tmp), "%s.tmp", archive);
+  if (tn < 0 || (size_t)tn >= sizeof(tmp)) {
+    free(newSize);
+    free(newOff);
+    goto done;
+  }
+  FILE *out = fopen(tmp, "wb");
+  if (out) {
+    bool w = fwrite("!<arch>\n", 1, 8, out) == 8;
+    w = w && arMemberHeader(out, "/", (long long)idxBody);
+    w = w && fwrite(ibuf, 1, idxBody, out) == idxBody;
+    if (w && (idxBody & 1) && fputc('\n', out) == EOF) w = false;
+    char *cpbuf = w ? malloc(64 * 1024) : NULL;
+    if (w && !cpbuf) w = false;
+    for (size_t k = 0; w && k < nmem; k++) {
+      if (mem[k].isIdx) continue;
+      if (mem[k].obj >= 0 && isChg[mem[k].obj]) {
+        unsigned char hdr[60];
+        memcpy(hdr, base + mem[k].off, 60);
+        char szf[11];
+        int sl = snprintf(szf, sizeof(szf), "%-10llu", (unsigned long long)newSize[k]);
+        if (sl != 10) {
+          w = false;
+          break;
+        }
+        memcpy(hdr + 48, szf, 10);
+        if (fwrite(hdr, 1, 60, out) != 60) {
+          w = false;
+          break;
+        }
+        FILE *in = fopen(objs->items[mem[k].obj], "rb");
+        if (!in) {
+          w = false;
+          break;
+        }
+        w = streamCopy(in, out, (long long)newSize[k], cpbuf, 64 * 1024);
+        fclose(in);
+        if (w && (newSize[k] & 1) && fputc('\n', out) == EOF) w = false;
+      } else {
+        size_t blk = 60 + mem[k].size + (mem[k].size & 1);
+        if (fwrite(base + mem[k].off, 1, blk, out) != blk) w = false;
+      }
+    }
+    free(cpbuf);
+    if (w && fclose(out) != 0) w = false;
+    if (w && rename(tmp, archive) == 0) ok = true;
+  }
+  if (!ok) remove(tmp);
+  free(newSize);
+  free(newOff);
+
+done:
+  free(mem);
+  free(oldCount);
+  free(isChg);
+  free(objOff);
+  free(objMem);
+  free(sym);
+  free(ibuf);
+  listFree(&owned);
+  if (map) fsMapClose(map, mapSize);
+  return ok;
+}
+
 /*
  * Fase library: kumpulkan object hasil kompilasi (source + embedded),
  * kemas statis (ar / lib) dan/atau link shared (-shared / /LD).
@@ -1013,8 +1437,10 @@ bool cmdsBuildLibraryEx2(const Config *c, const List *srcs, bool linkPathLibs,
   }
 
   /* Update arsip statis inkremental: hanya object yang lebih baru dari arsip
-     yang diserahkan ke `ar rcs`. `ar rcs` penuh membaca/menulis ulang semua
-     anggota — di proot 5001 object = ~75 dtk; update satu object ~16 dtk.
+     yang diserahkan ke penulis arsip (arRewriteIndexed) atau, bila jalur itu
+     tidak berlaku, ke `ar rcs`. `ar rcs` membaca/menulis ulang semua anggota —
+     di proot 5001 object = ~75 dtk; update satu object ~16 dtk, sedangkan
+     penulis arsip sendiri ~0,2 dtk karena blok anggota tetap hanya disalin.
      Aman hanya bila set sumber tidak berubah dan tidak ada tabrakan basename:
      `ar r` tidak menghapus anggota basi, dan object stage hasil mangle punya
      nama anggota berbeda. Selain itu arsip dibangun ulang penuh. */
@@ -1063,7 +1489,14 @@ bool cmdsBuildLibraryEx2(const Config *c, const List *srcs, bool linkPathLibs,
     if (staticUpToDate && stageDir[0] && fsFileExists(target) &&
         !archiveMembersMatch(c, target, &objs))
       staticUpToDate = false;
-    if (!staticUpToDate) {
+    /* Update inkremental: tulis arsip sendiri (salin blok anggota tetap +
+       armap baru) alih-alih `ar rcs` yang menulis ulang 5.000 anggota.
+       Gagal/kondisi tak dikenal -> jalur `ar` di bawah. */
+    bool staticRewritten = incrementalStatic &&
+                           arRewriteIndexed(target, &objs, &changedObjs);
+    if (!staticUpToDate && staticRewritten) {
+      staticDone = true;
+    } else if (!staticUpToDate) {
       const List *inputs = incrementalStatic ? &changedObjs : &objs;
       size_t n = 64;
       for (int i = 0; i < inputs->count; i++)

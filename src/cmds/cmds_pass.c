@@ -447,10 +447,14 @@ int cmdsBuildPassCompile(int jobs, Config c, const char *buildfilePath, bool lib
           continue;
         }
         headerStale++;
-      } else {
+      } else if (depsContentUpToDate(deps, src)) {
         skipped++;
         continue;
       }
+      /* mtime source lebih tua dari object BUKAN bukti isi sama: `mv`/
+         restore dari backup mempertahankan mtime lama padahal isinya berbeda
+         dari build sukses terakhir. Lanjut ke antrean kompilasi bila hash
+         konten tidak cocok dengan snapshot. */
     }
     /* Sumber lebih baru dari object (mis. `touch` yang tidak sempat di-PATCH,
        lalu run berikutnya membangun proyek lain lebih dulu): buktikan lewat

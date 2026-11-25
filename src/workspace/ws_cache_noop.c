@@ -33,7 +33,9 @@ bool wsCacheEnabled(void) {
 }
 void wsCacheMapFree(WsCacheMap *m) {
   free(m->recs);
+  free(m->arena);
   m->recs = NULL;
+  m->arena = NULL;
   m->n = m->cap = 0;
 }
 
@@ -140,8 +142,8 @@ static bool wsParseP(const char *rec, WsCachePath *r) {
       }
     }
   }
-  if (strlen(path) >= sizeof(r->path)) return false;
-  snprintf(r->path, sizeof(r->path), "%s", path);
+  if (strlen(path) >= WS_PATH_LEN) return false;
+  r->path = path; /* menunjuk ke arena map (buffer sources.cache) */
   return true;
 }
 
@@ -195,6 +197,22 @@ bool wsCacheLoadMap(WsCacheMap *m) {
   buf[len] = '\0';
   int metaAll = 1;
   char *p = buf, *end = buf + len;
+  /* Hitung baris P lebih dulu agar tabel dialokasikan sekali (tanpa rantai
+     realloc 64 -> 32768 record pada setiap no-op). */
+  size_t pcount = 0;
+  for (char *q = buf; q < end;) {
+    char *nl2 = memchr(q, '\n', (size_t)(end - q));
+    if (q[1] && q[0] == 'P' && q[1] == ' ') pcount++;
+    q = nl2 ? nl2 + 1 : end;
+  }
+  if (pcount) {
+    m->recs = malloc(pcount * sizeof(WsCachePath));
+    if (!m->recs) {
+      free(buf);
+      return false;
+    }
+    m->cap = pcount;
+  }
   while (ok && p < end) {
     char *nl = memchr(p, '\n', (size_t)(end - p));
     char *line = p;
@@ -217,6 +235,7 @@ bool wsCacheLoadMap(WsCacheMap *m) {
       m->recs = nr;
       m->cap = nc;
     }
+
     WsCachePath *r = &m->recs[m->n];
     if (!wsParseP(line + 2, r)) { /* baris P rusak -> tabel dianggap rusak */
       ok = false;
@@ -225,10 +244,17 @@ bool wsCacheLoadMap(WsCacheMap *m) {
     if (!r->hasMeta) metaAll = 0;
     m->n++;
   }
-  free(buf);
-  if (ok) qsort(m->recs, m->n, sizeof(WsCachePath), wsCacheRecCmp);
-  m->meta = ok && m->n > 0 && metaAll;
-  return ok && m->n > 0;
+  if (!ok || m->n == 0) {
+    free(buf);
+    m->meta = 0;
+    return false;
+  }
+  /* buf menjadi arena path: recs[].path menunjuk ke baris yang sudah
+     di-NUL-terminate di dalamnya. Satu alokasi untuk seluruh peta. */
+  m->arena = buf;
+  qsort(m->recs, m->n, sizeof(WsCachePath), wsCacheRecCmp);
+  m->meta = metaAll;
+  return true;
 }
 
 /* Perbarui metadata P dari map yang sudah divalidasi dengan hash. Isi konten
@@ -493,12 +519,40 @@ static void wsCachePreStat(WsCachePath **paths, size_t n, WsCacheStat *res) {
    -1 = tidak pasti -> jalur penuh menilai,
    -2 = MISS PASTI (isi berbeda) -> jalur penuh akan menemukan hal yang sama,
         jadi walk fingerprint.cache penuh dilewati (audit 30/10, kandidat 3). */
+/* Apakah direktori induk path punya baris D di peta P? Baris D memvalidasi
+   isi direktori: mtime tidak berubah -> himpunan nama di dalamnya sama (tambah
+   /hapus/rename selalu memperbarui mtime direktori). Jumlah direktori kecil,
+   jadi bandingkan langsung tanpa bsearch per output. */
+static bool wsCacheParentDirRec(const WsCachePath *const *dirs, size_t dirN, const char *path) {
+  const char *slash = strrchr(path, '/');
+  if (!slash || slash == path) return false;
+  size_t len = (size_t)(slash - path);
+  if (len == 0 || len >= WS_PATH_LEN) return false;
+  for (size_t i = 0; i < dirN; i++)
+    if (strlen(dirs[i]->path) == len && memcmp(dirs[i]->path, path, len) == 0) return true;
+  return false;
+}
+
 static int wsCachePFast(WsCacheMap *m, long long srcMtime) {
   if (!m->meta || m->n == 0) return -1;
   size_t outN = 0;
-  for (size_t i = 0; i < m->n; i++)
-    if (m->recs[i].type == 'O' && strncmp(m->recs[i].path, "build/", 6) == 0) outN++;
-  if (outN) {
+  const WsCachePath *dirs[64];
+  size_t dirN = 0;
+  bool outsCovered = true;
+  for (size_t i = 0; i < m->n && dirN < sizeof(dirs) / sizeof(dirs[0]); i++)
+    if (m->recs[i].type == 'D' && strncmp(m->recs[i].path, "build/", 6) == 0)
+      dirs[dirN++] = &m->recs[i];
+  for (size_t i = 0; i < m->n; i++) {
+    if (m->recs[i].type != 'O' || strncmp(m->recs[i].path, "build/", 6) != 0) continue;
+    outN++;
+    if (outsCovered && !wsCacheParentDirRec(dirs, dirN, m->recs[i].path))
+      outsCovered = false;
+  }
+  /* Output build/ diperiksa lewat baris D induknya (mtime langsung berubah
+     saat file ditambah/dihapus). readdir penuh 20 ribu nama hanya perlu bila
+     cache lama tidak menyimpan baris D untuk direktori build tersebut.
+     Racy (mtime == mtime sources.cache) atau isi berubah -> jalur penuh. */
+  if (outN && !outsCovered) {
     WsCachePath **outs = malloc(outN * sizeof(*outs));
     if (!outs) return -1;
     size_t k = 0;
@@ -559,6 +613,10 @@ static int wsCachePFast(WsCacheMap *m, long long srcMtime) {
        perlu disegarkan. Penambahan/penghapusan/rename membuat fast path miss. */
     if (r->type == 'D') {
       if (now == r->time && r->time < srcMtime) continue;
+      /* Direktori output build/: isinya tidak distat (lihat komentar di atas),
+         jadi daftar entri yang berubah tidak bisa dinilai murah di sini.
+         Perubahan apa pun = bukan no-op murni -> jalur penuh yang menilai. */
+      if (strncmp(r->path, "build/", 6) == 0) goto out;
       if (!wsCacheDirEntriesMatch(m, r->path)) goto out;
       struct stat after;
       if (stat(r->path, &after) != 0 || wsCacheStampNs(r->path, &after) != now) goto out;

@@ -139,7 +139,8 @@ static void benchGenSatriaWsBuildfile(Bench *b, const char *ws) {
   fputs("bade.embedded.modules.variable = MODULES\n", f);
   fprintf(f, "bade.embedded.modules.extract = %s\n", tmp);
   fputs("bade.embedded.modules.pattern = .rp\n", f);
-  fputs("cdeps = {bade,core}\n", f);
+  fputs("bade.library.cdeps = core\n", f);
+  fputs("core.library.cdeps = bade\n", f);
   fclose(f);
 }
 
@@ -302,10 +303,9 @@ static void benchTouchNewer(const char *path, const char *ref) {
   }
   struct timespec ts[2] = {now, now};
   struct stat st;
-  if (ref && stat(ref, &st) == 0) {    
+  if (ref && stat(ref, &st) == 0) {
     long long nowNs = (long long)now.tv_sec * 1000000000LL + now.tv_nsec;
     long long refNs = (long long)st.st_mtim.tv_sec * 1000000000LL + st.st_mtim.tv_nsec;
-
     if (nowNs <= refNs) {
       ts[1].tv_sec = st.st_mtim.tv_sec;
       ts[1].tv_nsec = st.st_mtim.tv_nsec + 1000000;
@@ -313,7 +313,7 @@ static void benchTouchNewer(const char *path, const char *ref) {
         ts[1].tv_sec++;
         ts[1].tv_nsec -= 1000000000;
       }
-    } 
+    }
   }
   utimensat(AT_FDCWD, path, ts, 0);
 }
@@ -371,10 +371,10 @@ void benchMutate(const Bench *b, const char *scen, int run, const char *label, c
     benchAppendFile(path, text);
   }
   if (strcmp(scen, "mod") == 0 || strcmp(scen, "dep") == 0) {
-    char archive[BENCH_PATH_LEN];
     benchPathCat(path, sizeof(path), ws, "/rupamod/m1.rp");
     snprintf(text, sizeof(text), "\n# edit %s-%d\n", label, run);
     benchAppendFile(path, text);
+    char archive[BENCH_PATH_LEN];
     benchPathCat(archive, sizeof(archive), ws, "/modules/rupa_modules.tar");
     benchTouchNewer(path, archive);
   }

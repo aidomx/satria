@@ -121,12 +121,17 @@ typedef struct {
   long long time;
   long long size;
   int hasMeta; /* 1 = baris memuat <content> <time> <size> (format baru) */
-  char path[WS_PATH_LEN];
+  /* Menunjuk ke buffer sources.cache yang dimiliki map (arena): record tetap
+     kecil (~5 record per baris cache), bukan 1 KB per path. Puluhan ribu
+     record 1 KB membuat setiap lintasan peta menyentuh puluhan MB — biaya itu
+     tampil sebagai gate-map/pfast pada setiap no-op. */
+  const char *path;
 } WsCachePath;
 
 typedef struct {
   WsCachePath *recs;
   size_t n, cap;
+  char *arena; /* buffer tempat recs[].path menunjuk */
   int meta; /* 1 = SEMUA entri ber-metadata -> fast path P sah (design/startup.md §4) */
 } WsCacheMap;
 
@@ -225,7 +230,8 @@ int wsRunBatch(const WsModel *m, const WsWork *batch, int n, int jobs, const cha
 int wsRunProject(const WsModel *m, const char *name, const char *cmd, int jobs, bool libOnly,
                  bool compileOnly);
 /* Rencana scheduler (P4, design/router_centric.md): induk + verifikasi
-   read-only pasca-eksekusi. Aktif default; SATRIA_WS_PLAN=0 mematikannya.
+   read-only pasca-eksekusi. Aktif default; SATRIA_PLAN=0 mematikannya
+   (SATRIA_WS_PLAN tetap diterima sebagai alias lama).
    `precompute` hanya true untuk runner paralel — serial memvalidasi tepat
    sebelum proyeknya dieksekusi (lihat ws_plan.c). */
 bool wsPlanActive(void);

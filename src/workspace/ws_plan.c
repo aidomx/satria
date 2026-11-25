@@ -8,8 +8,10 @@
    pasca-eksekusi bahwa yang berjalan persis seperti rencana. Fase 1 P4 akan
    mengisi rencana ini dengan keputusan router (route/group/fast-state).
 
-   Rencana aktif secara default sejak P4 selesai diuji; `SATRIA_WS_PLAN=0`
-   (atau `off`/`false`) mematikan seluruh jalur baru sebagai fallback.
+   Rencana aktif secara default sejak P4 selesai diuji; `SATRIA_PLAN=0`
+   (atau `off`/`false`) mematikan seluruh jalur baru sebagai fallback. Env
+   yang sama dipakai jalur single-project; `SATRIA_WS_PLAN` masih diterima
+   sebagai alias lama.
    Keputusan build, cache, dan penulisan state tetap identik dengan jalur
    lama (invarian §4 design/router_centric.md).
 
@@ -43,7 +45,8 @@ static bool g_planDirty = false;
 
 static bool wsPlanOn(void) {
   if (g_planEnv < 0) {
-    const char *v = getenv("SATRIA_WS_PLAN");
+    const char *v = getenv("SATRIA_PLAN");
+    if (!v || !*v) v = getenv("SATRIA_WS_PLAN"); /* alias lama */
     /* Default aktif; nilai 0/off/false adalah satu-satunya jalan keluar. */
     bool off = v && (strcmp(v, "0") == 0 || strcmp(v, "off") == 0 ||
                      strcmp(v, "false") == 0);

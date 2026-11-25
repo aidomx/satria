@@ -1248,6 +1248,11 @@ int cmdBench(const char *const argv[], int argc) {
     setenv("PATH", newPath, 1);
   }
   setenv("SATRIA_WSPLAN_PAR", "1", 1);
+  /* Runner paralel paksa (SATRIA_WS_PAR) menjalankan tiap proyek di child
+     sendiri: arsip rupamod bisa dibangun setelah bade dievaluasi, sehingga
+     skenario mod/dep tampak 0 kerja. Benchmark selalu memakai jalur plan
+     (serial per proyek) agar hitungan kerja deterministik. */
+  unsetenv("SATRIA_WS_PAR");
   /* Meson memilih compiler dari CC; samakan dengan `compiler =` di Buildfile. */
   if (!b.workspace && b.compilers[0] && !strchr(b.compilers, ','))
     setenv("CC", b.compilers, 1);

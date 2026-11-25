@@ -67,7 +67,7 @@ int workspaceEnumerate(const char *wsDir, int *count, const char **projectNames,
 /* true bila WsBuildfile (atau nama lama) ada di cwd. */
 bool workspaceFileExists(void);
 
-/* true bila pilot router-centric (SATRIA_WS_PLAN=1) aktif. Dipakai jalur
+/* true bila pilot router-centric (SATRIA_PLAN, default aktif) aktif. Dipakai jalur
    single-project agar memakai transaksi stage cache yang sama dengan
    workspace tanpa mengubah perilaku default. */
 bool workspaceRouterPilotActive(void);

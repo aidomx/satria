@@ -1,6 +1,6 @@
 # Port ws_plan.sh: scheduler plan (P4, design/router_centric.md) — induk
 # menyusun rencana per fase dan executor menjalankan tepat rencana itu.
-# Rencana aktif secara default sejak selesai diuji; SATRIA_WS_PLAN=0 adalah
+# Rencana aktif secara default sejak selesai diuji; SATRIA_PLAN=0 adalah
 # jalan keluar ke jalur lama.
 @suite workspace
 @fixture miniws
@@ -11,6 +11,7 @@ fixture.copy
 file.append WsBuildfile flags = MMD, MP
 
 # Cold build DEFAULT (tanpa env): kedua fase terverifikasi penuh.
+env.unset SATRIA_PLAN
 env.unset SATRIA_WS_PLAN
 run.build as cold
 @response cold
@@ -46,7 +47,7 @@ run.build as fast
 @assert files(.satria/router-stage) == 0
 
 # Opt-out: jalur lama tetap tersedia (nol penanda, nol output plan).
-env.set SATRIA_WS_PLAN=0
+env.set SATRIA_PLAN=0
 env.unset SATRIA_WS_PAR
 env.unset SATRIA_CACHE_NOOP
 time.tick

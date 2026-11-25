@@ -2,7 +2,8 @@
 
 > Status: eksperimen, fase 1-2 dan pemisahan pass compile/link sudah
 > diimplementasikan; artefak/laporan/release diputuskan induk, semuanya di balik
-> `SATRIA_WS_PLAN=1`. Tanpa env itu jalur default tidak berubah. Fase binary
+> `SATRIA_PLAN` (default aktif; `SATRIA_PLAN=0` kembali ke jalur lama, dan
+> `SATRIA_WS_PLAN` masih diterima sebagai alias lama). Fase binary
 > workspace memakai satu batch compile+link (link batch serial pilot dihapus
 > karena menggandakan pekerjaan). Rencana,
 > stage cache, dan intent route ada di `src/workspace/ws_plan.c`,
@@ -106,7 +107,7 @@ bool wsPlanAdmit(const char *name, bool libOnly); /* dipanggil executor */
 void wsPlanEnd(int rc);                            /* dipanggil scheduler */
 ```
 
-Keluaran (`SATRIA_WS_PLAN=1`): build sukses **senyap**, tanpa ringkasan
+Keluaran (rencana aktif): build sukses **senyap**, tanpa ringkasan
 fase. Hanya penyimpangan yang dicetak ke stderr, misalnya:
 
 ```text
@@ -121,8 +122,8 @@ build maupun isi cache; fase 1-3 di bawah memperluasnya.
 
 ## 5b. Implementasi fase 1-3 (P4)
 
-Semua fase memakai env yang sama, `SATRIA_WS_PLAN=1`; tanpa env seluruh
-jalur baru no-op.
+Semua fase memakai env yang sama, `SATRIA_PLAN` (default aktif);
+`SATRIA_PLAN=0` mematikan seluruh jalur baru.
 
 - **Fase 1 — verdict di rencana.** `wsPlanBegin` menyetel proyek, menghitung
   `optsRouterValidate()` dan verdict `wsFastStateValid()` untuk fase yang
@@ -179,8 +180,8 @@ non-plan median sekitar 19,7 dtk; plan sekitar 23,3 dtk. Staging yang tadinya
 selalu aktif adalah regresi terbesar (sudah dihapus untuk serial); sisa
 selisih berasal dari validasi rencana yang dihitung lebih awal, sebelum
 proyek dependensi membangun. Karena default foreground memakai runner serial,
-`SATRIA_WS_PLAN` **belum dijadikan default** — rencana baru menguntungkan saat
-runner paralel/background dipakai.
+`SATRIA_PLAN` kini **default aktif** untuk workspace dan single-project;
+`SATRIA_PLAN=0` adalah jalan keluar bila rencana baru merugikan.
 
 Batas eksperimen: stage hanya untuk empat cache grup di atas; `artifact.cache`,
 `state.cache`, dan `opts.cache` punya jalur sendiri. Windows tidak memakai

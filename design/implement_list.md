@@ -53,9 +53,14 @@ aktif (`src/`). Rujukan bukti berupa berkas source dan tes yang benar-benar ada.
   dari build lama menyembuhkan diri. Update inkremental (`ar rcs` hanya object
   yang berubah) dipakai bila set sumber tetap; link `.so` memakai arsip statis
   (`--whole-archive`/`-force_load`) agar tidak membuka ribuan object langsung.
+  **Update inkremental tanpa `ar` (GNU/ELF)**: arsip ditulis ulang dengan
+  menyalin blok anggota tetap apa adanya dan membangun ulang armap dari
+  indeks lama + `nm` object yang berubah; armap ganda/rusak, MSVC, macOS, atau
+  objek LTO memakai `ar rcs` seperti biasa.
   Bukti: `src/cmds/cmds_lib.c` (`objsStageCollisions`, `objMemberName`,
-  `archiveMembersMatch`, `cmdsBuildLibraryEx2`); profil 5001 object/proot:
-  `ar` 74,8 s -> 16,5 s, `.so` 58,8 s -> 4,9 s.
+  `archiveMembersMatch`, `arRewriteIndexed`, `cmdsBuildLibraryEx2`); profil
+  5001 object/proot: `ar` 74,8 s -> 16,5 s (update 1 object 13,4 s -> 0,2 s),
+  `.so` 58,8 s -> 4,9 s.
 - [startup.md](startup.md) § Optimasi editrel single-project — **arsip link privat single-project (POSIX/ELF)**: bila 
   executable memakai >= 512 source tanpa library pengguna, object dikemas ke
   `build/.satria-link.a` dan linker memakai `--whole-archive`. Arsip ditulis

@@ -225,12 +225,14 @@ static bool wsCacheAddEntry(FILE *pf, CsStore *st, uint64_t proj, const char *pa
     }
     if (!e.content) return false;
   }
-  if (type == 'O') {
+  if (type == 'O' || type == 'D') {
     CsEntry existing;
     /* Kunci sudah tercatat dengan nilai identik: duplikat dalam run yang sama
        ATAU entri lama build selektif yang tidak berubah — lewati tanpa baris
        baru (baris P lamanya tetap berlaku lewat aturan merge). Nilai BERBEDA
-       (output ditulis ulang run ini) -> timpa: catatan = kenyataan disk. */
+       (output ditulis ulang run ini) -> timpa: catatan = kenyataan disk.
+       Direktori ikut dicek agar satu kunci D tidak menulis dua baris P dengan
+       stempel berbeda (baris lama akan menggagalkan no-op). */
     if (csGet(st, proj, e.file, &existing) && existing.content == e.content &&
         existing.time == e.time && existing.size == e.size)
       return true;
@@ -336,6 +338,10 @@ static bool wsCacheAddObjectTree(FILE *pf, CsStore *st, uint64_t proj,
                                  const char *dir, const char *root, unsigned depth,
                                  int *objects, bool compiled) {
   if (depth > 64) return false;
+  /* Direktori build juga dicatat sebagai D (sama seperti pohon arsip):
+     gerbang no-op memvalidasi keberadaan object/.d lewat stempel direktori
+     induknya, sehingga tidak perlu readdir ribuan nama output setiap run. */
+  if (!wsCacheAdd(pf, st, proj, dir, 'D')) return false;
   List dirs = {0}, files = {0};
   fsListDir(dir, &dirs, &files);
   bool ok = true;

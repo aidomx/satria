@@ -56,6 +56,14 @@ checks the archive's member list. An archive left with duplicate or obsolete
 members by an older build is repaired by the next run; an archive that already
 matches is reported `cached`.
 
+When only a few members changed and the source set is stable, satria does not
+run `ar rcs` (which rewrites the whole archive): it writes the new archive
+itself, copying unchanged member blocks verbatim and rebuilding the GNU symbol
+index from the old index plus `nm` on the changed objects only. A 5,000-member
+archive goes from ~13 s to ~0.2 s on a slow-syscall host. Anything the writer
+does not recognize (MSVC, macOS, LTO objects, damaged archive, missing `nm`)
+falls back to `ar rcs`.
+
 ## Why this matters
 
 The objective is not to claim that satria is always faster than Ninja. The objective is predictable incremental behavior with low overhead across environments.

@@ -51,6 +51,12 @@ static bool sourcesHaveCpp(const Config *c) {
  */
 void configWalkSources(const Config *c, const char *dir, List *out, bool cached) {
   if (!dir || !out) return;
+  /* Folder sumber yang tidak ada dilewati sebelum walk/cache: dulu entri
+     seperti `sources = manager, src` tetap di-walk dan menyimpan record
+     kosong di sources.cache, membayar stat setiap startup (trace [walk]).
+     Satu stat di sini lebih murah dan tidak mengubah hasil (walkDir pada
+     path yang tidak ada memang tidak menghasilkan file). */
+  if (!fsDirExists(dir)) return;
   bool wantCpp = !c || !c->langDeclared || c->langCpp;
   if (cached) {
     stateWalkDirCached(dir, ".c", out);

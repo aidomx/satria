@@ -75,8 +75,9 @@ confirmation. On a terminal the scaffold is built and run immediately.
 ## Fixes
 
 - The trace summary test now matches the top list ordered by total time.
-- The workspace scheduler-plan pilot (`SATRIA_WS_PLAN=1`) is internal and
-  inert by default; router-centric orchestration is planned for v0.6.5.
+- The router-centric scheduler plan is on by default (`SATRIA_PLAN=1`); set
+  `SATRIA_PLAN=0` to use the legacy path. `SATRIA_WS_PLAN` remains a legacy
+  alias.
 
 ## Known limitations
 
