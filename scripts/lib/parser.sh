@@ -2,7 +2,7 @@
 # parser.sh — parser berkas DSL `.test` (design/unit_test_dsl.md).
 #
 # Parse-only: tokenisasi per baris, mesin status heredoc, tumpukan blok,
-# validasi objek/aksi, kesalahan bernomor baris. TIDAK mengeksekusi apa pun.
+# validasi objek/action, kesalahan bernomor baris. TIDAK mengeksekusi apa pun.
 #
 # TERISOLASI: modul ini TIDAK di-consume unit_dev.sh/unit.sh sampai M0 stabil;
 # suite `tests/unit/common/*.sh` yang berjalan hari ini tak tersentuh.
@@ -18,7 +18,7 @@
 #   DIR   <baris> <direktif> <argumen>          @include/@guard/@return/@else/@set/@get/@find
 #   BLOCK <baris> <direktif> <label/ekspresi>   @response/@if/@while/@for (buka blok)
 #   ENDB  <baris> <direktif>                    @end
-#   STMT  <baris> <objek> <aksi> <argumen>
+#   STMT  <baris> <objek> <action> <argumen>
 #   OPEN  <baris> heredoc <marker>              mulai isi berkas
 #   TEXT  <baris> <isi>                         baris isi (TAB di-escape \t)
 #   CLOSE <baris> heredoc <marker>              baris penutup marker
@@ -153,16 +153,16 @@ handle_directive() { # $1 = @kata, $2 = sisa argumen
 }
 
 handle_statement() { # $1 = baris (tanpa indentasi)
-  local l=$1 re obj aksi rest marker var list after
+  local l=$1 re obj action rest marker var list after
   re='^([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_-]*)([[:space:]]+(.*))?$'
   if ! [[ "$l" =~ $re ]]; then
     err_at "$LINE" "pernyataan tidak dipahami: $l"; return
   fi
-  obj=${BASH_REMATCH[1]} aksi=${BASH_REMATCH[2]} rest=${BASH_REMATCH[4]:-}
+  obj=${BASH_REMATCH[1]} action=${BASH_REMATCH[2]} rest=${BASH_REMATCH[4]:-}
 
   in_list "$obj" "$OBJS" || { err_at "$LINE" "objek tidak dikenal: $obj"; return; }
   var="OBJ_AKSI_$obj" list=${!var}
-  in_list "$aksi" "$list" || { err_at "$LINE" "aksi tidak dikenal: $obj.$aksi"; return; }
+  in_list "$action" "$list" || { err_at "$LINE" "action tidak dikenal: $obj.$action"; return; }
 
   marker=''
   if [[ "$rest" == *'<<'* ]]; then
@@ -171,12 +171,12 @@ handle_statement() { # $1 = baris (tanpa indentasi)
     marker=${BASH_REMATCH[1]}
     after=${rest#*"<<"$marker}
     [[ "$after" == *'<<'* ]] && { err_at "$LINE" "hanya satu heredoc per pernyataan"; return; }
-    [ "$obj.$aksi" = "file.write" ] || { err_at "$LINE" "heredoc hanya sah pada file.write"; return; }
-  elif [ "$obj.$aksi" = "file.write" ]; then
+    [ "$obj.$action" = "file.write" ] || { err_at "$LINE" "heredoc hanya sah pada file.write"; return; }
+  elif [ "$obj.$action" = "file.write" ]; then
     err_at "$LINE" "file.write memerlukan heredoc: file.write <path> <<T"; return
   fi
 
-  emitf 'STMT\t%s\t%s\t%s\t%s' "$LINE" "$obj" "$aksi" "$rest"
+  emitf 'STMT\t%s\t%s\t%s\t%s' "$LINE" "$obj" "$action" "$rest"
   if [ -n "$marker" ]; then
     HEREDOC=$marker HD_START=$LINE
     emitf 'OPEN\t%s\theredoc\t%s' "$LINE" "$marker"

@@ -1,4 +1,4 @@
-# Konforman M0: header lengkap + seluruh objek/aksi kosakata.
+# Konforman M0: header lengkap + seluruh objek/action kosakata.
 @suite project,workspace
 @fixture miniws
 @purpose "Header lengkap dan sapuan objek"

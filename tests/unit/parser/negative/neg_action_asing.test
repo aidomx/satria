@@ -1,0 +1,4 @@
+# expect: action tidak dikenal: file.rewind
+@suite project
+@purpose "action asing"
+file.rewind Buildfile

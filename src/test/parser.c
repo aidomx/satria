@@ -58,7 +58,7 @@ static bool isIdentChar(unsigned char c) {
   return isIdentStart(c) || (c >= '0' && c <= '9');
 }
 
-static bool isAksiChar(unsigned char c) { return isIdentChar(c) || c == '-'; }
+static bool isActionChar(unsigned char c) { return isIdentChar(c) || c == '-'; }
 
 static bool isFullIdent(const char *s) {
   if (!isIdentStart((unsigned char)*s)) return false;
@@ -395,11 +395,11 @@ static void handleDirective(Parser *p, char *l) {
   errAtf(p, p->line, "direktif tidak dikenal: %s", d);
 }
 
-/* ---- pernyataan objek.aksi ------------------------------------------------ */
+/* ---- pernyataan objek.action ------------------------------------------------ */
 
-/* Pecah `line` menjadi objek/aksi/argumen. False bila bentuk tak dipahami.
+/* Pecah `line` menjadi objek/action/argumen. False bila bentuk tak dipahami.
    `work` wajib dibebaskan pemanggil; pointer lain menunjuk ke dalamnya. */
-static bool splitStatement(const char *line, char **work, char **obj, char **aksi,
+static bool splitStatement(const char *line, char **work, char **obj, char **action,
                            char **rest) {
   char *w = dupStr(line);
   if (!w) return false;
@@ -421,7 +421,7 @@ static bool splitStatement(const char *line, char **work, char **obj, char **aks
     return false;
   }
   p++;
-  while (isAksiChar((unsigned char)*p)) p++;
+  while (isActionChar((unsigned char)*p)) p++;
   char *r;
   if (*p == '\0') {
     r = p;
@@ -435,7 +435,7 @@ static bool splitStatement(const char *line, char **work, char **obj, char **aks
   }
   *work = w;
   *obj = o;
-  *aksi = a;
+  *action = a;
   *rest = r;
   return true;
 }
@@ -443,9 +443,9 @@ static bool splitStatement(const char *line, char **work, char **obj, char **aks
 static void handleStatement(Parser *p, const char *line) {
   char *work;
   char *obj;
-  char *aksi;
+  char *action;
   char *rest;
-  if (!splitStatement(line, &work, &obj, &aksi, &rest)) {
+  if (!splitStatement(line, &work, &obj, &action, &rest)) {
     errAtf(p, p->line, "pernyataan tidak dipahami: %s", line);
     return;
   }
@@ -456,8 +456,8 @@ static void handleStatement(Parser *p, const char *line) {
     return;
   }
   const char *list = actionsFor(obj);
-  if (!list || !inList(aksi, list)) {
-    errAtf(p, p->line, "aksi tidak dikenal: %s.%s", obj, aksi);
+  if (!list || !inList(action, list)) {
+    errAtf(p, p->line, "action tidak dikenal: %s.%s", obj, action);
     free(work);
     return;
   }
@@ -498,7 +498,7 @@ static void handleStatement(Parser *p, const char *line) {
       free(work);
       return;
     }
-    if (strcmp(obj, "file") != 0 || strcmp(aksi, "write") != 0) {
+    if (strcmp(obj, "file") != 0 || strcmp(action, "write") != 0) {
       errAt(p, p->line, "heredoc hanya sah pada file.write");
       free(work);
       return;
@@ -511,13 +511,13 @@ static void handleStatement(Parser *p, const char *line) {
     }
     memcpy(marker, mk, mklen);
     marker[mklen] = '\0';
-  } else if (strcmp(obj, "file") == 0 && strcmp(aksi, "write") == 0) {
+  } else if (strcmp(obj, "file") == 0 && strcmp(action, "write") == 0) {
     errAt(p, p->line, "file.write memerlukan heredoc: file.write <path> <<T");
     free(work);
     return;
   }
 
-  emitFields(p, "STMT", p->line, (const char *const[]){obj, aksi, rest}, 3);
+  emitFields(p, "STMT", p->line, (const char *const[]){obj, action, rest}, 3);
   if (marker) {
     emitFields(p, "OPEN", p->line, (const char *const[]){"heredoc", marker}, 2);
     free(p->heredoc);

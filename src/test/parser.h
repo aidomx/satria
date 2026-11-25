@@ -1,7 +1,7 @@
 #pragma once
 /* Parser berkas DSL `.test` (design/unit_test_dsl.md) — padanan C dari
    scripts/lib/parser.sh. Parse-only: tokenisasi per baris, mesin status
-   heredoc, tumpukan blok, validasi objek/aksi, kesalahan bernomor baris.
+   heredoc, tumpukan blok, validasi objek/action, kesalahan bernomor baris.
    TIDAK mengeksekusi apa pun.
 
    Jejak event (dipisah TAB, satu baris per event):
@@ -9,7 +9,7 @@
      DIR   <baris> <direktif> <argumen>
      BLOCK <baris> <direktif> <label/ekspresi>
      ENDB  <baris> <direktif>
-     STMT  <baris> <objek> <aksi> <argumen>
+     STMT  <baris> <objek> <action> <argumen>
      OPEN  <baris> heredoc <marker>
      TEXT  <baris> <isi>
      CLOSE <baris> heredoc <marker>

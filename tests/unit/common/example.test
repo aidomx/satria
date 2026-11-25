@@ -4,7 +4,7 @@
 @suite project
 @purpose "Contoh acuan: fitur inti DSL dalam satu berkas"
 
-# Aksi file: menulis proyek kecil di dir kerja (tersedia juga append/copy/
+# Action file: menulis proyek kecil di dir kerja (tersedia juga append/copy/
 # touch/delete, work.new, fixture.copy, env.set, time.tick/mark).
 file.write Buildfile <<T
 use project

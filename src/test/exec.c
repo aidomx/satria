@@ -1,5 +1,5 @@
 /* exec.c — eksekutor event DSL unit test (M4b). Padanan C dari
-   tests/unit/lib/dsl.sh: aksi work/fixture/file/env/time/run/stage/text,
+   tests/unit/lib/dsl.sh: action work/fixture/file/env/time/run/stage/text,
    blok @if/@for/@while/@response, @guard/@set/@get/@find/@include/@return,
    asersi, serta verdict PASS/FAIL/PRECONDITION dengan format yang sama.
    Proses `run.*` di-spawn lewat fork+exec (tanpa shell). */
@@ -288,7 +288,7 @@ static int spawnWait(char *const argv[], const char *cwd, const char *outPath, i
   return 1;
 }
 
-/* ==================== aksi ==================== */
+/* ==================== action ==================== */
 
 /* Parser meng-escape TAB di isi heredoc sebagai \t; kembalikan di sini. */
 static void unescTabs(const char *s, char *out, size_t n) {
@@ -429,7 +429,7 @@ static void resolveOrPrecond(Run *r, const char *raw, char *out, size_t n) {
 
 /* ==================== asersi ==================== */
 
-static void assertStmt(Run *r, const char *obj, const char *aksi, char *args,
+static void assertStmt(Run *r, const char *obj, const char *action, char *args,
                        const char *clause) {
   DslCtx *c = r->c;
   if (strcmp(obj, "rc") == 0) {
@@ -441,7 +441,7 @@ static void assertStmt(Run *r, const char *obj, const char *aksi, char *args,
       fail(r, clause, "tidak ada run berlabel", label);
       return;
     }
-    if (strcmp(aksi, "ok") == 0) {
+    if (strcmp(action, "ok") == 0) {
       if (run->rc == 0) pass(r, clause);
       else {
         char got[32];
@@ -461,7 +461,7 @@ static void assertStmt(Run *r, const char *obj, const char *aksi, char *args,
 
   if (strcmp(obj, "out") == 0) {
     /* out.equals membandingkan dua label eksplisit, bukan label @response. */
-    if (strcmp(aksi, "equals") == 0) {
+    if (strcmp(action, "equals") == 0) {
       char tmp[DSL_VAL];
       copyStr(tmp, sizeof(tmp), args);
       char **tok = NULL;
@@ -521,13 +521,13 @@ static void assertStmt(Run *r, const char *obj, const char *aksi, char *args,
     char *txt = dslReadFile(run->out, &len);
     bool hit = false;
     if (txt) {
-      if (strcmp(aksi, "contains") == 0) hit = strstr(txt, pat) != NULL;
-      else if (strcmp(aksi, "not-contains") == 0) hit = strstr(txt, pat) == NULL;
-      else if (strcmp(aksi, "matches") == 0) hit = dslRegexText(pat, txt, len);
-      else if (strcmp(aksi, "not-matches") == 0) hit = !dslRegexText(pat, txt, len);
+      if (strcmp(action, "contains") == 0) hit = strstr(txt, pat) != NULL;
+      else if (strcmp(action, "not-contains") == 0) hit = strstr(txt, pat) == NULL;
+      else if (strcmp(action, "matches") == 0) hit = dslRegexText(pat, txt, len);
+      else if (strcmp(action, "not-matches") == 0) hit = !dslRegexText(pat, txt, len);
     }
     free(txt);
-    if (strcmp(aksi, "not-contains") == 0 || strcmp(aksi, "not-matches") == 0) {
+    if (strcmp(action, "not-contains") == 0 || strcmp(action, "not-matches") == 0) {
       if (hit) pass(r, clause);
       else {
         char want[DSL_VAL + 16];
@@ -538,16 +538,16 @@ static void assertStmt(Run *r, const char *obj, const char *aksi, char *args,
     }
     if (hit) pass(r, clause);
     else
-      fail(r, clause, strcmp(aksi, "matches") == 0 ? "tidak cocok" : "tidak ada", pat);
+      fail(r, clause, strcmp(action, "matches") == 0 ? "tidak cocok" : "tidak ada", pat);
     return;
   }
 
   if (strcmp(obj, "file") == 0) {
-    if (strcmp(aksi, "exists") == 0 || strcmp(aksi, "absent") == 0) {
+    if (strcmp(action, "exists") == 0 || strcmp(action, "absent") == 0) {
       char path[SATRIA_MAX_PATH];
       dslWPath(c, args, path, sizeof(path));
       bool has = fsFileExists(path) || fsDirExists(path);
-      if (strcmp(aksi, "exists") == 0) {
+      if (strcmp(action, "exists") == 0) {
         if (has) pass(r, clause);
         else fail(r, clause, "absen", args);
       } else {
@@ -556,7 +556,7 @@ static void assertStmt(Run *r, const char *obj, const char *aksi, char *args,
       }
       return;
     }
-    if (strcmp(aksi, "same") == 0) {
+    if (strcmp(action, "same") == 0) {
       char tmp[DSL_VAL];
       copyStr(tmp, sizeof(tmp), args);
       char **tok = NULL;
@@ -578,7 +578,7 @@ static void assertStmt(Run *r, const char *obj, const char *aksi, char *args,
       else fail(r, clause, "berbeda", "identik");
       return;
     }
-    if (strcmp(aksi, "contains") == 0) {
+    if (strcmp(action, "contains") == 0) {
       char tmp[DSL_VAL];
       copyStr(tmp, sizeof(tmp), args);
       char *sp = strchr(tmp, ' ');
@@ -610,7 +610,7 @@ static void assertStmt(Run *r, const char *obj, const char *aksi, char *args,
     }
     int64_t cur = fsMTimeNs(m->path);
     bool changed = cur != m->ns;
-    if (strcmp(aksi, "changed") == 0) {
+    if (strcmp(action, "changed") == 0) {
       if (changed) pass(r, clause);
       else fail(r, clause, "sama", "berubah");
     } else {
@@ -637,7 +637,7 @@ static void splitArgs(char *args, char ***out, int *n, char *label, size_t label
   *n = cnt;
 }
 
-static void runStmt(Run *r, const char *aksi, char *args) {
+static void runStmt(Run *r, const char *action, char *args) {
   DslCtx *c = r->c;
   if (!fsFileExists(c->satria)) precondition(r, "binary satria tidak ada");
 
@@ -648,7 +648,7 @@ static void runStmt(Run *r, const char *aksi, char *args) {
   if (!label[0]) copyStr(label, sizeof(label), "last");
 
   char outPath[SATRIA_MAX_PATH + 256];
-  if (strcmp(aksi, "wait") == 0) {
+  if (strcmp(action, "wait") == 0) {
     const char *wl = n > 0 ? tok[0] : "last";
     int lim = n > 1 ? atoi(tok[1]) : 120;
     DslRun *run = runAdd(r, wl);
@@ -677,7 +677,7 @@ static void runStmt(Run *r, const char *aksi, char *args) {
     free(tok);
     return;
   }
-  if (strcmp(aksi, "stop") == 0) {
+  if (strcmp(action, "stop") == 0) {
     const char *sl = n > 0 ? tok[0] : "last";
     DslRun *run = runAdd(r, sl);
     if (!run || !run->pid) dieMsg(r, "run.stop: tidak ada proses latar '%s'", sl);
@@ -704,15 +704,15 @@ static void runStmt(Run *r, const char *aksi, char *args) {
   int ac = 0;
   /* run.exec/run.execbg menjalankan program tes itu sendiri; build/cmd/bg
      adalah argumen untuk binary satria. */
-  if (strcmp(aksi, "exec") != 0 && strcmp(aksi, "execbg") != 0) argv[ac++] = c->satria;
+  if (strcmp(action, "exec") != 0 && strcmp(action, "execbg") != 0) argv[ac++] = c->satria;
   char jb[32];
-  if (strcmp(aksi, "build") == 0) {
+  if (strcmp(action, "build") == 0) {
     snprintf(jb, sizeof(jb), "-j%d", c->jobs);
     argv[ac++] = jb;
     if (r->workspace) argv[ac++] = "-w";
   }
 
-  if (strcmp(aksi, "tool") == 0) {
+  if (strcmp(action, "tool") == 0) {
     if (n < 1) dieMsg(r, "run.tool butuh skrip");
     char script[SATRIA_MAX_PATH + 256];
     snprintf(script, sizeof(script), "%s/%s", c->repo, tok[0]);
@@ -731,17 +731,17 @@ static void runStmt(Run *r, const char *aksi, char *args) {
 
   const char *cwd = c->work;
   int first = 0;
-  if (strcmp(aksi, "exec") == 0 || strcmp(aksi, "execbg") == 0) {
-    if (n < 1) dieMsg(r, "run.%s butuh program", aksi);
+  if (strcmp(action, "exec") == 0 || strcmp(action, "execbg") == 0) {
+    if (n < 1) dieMsg(r, "run.%s butuh program", action);
     argv[ac++] = tok[0];
     first = 1;
-  } else if (strcmp(aksi, "bg") == 0) {
+  } else if (strcmp(action, "bg") == 0) {
     if (n < 1) dieMsg(r, "run.bg butuh argumen");
-  } else if (strcmp(aksi, "cmd") == 0 && n < 1) {
+  } else if (strcmp(action, "cmd") == 0 && n < 1) {
     dieMsg(r, "run.cmd butuh argumen");
   }
 
-  if (strcmp(aksi, "bg") != 0 && strcmp(aksi, "execbg") != 0) {
+  if (strcmp(action, "bg") != 0 && strcmp(action, "execbg") != 0) {
     for (int i = first; i < n; i++) argv[ac++] = tok[i];
     argv[ac] = NULL;
     run->rc = spawnWait(argv, cwd, outPath, NULL, false);

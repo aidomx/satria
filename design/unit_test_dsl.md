@@ -12,7 +12,7 @@ Dengan memperlakukan unit test sebagai bagian dari dsl, itu akan mempermudah pen
 Ukuran keberhasilan:
 - Seluruh `tests/unit/common` (31 tes) dapat dinyatakan **tanpa satu pun baris
   bash/sh di sisi penulis tes** — dicapai bertahap lewat milestone parser.
-- Syntax baru yang harus dipelajari penulis tes kecil: **8 objek aksi +
+- Syntax baru yang harus dipelajari penulis tes kecil: **8 objek action +
   3 objek hasil + 14 direktif** — dan objek bisa dibuka untuk keperluan lain
   tanpa menambah bentuk syntax.
 - Kontrak runner (`scripts/unit.sh` + `scripts/lib/unit_runner.sh`) tidak
@@ -52,7 +52,7 @@ Perincian:
 # Prinsip rancangan
 
 1. **Objek, bukan verba datar.** Perilaku dikelompokkan ke objek; satu bentuk
-   pernyataan: `<objek>.<aksi> [argumen…]`. Objek baru menambah kosakata tanpa
+   pernyataan: `<objek>.<action> [argumen…]`. Objek baru menambah kosakata tanpa
    menambah bentuk syntax.
 2. **Kendali aliran hanya di lapis `@`.** `@if @while @for` adalah direktif
    blok ber-`@end` — bukan shell. Tidak ada shell inline di berkas `.test`.
@@ -70,12 +70,12 @@ Perincian:
 7. **Kelas [snap] melarang penghapusan state.** `work.clean` ditolak runtime
    pada `[snap]` (aturan classes.conf ditegakkan, bukan hanya komentar).
 8. **Kesalahan selalu bernomor baris.** `FAIL <nama>: <file>.test:<baris>: <pesan>`.
-9. **Generalisasi hemat.** Objek/aksi/direktif baru hanya bila ≥ 2 tes
+9. **Generalisasi hemat.** Objek/action/direktif baru hanya bila ≥ 2 tes
    membutuhkannya.
 
 ---
 
-# Model eksekusi: persiapan → aksi → tanggapan
+# Model eksekusi: persiapan → action → tanggapan
 
 Tiga peran Given/When/Then dari draft awal kini diekspresikan lewat objek:
 pernyataan sudah cukup jelas dari objeknya, dan asersi berkumpul di
@@ -84,12 +84,12 @@ pernyataan sudah cukup jelas dari objeknya, dan asersi berkumpul di
 | Peran | Diekspresikan lewat |
 | --- | --- |
 | Given (menata panggung) | `work`, `fixture`, `file`, `env`, `time`, `stage` |
-| When (aksi yang diuji) | `run` (build/cmd/exec/bg/tool), mutasi `file` |
+| When (action yang diuji) | `run` (build/cmd/exec/bg/tool), mutasi `file` |
 | Then (tanggapan) | blok `@response` + `@guard` |
 
 Kaidah penulisan:
 - Satu baris = satu pernyataan atau satu direktif, selalu berbentuk
-  `<objek>.<aksi> [argumen…]` — termasuk asersi di dalam `@response` (tak ada
+  `<objek>.<action> [argumen…]` — termasuk asersi di dalam `@response` (tak ada
   bentuk spasi). Komentar `#` diteruskan ke log; baris kosong diabaikan.
 - Blok direktif selalu ditutup `@end`; isi berkas memakai heredoc
   `file.write <path> <<T … T`: penutup `T` sendirian di barisnya, marker bebas
@@ -109,7 +109,7 @@ Kaidah penulisan:
 | Lapis | Isi | Bentuk |
 | --- | --- | --- |
 | L1 struktur | `@suite @fixture @purpose @requires @keep` | direktif header |
-| L2 pernyataan | objek aksi + objek hasil, blok `@guard @response @include @set @get @find @if @while @for @return` | `<objek>.<aksi>`, blok `… @end` |
+| L2 pernyataan | objek action + objek hasil, blok `@guard @response @include @set @get @find @if @while @for @return` | `<objek>.<action>`, blok `… @end` |
 | L3 ekspresi | selektor, predikat, pembanding, ternary, interpolasi `{…}` | nilai di dalam argumen/kondisi |
 
 ## Direktif (L1 + kendali)
@@ -123,7 +123,7 @@ Kaidah penulisan:
 | `@keep` | Dir kerja disimpan saat FAIL (debug) | Default: dihapus otomatis (trap) |
 | `@include <path> [as <nama>]` | Sisip klausa dari berkas lain (setup bersama); dengan `as` → nilai `@return` fragmen tersimpan sebagai `{<nama>}` | Bukan `source` shell — yang disisip klausa DSL, bukan kode bash |
 | `@guard <ekspresi>` | Salah → `PRECONDITION <klausa>` rc 0 | Selain guard otomatis dari selektor |
-| `@response [label] … @end` | Kumpulan asersi atas hasil run; tiap baris = satu verdict | Barisnya aksi objek hasil; label default `last` |
+| `@response [label] … @end` | Kumpulan asersi atas hasil run; tiap baris = satu verdict | Barisnya action objek hasil; label default `last` |
 | `@if <ekspresi> [@else …] @end` | Cabang | Ekspresi L3 |
 | `@while <ekspresi> @end` | Ulang selalu benar | Untuk menunggu: polling + `time.tick` |
 | `@for <var> in <rentang\|koleksi> @end` | Rentang `1..30`, koleksi `project(p).sources` atau `{nama}` hasil `@find` | `{var}` diinterpolasi ke argumen & isi heredoc |
@@ -132,9 +132,9 @@ Kaidah penulisan:
 | `@get <nama>` | Baca/catat nilai variabel ke log (tracing) | Akses dalam argumen tetap `{<nama>}` |
 | `@return [ekspresi]` | Fleksibel: di fragmen `@include` = nilai balik; di badan utama = berhenti lebih awal | `@return fail` memaksa verdict FAIL; selain itu verdict dari penghitung |
 
-## Objek aksi
+## Objek action
 
-| Objek.Aksi | M | Makna | Dipetakan dari `tests/unit/common` |
+| Objek.Action | M | Makna | Dipetakan dari `tests/unit/common` |
 | --- | --- | --- | --- |
 | `fixture.copy` | M0 | Salin fixture ke dir kerja (`cp -a`) | cache_noop, cdeps_group, crud_touch_delete, … |
 | `work.new [nama]` | M0 | Dir kerja bersih `$UNIT_TMP/<nama>` + trap | boilerplate semua tes (default: nama berkas) |
@@ -159,7 +159,7 @@ Kaidah penulisan:
 
 ## Objek hasil (asersi — di dalam `@response`)
 
-| Objek.Aksi | M | Makna | Dipetakan dari |
+| Objek.Action | M | Makna | Dipetakan dari |
 | --- | --- | --- | --- |
 | `rc.ok\|rc.fail` | M0 | Kode keluar run berlabel | cdeps_key_reject, version_alias |
 | `out.contains\|out.not-contains <teks>` | M0 | Substring stdout+stderr | "Nothing to build", "Cache valid", "Binaries   : 1 linked, 0 up-to-date", "(up-to-date)" |
@@ -404,7 +404,7 @@ run.cmd watch as w
 
 # Pemetaan cakupan tests/unit/common → milestone
 
-| Tes | Kelas | @suite | M | Aksi kunci |
+| Tes | Kelas | @suite | M | Action kunci |
 | --- | --- | --- | --- | --- |
 | build_log | cold | workspace | M0 | `work.clean state`, `file.absent` |
 | cache_noop | snap | workspace | M0 | contoh §terjemahan |
@@ -443,7 +443,7 @@ tercapai, tes itu tetap `.sh` (transisi, bukan pengecualian desain).
 
 | Milestone | Isi parser | Uji konforman sebelum migrasi |
 | --- | --- | --- |
-| M0 | Header + pernyataan objek dasar + `@response/@guard/@requires/@include/@set/@get/@find` (tanpa ekspresi) + selektor source/binary + verdict | contoh kecil tiap aksi M0 |
+| M0 | Header + pernyataan objek dasar + `@response/@guard/@requires/@include/@set/@get/@find` (tanpa ekspresi) + selektor source/binary + verdict | contoh kecil tiap action M0 |
 | M1 (✓) | Evaluator ekspresi (predikat, pembanding, ternary), variabel `@set/@get/@find`, `@return` badan utama, interpolasi `{}`, escape, selektor embed + `repo()`/`work()`/`ws()` | tabel ekspresi benar/salah — `tests/unit/dsl/` 8/8 |
 | M2 (✓) | `@if/@else`, `@for` + rentang/koleksi, `@while` | kit `tests/unit/dsl/` (blok + `@include as`) + pilot `build_resume_abc` |
 | M3 (✓) | `run.bg/stop/wait`, `stage`, `text`, `run.tool` | kit (run_bg, stage_text) + pilot trace/background |
@@ -456,7 +456,7 @@ tercapai, tes itu tetap `.sh` (transisi, bukan pengecualian desain).
 
 **Isolasi parser** (sudah berjalan). Parser dikembangkan terpisah sebagai
 `scripts/lib/parser.sh` — parse-only: tokenisasi per baris, mesin status
-heredoc, tumpukan blok, validasi objek/aksi, kesalahan bernomor baris; tanpa
+heredoc, tumpukan blok, validasi objek/action, kesalahan bernomor baris; tanpa
 mengeksekusi apa pun. Selama stabilisasi `unit_dev.sh`/`unit.sh` TIDAK
 meng-consume modul ini — suite `.sh` hari ini tak tersentuh. Konforman diuji
 berdiri sendiri:
@@ -493,7 +493,7 @@ menjadi runner asli, tanpa bash sama sekali. Tes tetap berkas `.test`/`.t`
 | Fase | Port dari → ke | Kriteria lulus |
 | --- | --- | --- |
 | M4a parser | `scripts/lib/parser.sh` → `src/test/parser.c` | kit parser (positif + negatif) diport jadi uji unit C; jejak event TSV identik byte-per-byte dengan parser bash |
-| M4b evaluator+eksekutor (✓) | `tests/unit/lib/dsl.sh` → `src/test/eval.c` + `exec.c` (konvensi `EV`/`CUR`, tabel `obj.aksi` → fungsi C) | kit konforman `tests/unit/dsl/` 14/14 dijalankan runner C, hasil verdict identik — `tests/unit/dsl/parity.sh` |
+| M4b evaluator+eksekutor (✓) | `tests/unit/lib/dsl.sh` → `src/test/eval.c` + `exec.c` (konvensi `EV`/`CUR`, tabel `obj.action` → fungsi C) | kit konforman `tests/unit/dsl/` 14/14 dijalankan runner C, hasil verdict identik — `tests/unit/dsl/parity.sh` |
 | M4c runner/discovery (✓) | `lib/unit_runner.sh` → `src/test/runner.c`: discovery `.test`>`.t`>`.sh` + dedupe, `classes.conf`, staging/snapshot, `-j`, log/timing | sweep miniws via runner C = 524 asersi / 32 tes, log & timing.tsv setara |
 | M4d `satria test` native (✓) | delegasi `cmdTest` (src/test.c) diganti pemanggilan runner C langsung (in-process, tanpa exec) | jalur run default in-process; `-b` fork/setsid, `-w` watcher, dan `stop`/`pause`/`resume` native (`pause.flag`, kill run tree, plan−timing); `satria test miniws -j4` 605/32 rc 0 tanpa `scripts/unit.sh`; sisa: arsip `unit.sh`/`unit_dev.sh` |
 
@@ -520,14 +520,14 @@ Catatan rancangan:
 # Keputusan desain (terkunci)
 
 1. **Peran Given/When/Then**: prefiks `_G/_W/_T` diganti sepenuhnya objek +
-   `@response`; peran persiapan → aksi → tanggapan tetap sebagai konsep baca.
+   `@response`; peran persiapan → action → tanggapan tetap sebagai konsep baca.
 2. **Variabel disediakan**: `@set` (skalar), `@find` (koleksi glob),
    `@get` (baca/catat ke log); akses lewat `{nama}` di argumen, isi heredoc,
    dan kondisi.
 3. **`@return` fleksibel**: nilai balik fragmen `@include` (ternary) dan
    berhenti lebih awal di badan utama; `@return fail` memaksa FAIL, selain itu
    verdict tetap dari penghitung.
-4. **`run.tool` generik**: satu aksi untuk semua alat repo — bukan verba
+4. **`run.tool` generik**: satu action untuk semua alat repo — bukan verba
    spesifik per alat.
 5. **`@include` berparameter (makro)**: ditunda — kebutuhannya ditutupi
    variabel (kembali ke poin 2).

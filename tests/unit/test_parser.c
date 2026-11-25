@@ -167,14 +167,14 @@ int main(void) {
 
   /* ---- negatif --------------------------------------------------------- */
   runCase("objek-asing", "foo.bar\n", 1, NULL, "baris 1: objek tidak dikenal: foo\n");
-  runCase("aksi-asing", "file.rewind x\n", 1, NULL,
-          "baris 1: aksi tidak dikenal: file.rewind\n");
+  runCase("action-asing", "file.rewind x\n", 1, NULL,
+          "baris 1: action tidak dikenal: file.rewind\n");
   runCase("else-di-luar", "@else\n", 1, NULL, "baris 1: @else di luar @if\n");
   runCase("header-lambat", "run.build\n@fixture x\n", 1, NULL,
           "baris 2: direktif header setelah badan\n");
   runCase("write-tanpa-heredoc", "file.write x\n", 1, NULL,
           "baris 1: file.write memerlukan heredoc: file.write <path> <<T\n");
-  runCase("heredoc-aksi-lain", "file.append x <<T\nT\n", 1, NULL,
+  runCase("heredoc-action-lain", "file.append x <<T\nT\n", 1, NULL,
           "baris 1: heredoc hanya sah pada file.write\n"
           "baris 2: pernyataan tidak dipahami: T\n");
   runCase("set-tanpa-nilai", "@set alat\n", 1, NULL,

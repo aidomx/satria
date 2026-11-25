@@ -399,15 +399,15 @@ label_out() { # $1=label → berkas out; gagal bila run belum ada
   printf '%s' "$o"
 }
 
-assert_exec() { # $1=obj $2=aksi $3=argumen(sudah resolve) $4=klausa
-  local obj=$1 aksi=$2 args=$3 klausa=$4 label o a b cur
+assert_exec() { # $1=obj $2=action $3=argumen(sudah resolve) $4=klausa
+  local obj=$1 action=$2 args=$3 klausa=$4 label o a b cur
   label=${RESP:-last}
-  case "$obj.$aksi" in
+  case "$obj.$action" in
     rc.ok|rc.fail)
       [ -n "$args" ] && label=$args
       o=${RC[$label]:-}
       [ -n "$o" ] || { no "$klausa" "tidak ada run berlabel $label" "rc"; return; }
-      if [ "$aksi" = ok ]; then
+      if [ "$action" = ok ]; then
         [ "$o" -eq 0 ] && ok "$klausa" || no "$klausa" "$o" "0"
       else
         [ "$o" -ne 0 ] && ok "$klausa" || no "$klausa" "$o" "bukan 0"
@@ -415,7 +415,7 @@ assert_exec() { # $1=obj $2=aksi $3=argumen(sudah resolve) $4=klausa
     out.contains|out.not-contains|out.matches|out.not-matches)
       o=$(label_out "$label") || return
       args=$(unesc "$(unq "$args")")
-      case "$aksi" in
+      case "$action" in
         contains)      grep -qF -- "$args" "$o" && ok "$klausa" || no "$klausa" "tidak ada" "$args" ;;
         not-contains)  grep -qF -- "$args" "$o" && no "$klausa" "ada" "tiada $args" || ok "$klausa" ;;
         matches)       grep -qE -- "$args" "$o" && ok "$klausa" || no "$klausa" "tidak cocok" "$args" ;;
@@ -441,7 +441,7 @@ assert_exec() { # $1=obj $2=aksi $3=argumen(sudah resolve) $4=klausa
     mtime.changed|mtime.unchanged)
       [ -n "${MTIME[$args]:-}" ] || { no "$klausa" "rekaman $args tidak ada" "time.mark dulu"; return; }
       cur=$(stat -c %y "${MTIME[$args]}" 2>/dev/null)
-      if [ "$aksi" = changed ]; then
+      if [ "$action" = changed ]; then
         [ "$cur" != "${MTIME_T[$args]}" ] && ok "$klausa" || no "$klausa" "sama" "berubah"
       else
         [ "$cur" = "${MTIME_T[$args]}" ] && ok "$klausa" || no "$klausa" "berubah" "sama"
@@ -503,11 +503,11 @@ dir_exec() { # $1=direktif $2=argumen
   esac
 }
 
-stmt_exec() { # $1=obj $2=aksi $3=argumen mentah $4=baris
-  local obj=$1 aksi=$2 rest=$3 ln=$4 args klausa label
+stmt_exec() { # $1=obj $2=action $3=argumen mentah $4=baris
+  local obj=$1 action=$2 rest=$3 ln=$4 args klausa label
   args=$(resolve_args "$rest")
-  klausa="$obj.$aksi $rest"
-  case "$obj.$aksi" in
+  klausa="$obj.$action $rest"
+  case "$obj.$action" in
     work.new)    set_work "${args:-$TESTNAME}" ;;
     work.clean)
       [ "$UNIT_CLASS" = snap ] && die "work.clean hanya untuk kelas [cold]"
@@ -561,29 +561,29 @@ stmt_exec() { # $1=obj $2=aksi $3=argumen mentah $4=baris
         unset "A[$((n-1))]" "A[$((n-2))]"
       fi
       label=${label:-last}
-      if [ "$obj.$aksi" = run.build ]; then
+      if [ "$obj.$action" = run.build ]; then
         case "$MODE" in workspace) do_run "$label" -j"$UNIT_JOBS" -w ;; *) do_run "$label" -j"$UNIT_JOBS" ;; esac
-      elif [ "$obj.$aksi" = run.exec ]; then
+      elif [ "$obj.$action" = run.exec ]; then
         [ ${#A[@]} -gt 0 ] || die "run.exec butuh program"
         local rf="$WORK/.out.$label.txt" _rc
         ( cd "$WORK" && "${A[0]}" "${A[@]:1}" > "$rf" 2>&1 )
         _rc=$?   # assignment array me-reset $? — rekam dulu
         OUT[$label]=$rf
         RC[$label]=$_rc
-      elif [ "$obj.$aksi" = run.bg ]; then
+      elif [ "$obj.$action" = run.bg ]; then
         [ ${#A[@]} -gt 0 ] || die "run.bg butuh argumen"
         local rf="$WORK/.out.$label.txt"
         # exec: PID latar = satria itu sendiri (run.stop menarget sinyal benar)
         ( cd "$WORK" && exec "$SATRIA" "${A[@]}" ) > "$rf" 2>&1 &
         BGPID[$label]=$!
         OUT[$label]=$rf
-      elif [ "$obj.$aksi" = run.execbg ]; then
+      elif [ "$obj.$action" = run.execbg ]; then
         [ ${#A[@]} -gt 0 ] || die "run.execbg butuh program"
         local rf="$WORK/.out.$label.txt"
         ( cd "$WORK" && exec "${A[0]}" "${A[@]:1}" ) > "$rf" 2>&1 &
         BGPID[$label]=$!
         OUT[$label]=$rf
-      elif [ "$obj.$aksi" = run.wait ]; then
+      elif [ "$obj.$action" = run.wait ]; then
         local wl=${A[0]:-last} lim=${A[1]:-120} n=0 _rc
         [ -n "${BGPID[$wl]:-}" ] || die "run.wait: tidak ada proses latar '$wl' (run.bg dulu)"
         while kill -0 "${BGPID[$wl]}" 2> /dev/null; do
@@ -591,11 +591,11 @@ stmt_exec() { # $1=obj $2=aksi $3=argumen mentah $4=baris
           [ "$n" -le $((lim * 10)) ] || die "run.wait: lewat batas ${lim}s: $wl"
         done
         wait "${BGPID[$wl]}"; _rc=$?; RC[$wl]=$_rc
-      elif [ "$obj.$aksi" = run.stop ]; then
+      elif [ "$obj.$action" = run.stop ]; then
         local sl=${A[0]:-last} sgn=${A[1]:-INT}
         [ -n "${BGPID[$sl]:-}" ] || die "run.stop: tidak ada proses latar '$sl'"
         kill -s "$sgn" "${BGPID[$sl]}" 2> /dev/null || true
-      elif [ "$obj.$aksi" = run.tool ]; then
+      elif [ "$obj.$action" = run.tool ]; then
         [ ${#A[@]} -gt 0 ] || die "run.tool butuh skrip"
         local ts=${A[0]} rf="$WORK/.out.$label.txt"
         [ -f "$UNIT_REPO/$ts" ] || die "run.tool: skrip tidak ada: $ts"
@@ -643,9 +643,9 @@ stmt_exec() { # $1=obj $2=aksi $3=argumen mentah $4=baris
       [ ${#T2[@]} -eq 2 ] || die "bentuk: text.aggregate <src> <dst>"
       sort "$WORK/${T2[0]}" | uniq -c | sort -rn | head > "$WORK/${T2[1]}" ;;
     rc.*|out.*|file.exists|file.absent|file.same|file.contains|mtime.*)
-      assert_exec "$obj" "$aksi" "$args" "$klausa" ;;
+      assert_exec "$obj" "$action" "$args" "$klausa" ;;
     *)
-      die "baris $ln: $obj.$aksi belum dieksekusi di M0" ;;
+      die "baris $ln: $obj.$action belum dieksekusi di M0" ;;
   esac
 }
 
