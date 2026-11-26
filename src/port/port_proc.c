@@ -363,4 +363,20 @@ int cpuCount(void) {
   return si.dwNumberOfProcessors > 0 ? (int)si.dwNumberOfProcessors : 1;
 }
 
+int64_t wallClockMs(void) {
+  FILETIME ft;
+  ULARGE_INTEGER ticks;
+
+  GetSystemTimeAsFileTime(&ft);
+
+  /* FILETIME adalah jumlah interval 100 ns sejak 1601-01-01 UTC. */
+  ticks.LowPart = ft.dwLowDateTime;
+  ticks.HighPart = ft.dwHighDateTime;
+
+  /* Selisih 1601-01-01 ke 1970-01-01, dalam interval 100 ns. */
+  const int64_t kUnixEpochInFileTime = INT64_C(116444736000000000);
+
+  return ((int64_t)ticks.QuadPart - kUnixEpochInFileTime) / INT64_C(10000);
+}
+
 #endif /* _WIN32 */

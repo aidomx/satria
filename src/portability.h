@@ -203,6 +203,10 @@ bool fsSetCwd(const char *path);
 bool fsMapRead(const char *path, void **outData, size_t *outSize);
 void fsMapClose(void *data, size_t size); /* aman dipanggil dgn data=NULL */
 
+/* Waktu kalender UTC dalam milidetik sejak Unix epoch.
+   Dipakai untuk membandingkan timestamp log dan filesystem. */
+int64_t wallClockMs(void);
+
 #endif /* SATRIA_V0_1_0_PORTABILITY_H */
 
 #ifdef _WIN32

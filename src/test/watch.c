@@ -59,14 +59,13 @@ static void joinPath(char *out, size_t n, const char *a, const char *b) {
 }
 
 static long long nowMs(void) {
-  struct timespec ts;
-  if (clock_gettime(CLOCK_REALTIME, &ts) != 0) return 0;
-  return (long long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+  return (long long)wallClockMs(); 
 }
 
 static bool alivePid(long pid) {
   if (pid <= 0) return false;
-  return kill((pid_t)pid, 0) == 0;
+  return procAlive((int)pid);
+  //return kill((pid_t)pid, 0) == 0;
 }
 
 /* PID di berkas (0 bila tidak ada/tidak sah). */
@@ -872,7 +871,9 @@ int testWatchMain(const char *target, const char *optLog, const char *stage) {
 
   signal(SIGINT, onWatchSignal);
   signal(SIGTERM, onWatchSignal);
+#ifdef SIGHUP
   signal(SIGHUP, onWatchSignal);
+#endif
 
   if (nwatch > 0) {
     char list[512] = "";
