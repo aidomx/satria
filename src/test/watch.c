@@ -14,8 +14,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
-#include <unistd.h>
 
 #include "dsl.h"
 
@@ -143,13 +141,13 @@ static void fmtHms(long long sec, char *out, size_t n) {
 /* ==================== registry & sinyal ==================== */
 
 static void wipeWatch(void) {
-  if (w_watchFile[0]) unlink(w_watchFile);
+  if (w_watchFile[0]) fsRemoveFile(w_watchFile);
 }
 
 static void onWatchSignal(int sig) {
   (void)sig;
   wipeWatch();
-  _exit(130);
+  exit(130);
 }
 
 /* Bersihkan entri watcher mati; kumpulkan watcher lain dan targetnya. */
@@ -158,7 +156,7 @@ static int initRegistry(const char *watchDir, List *otherPids, List *otherTarget
   List dirs = {0}, files = {0};
   fsListDir(watchDir, &dirs, &files);
   listFree(&dirs);
-  long self = (long)getpid();
+  long self = (long)procSelfPid();
   for (int i = 0; i < files.count; i++) {
     const char *b = strrchr(files.items[i], '/');
     b = b ? b + 1 : files.items[i];
@@ -167,12 +165,12 @@ static int initRegistry(const char *watchDir, List *otherPids, List *otherTarget
     char *end = NULL;
     long pid = strtol(num, &end, 10);
     if (!num[0] || !end || *end) {
-      unlink(files.items[i]);
+      fsRemoveFile(files.items[i]);
       continue;
     }
     if (pid == self) continue;
     if (!alivePid(pid)) {
-      unlink(files.items[i]);
+      fsRemoveFile(files.items[i]);
       continue;
     }
     listAdd(otherPids, num);
@@ -201,7 +199,7 @@ static void cleanSnapRegistry(const char *stage) {
   List dirs = {0}, files = {0};
   fsListDir(snapDir, &dirs, &files);
   listFree(&dirs);
-  long self = (long)getpid();
+  long self = (long)procSelfPid();
   for (int i = 0; i < files.count; i++) {
     const char *b = strrchr(files.items[i], '/');
     b = b ? b + 1 : files.items[i];
@@ -212,10 +210,10 @@ static void cleanSnapRegistry(const char *stage) {
     char *end = NULL;
     long pid = strtol(num, &end, 10);
     if (!num[0] || !end || *end || pid == self) {
-      if (!num[0] || (end && *end)) unlink(files.items[i]);
+      if (!num[0] || (end && *end)) fsRemoveFile(files.items[i]);
       continue;
     }
-    if (!alivePid(pid)) unlink(files.items[i]);
+    if (!alivePid(pid)) fsRemoveFile(files.items[i]);
   }
   listFree(&files);
 }
@@ -855,13 +853,13 @@ int testWatchMain(const char *target, const char *optLog, const char *stage) {
   joinPath(w.prev, sizeof(w.prev), w.ldir, "timing.prev.tsv");
   joinPath(w.logp, sizeof(w.logp), w.ldir, "unit.log");
   joinPath(w.pidp, sizeof(w.pidp), w.ldir, "run.pid");
-  w.tty = isatty(STDOUT_FILENO);
+  w.tty = termIsTTY();
 
   char watchDir[WBUF];
   joinPath(watchDir, sizeof(watchDir), w_stage, "watch");
   List others = {0}, otherTargets = {0};
   int nwatch = initRegistry(watchDir, &others, &otherTargets);
-  snprintf(w_watchFile, sizeof(w_watchFile), "%s/%ld", watchDir, (long)getpid());
+  snprintf(w_watchFile, sizeof(w_watchFile), "%s/%ld", watchDir, (long)procSelfPid());
   FILE *wf = fopen(w_watchFile, "w");
   if (wf) {
     fprintf(wf, "%s\n", w.target);
@@ -890,7 +888,7 @@ int testWatchMain(const char *target, const char *optLog, const char *stage) {
   long runPid = pidFile(w.pidp);
   if (runPid > 0) snprintf(pidTxt, sizeof(pidTxt), " - %ld", runPid);
   say("# Watch unit test\n");
-  say("* PID      : %ld\n", (long)getpid());
+  say("* PID      : %ld\n", (long)procSelfPid());
   say("* Staging  : %s\n", targets);
   say("* Interval : %ds, Ctrl-C untuk berhenti\n", w_interval);
   say("* Target   : %s%s\n", w.target, pidTxt);
@@ -901,7 +899,7 @@ int testWatchMain(const char *target, const char *optLog, const char *stage) {
     if (fsFileExists(w.envp)) {
       int r = renderRun();
       if (r == 2) {
-        sleep(2);
+        procSleepMs(2);
         wipeWatch();
         listFree(&w.names);
         return 0;
@@ -912,6 +910,6 @@ int testWatchMain(const char *target, const char *optLog, const char *stage) {
         return 0;
       }
     }
-    sleep((unsigned)w_interval);
+    procSleepMs(w_interval * 1000);
   }
 }

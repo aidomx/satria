@@ -87,6 +87,7 @@ mod.extension = .rp
 - Added `.extension` to the archive config hash so changing it rebuilds the
   archive state exactly once.
 - Fixed windows clock time
+- fixed `src/test/watch.c` replace POSIX-only APIs with portable wrappers
 
 ## Known limitations
 
