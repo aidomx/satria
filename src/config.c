@@ -260,8 +260,13 @@ void configApplyCompilerSuffix(Config *c) {
  * MURNI derivasi in-memory + stat direktori; tidak menulis file apa pun.
  */
 void configFinalize(Config *c) {
-  for (int i = 0; i < c->embCount; i++)
+  for (int i = 0; i < c->embCount; i++) {
+    /* `<proyek>.extension` adalah default semua entri arsip/embed proyek;
+       entri yang punya `.extension` sendiri tidak ditimpa. */
+    if (!c->emb[i].extension[0] && c->extension[0])
+      copyStr(c->emb[i].extension, sizeof(c->emb[i].extension), c->extension);
     configFinalizeEntry(&c->emb[i], c->outBuildDir);
+  }
 
   /* Konvensi proyek standar — Buildfile minimal cukup `use project`:
      - sources -> src (bila tidak dideklarasikan)

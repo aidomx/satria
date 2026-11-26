@@ -83,15 +83,25 @@ lama); gcc lalu mengeluh `-std=c++17 is valid for C++/ObjC++ but not for C`.
   `output.libDir`.
 - **lain**: `clean as c` + `c.build/c.compdb`, `progress.bar`,
   `progress.error`.
-- **embedded**: `embedded.<nama>.src/pattern/extract/variable/key/type/file`,
+- **extension**: `<proyek>.extension = .rp` (atau `<alias>.extension`) —
+  ekstensi konten proyek untuk **pelacakan input/freshness** arsip dan embed.
+  Bila diisi, walk freshness hanya menyentuh berkas berekstensi itu (mis.
+  proyek modul Rupa: `.rp`), bukan seluruh isi folder. Nilai proyek menjadi
+  default tiap entri `embedded.<nama>` yang tidak punya `.extension` sendiri.
+  Isi arsip **tidak** berubah: `archive.pattern`/`embedded.<nama>.pattern`
+  dan `exclude` tetap menentukan berkas yang dikemas, sehingga metadata
+  seperti `module.json` tetap ikut. Tanpa `extension`, walk memakai `pattern`
+  lalu `""` (perilaku lama).
+- **embedded**: `embedded.<nama>.src/pattern/extension/extract/variable/key/type/file`,
   `embedded.<nama>.archive.dir/name/with.tar/with.ext`. Hasil:
   `build/embedded.c` + `build/embedded.h` — codegen tunggal (array byte +
   tabel `getEmbed()`; jalur `ld -r -b binary` sudah dihapus — design/
   embedded.md). Freshness arsip otomatis, regenerasi content-based.
   `build/` proyek selalu ada di include path, jadi `#include <embedded.h>`
   tidak butuh baris `headers`.
-- **archive**: `archive.src/dir/name/with/with.ext/exclude` untuk proyek
-  arsip-saja (`o.binary = false`).
+- **archive**: `archive.src/dir/name/with/with.ext/exclude/pattern/extension`
+  untuk proyek arsip-saja (`o.binary = false`). `extension` mempersempit input
+  freshness; `pattern`/`exclude` menentukan isi arsip.
 - **pack**: `pack.name/version/output/files/format/compress/optimize/
   checksum/exclude` + `pack.deb.*` (lihat [packaging.md](packaging.md)).
   Bare key `name/version/output/compress/optimize/checksum/format/files`

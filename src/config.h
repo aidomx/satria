@@ -63,6 +63,11 @@ typedef struct {
   char src[SATRIA_MAX_PATH];     /* direktori yang diarsipkan */
   char extract[SATRIA_MAX_PATH]; /* direktori ekstraksi saat runtime (boleh kosong) */
   char pattern[128];      /* pola scan freshness, default ".rp" tidak generik */
+  /* Ekstensi konten proyek (`<proyek>.extension = .rp`, atau
+     `<alias>.extension`): dipakai untuk walk freshness/input arsip saat
+     `pattern` kosong. Isi arsip tetap ditentukan `pattern`/exclude; extension
+     hanya mempersempit input yang divalidasi (mis. rupamod: .rp saja). */
+  char extension[64];
   List excludes;          /* pola/path yang dikeluarkan dari archive */
   char archiveDir[EMBED_PATH_LEN];
   char archiveName[EMBED_NAME_LEN];
@@ -183,6 +188,17 @@ typedef struct {
    * Tanpa deklarasi, langCpp diturunkan dari isi sources seperti semula.
    */
   bool langDeclared;
+
+  /*
+   * extension (Buildfile: `<proyek>.extension = .rp`): ekstensi berkas yang
+   * menjadi konten proyek untuk pelacakan inkremental. Proyek arsip/embed yang
+   * sumbernya bukan C (mis. modul Rupa) memakai ini agar walk freshness hanya
+   * menyentuh `.rp`, bukan seluruh isi folder. Nilai diturunkan ke tiap
+   * EmbeddedEntry (kecuali entri punya `.extension` sendiri) dan TIDAK
+   * mengubah isi arsip — `archive.pattern`/`embedded.<n>.pattern` tetap
+   * menentukan berkas yang dikemas.
+   */
+  char extension[64];
 
   bool progressBar;
   bool progressErrorAlways;

@@ -177,6 +177,7 @@ mod.archive.name = rupa_modules
 mod.archive.with = tar
 mod.archive.exclude = build, dist, LICENSE, README.md, self_archive
 mod.archive.dir = modules                # lintas-proyek: relatif root workspace
+mod.extension = .rp                      # konten proyek: walk freshness hanya .rp
 
 # B. Core engine
 core.sources = src

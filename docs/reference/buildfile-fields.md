@@ -139,6 +139,7 @@ bademod.pattern = .rp
 | `variable` | Name used in the generated compatibility macros, `EMBED_<VARIABLE>_*`. |
 | `extract` | Extraction target, exposed as the `extract` field (and `EMBED_<VARIABLE>_EXTRACT_DIR`). |
 | `pattern` | Only files matching this pattern are archived. |
+| `extension` | Content extension used to track archive/embed inputs, for example `.rp`. Falls back to `pattern`; it does not filter archive contents. |
 | `exclude` | Files and folders left out of the archive. |
 | `dir` | Folder where the archive is written. |
 | `tar`, `ext` | Archive format, for example `tar` with `ext = gz`. |
@@ -183,6 +184,19 @@ mod.archive.dir = modules
 
 `with = tar` and `with.tar = true` select the tar format. `with.ext` selects the
 compression (`gz`, `xz`, and so on).
+
+When the project's content is not C source, declare its extension so freshness
+checks walk only those files:
+
+```text
+mod.extension = .rp
+```
+
+`extension` narrows the inputs validated for freshness and, in workspace mode,
+recorded in `sources.cache`. It is inherited by every `embedded.<n>` entry of
+the project unless that entry sets its own `.extension`. Archive contents are
+still decided by `pattern` and `exclude`, so metadata such as `module.json`
+stays in the tarball.
 
 ## Packaging and release
 

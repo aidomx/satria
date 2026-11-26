@@ -63,6 +63,7 @@ static uint64_t embArchiveConfigHash(const EmbeddedEntry *e) {
   } while (0)
   HASH_STR(e->src);
   HASH_STR(e->pattern);
+  HASH_STR(e->extension);
   HASH_STR(e->archiveDir);
   HASH_STR(e->archiveName);
   HASH_STR(e->ext);
@@ -110,6 +111,7 @@ void embArchiveStateSave(const EmbeddedEntry *e) {
 
 bool embExcluded(const EmbeddedEntry *e, const char *rel); /* di bawah */
 void embRelPath(const EmbeddedEntry *e, const char *path, char *rel, size_t n);
+static const char *embScanExt(const EmbeddedEntry *e); /* di bawah */
 
 /* FNV-1a 64 atas isi file (streaming 4KB); 0 = tak terbaca. */
 static uint64_t embFileHash(const char *path) {
@@ -351,8 +353,9 @@ void embEmbedCacheRecord(const EmbeddedEntry *e) {
   csPut(st, &g);
 
   List files = {0};
-  if (e->pattern[0])
-    stateWalkDirCached(e->src, e->pattern, &files);
+  const char *scanExt = embScanExt(e);
+  if (scanExt[0])
+    stateWalkDirCached(e->src, scanExt, &files);
   else
     stateWalkDirCached(e->src, "", &files);
   char rel[SATRIA_MAX_PATH * 2];
@@ -389,7 +392,7 @@ void embEmbedCacheRecord(const EmbeddedEntry *e) {
 
     List dirs = {0};
     if (wsModeActive())
-      stateWalkDirStamps(e->src, e->pattern[0] ? e->pattern : "", &dirs);
+      stateWalkDirStamps(e->src, scanExt, &dirs);
     else
       embCollectDirStamps(e->src, &dirs);
     for (int i = 0; i < dirs.count; i++) {
@@ -450,6 +453,14 @@ void embRelPath(const EmbeddedEntry *e, const char *path, char *rel, size_t n) {
   snprintf(rel, n, "%s", path);
 }
 
+/* Ekstensi input untuk walk freshness/record: `<proyek>.extension` (atau
+   `<alias>.extension`) menang, lalu `pattern` (perilaku lama), lalu "" =
+   semua berkas. Extension hanya mempersempit INPUT yang divalidasi; isi
+   arsip tetap ditentukan pattern/exclude (lihat embed_archive.c). */
+static const char *embScanExt(const EmbeddedEntry *e) {
+  return e->extension[0] ? e->extension : e->pattern;
+}
+
 bool embArchiveFresh(const EmbeddedEntry *e) {
   /* Arsip jadi (embedded.<n>.file): cukup bandingkan mtime file — tidak
      ada direktori sumber untuk discan. */
@@ -465,8 +476,9 @@ bool embArchiveFresh(const EmbeddedEntry *e) {
      kasar untuk invalidasi build. Entri yang di-exclude tidak dihitung —
      sama seperti saat arsip dibangun. */
   List files = {0};
-  if (e->pattern[0])
-    stateWalkDirCached(e->src, e->pattern, &files);
+  const char *scanExt = embScanExt(e);
+  if (scanExt[0])
+    stateWalkDirCached(e->src, scanExt, &files);
   else
     stateWalkDirCached(e->src, "", &files);
   int64_t newest = 0;

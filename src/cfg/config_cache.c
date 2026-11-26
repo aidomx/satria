@@ -19,11 +19,12 @@
 
 #define CONFIG_CACHE_MAGIC "SATRIACFG1"
 /* Versi format startup.state: naikkan tiap mengubah layout Config.
+   17: extension (Config + EmbeddedEntry)
    14: pack.optimize (release.optimize)
    13: background (design/background.md)
    12: embedded.key + embedded.type (design/embedded.md)
    11: ... 10: defines + suffix flags/library/headers/std */
-#define CONFIG_CACHE_VERSION 16u /* +release.files/pack.files multi-baris */
+#define CONFIG_CACHE_VERSION 17u /* +extension (arsip/embed non-C) */
 #define CONFIG_CACHE_DIR ".satria"
 #define CONFIG_CACHE_FILE "startup.state"
 
@@ -85,6 +86,7 @@ static bool cacheWriteEmbedded(FILE *fp, const EmbeddedEntry *e) {
   uint8_t pre = e->usePrebuilt ? 1 : 0;
   return cacheWriteString(fp, e->name) && cacheWriteU8(fp, b) && cacheWriteString(fp, e->src) &&
          cacheWriteString(fp, e->extract) && cacheWriteString(fp, e->pattern) &&
+         cacheWriteString(fp, e->extension) &&
          cacheWriteString(fp, e->archiveDir) && cacheWriteString(fp, e->archiveName) &&
          cacheWriteU8(fp, tar) && cacheWriteString(fp, e->ext) &&
          cacheWriteString(fp, e->archivePath) && cacheWriteString(fp, e->objectPath) &&
@@ -100,6 +102,7 @@ static bool cacheReadEmbedded(FILE *fp, EmbeddedEntry *e) {
       !cacheReadString(fp, e->src, sizeof(e->src)) ||
       !cacheReadString(fp, e->extract, sizeof(e->extract)) ||
       !cacheReadString(fp, e->pattern, sizeof(e->pattern)) ||
+      !cacheReadString(fp, e->extension, sizeof(e->extension)) ||
       !cacheReadString(fp, e->archiveDir, sizeof(e->archiveDir)) ||
       !cacheReadString(fp, e->archiveName, sizeof(e->archiveName)) || !cacheReadU8(fp, &tar) ||
       !cacheReadString(fp, e->ext, sizeof(e->ext)) ||
@@ -149,6 +152,7 @@ static bool cacheWriteConfig(FILE *fp, const Config *c) {
       !cacheWriteList(fp, &c->headerPublic) || !cacheWriteList(fp, &c->libraries) ||
       !cacheWriteList(fp, &c->compilers) || !cacheWriteList(fp, &c->defines) ||
       !cacheWriteString(fp, c->std) || !cacheWriteString(fp, c->cc) ||
+      !cacheWriteString(fp, c->extension) ||
       !cacheWriteString(fp, c->target) || !cacheWriteU8(fp, cleanBuild) ||
       !cacheWriteU8(fp, cleanCompdb) || !cacheWriteU8(fp, progress) ||
       !cacheWriteU8(fp, progressError) ||      !cacheWriteU8(fp, foreground) ||
@@ -191,6 +195,7 @@ static bool cacheReadConfig(FILE *fp, Config *c) {
       !cacheReadList(fp, &c->headerPublic) ||      !cacheReadList(fp, &c->libraries) ||
       !cacheReadList(fp, &c->compilers) || !cacheReadList(fp, &c->defines) ||
       !cacheReadString(fp, c->std, sizeof(c->std)) || !cacheReadString(fp, c->cc, sizeof(c->cc)) ||
+      !cacheReadString(fp, c->extension, sizeof(c->extension)) ||
       !cacheReadString(fp, c->target, sizeof(c->target)) || !cacheReadU8(fp, &cleanBuild) ||
       !cacheReadU8(fp, &cleanCompdb) || !cacheReadU8(fp, &progress) ||
       !cacheReadU8(fp, &progressError) || !cacheReadU8(fp, &foreground) ||

@@ -503,9 +503,16 @@ mod.archive.name = rupa_modules
 mod.archive.with = tar, gz
 mod.archive.exclude = build, dist, LICENSE, README.md, self_archive
 mod.archive.dir = ../ruka/modules
+mod.extension = .rp
 ```
 
 `.git` dikecualikan dari source archive secara default.
+
+`extension` menandai konten proyek untuk pelacakan freshness (mode workspace):
+walk hanya menyentuh berkas `.rp` (bukan seluruh isi folder), dan nilai ini
+diwarisi tiap entri `embedded.<n>` yang tidak punya `.extension` sendiri. Isi
+arsip tetap ditentukan `archive.pattern`/`exclude` — `module.json` dan metadata
+lain tetap ikut bila tidak dikecualikan.
 
 Archive project berjalan pada library phase dan tidak perlu membuat binary.
 
@@ -825,7 +832,9 @@ SATRIA_CACHE_TRACE  jejak keputusan cache (fast path / gate no-op)
 SATRIA_HDR_SEM      validasi header semantik (default: workspace; 1=selalu, 0=nonaktif)
 SATRIA_PROFILE      cetak penanda fase (ms) ke stderr
 SATRIA_STATUS       cetak status gate/cold build
-SATRIA_WS_PAR       =0 menjalankan anak workspace serial (default: penjadwal siap-dep)
+SATRIA_WS_PAR       =0 serial realtime; =1 paralel + output live
+                    (default: paralel penjadwal siap-dep; output live bila
+                    stdout pipe, urut worklist bila redirect ke berkas)
 SATRIA_NO_COLOR     matikan warna (juga NO_COLOR)
 SATRIA_HOME         lokasi state global (default ~/.satria)
 SATRIA_CMD          path cmd.txt untuk bantuan CLI

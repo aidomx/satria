@@ -51,6 +51,9 @@ static void configApply(Config *c, const char *section, const char *sub, const c
               value); /* Key bare hasil sintesis WsBuildfile (prefix projects.<n>. dan
        aliasnya dilepas): name/version/files/output/... -> pack. Tanpa
        files/output proyek biasa tidak terpengaruh (pack tak aktif). */
+    else if (strcmp(key, "extension") == 0)
+      copyStr(c->extension, sizeof(c->extension),
+              value); /* ekstensi konten proyek (arsip/embed non-C) */
     else if (strcmp(key, "name") == 0 || strcmp(key, "version") == 0 ||
              strcmp(key, "output") == 0 || strcmp(key, "compress") == 0 ||
              strcmp(key, "optimize") == 0 ||
@@ -154,6 +157,9 @@ static void configApply(Config *c, const char *section, const char *sub, const c
       copyStr(e->extract, sizeof(e->extract), value);
     } else if (strcmp(key, "pattern") == 0) {
       copyStr(e->pattern, sizeof(e->pattern), value);
+    } else if (strcmp(key, "extension") == 0) {
+      /* Override per-entri untuk ekstensi input freshness. */
+      copyStr(e->extension, sizeof(e->extension), value);
     } else if (strcmp(key, "enable") == 0 && parseBool(value, &b)) {
       e->enable = b;
     } else if (strcmp(key, "dir") == 0) {
@@ -273,6 +279,10 @@ static void configApply(Config *c, const char *section, const char *sub, const c
       copyStr(e->src, sizeof(e->src), value);
     } else if (strcmp(key, "pattern") == 0) {
       copyStr(e->pattern, sizeof(e->pattern), value);
+    } else if (strcmp(key, "extension") == 0) {
+      /* Ekstensi input freshness khusus proyek arsip; isi arsip tetap
+         mengikuti pattern/exclude. */
+      copyStr(e->extension, sizeof(e->extension), value);
     } else if (strcmp(key, "name") == 0) {
       copyStr(e->archiveName, sizeof(e->archiveName), value);
     } else if (strcmp(key, "dir") == 0) {

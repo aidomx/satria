@@ -30,6 +30,23 @@ The source root defines what is considered for archiving. Exclusion rules determ
 `.git` and `.satria` are excluded from source archives by default (the latter
 keeps build state out of the archive so a no-op does not look stale).
 
+### Tracking project content
+
+When an archive project's content is not C source, tell satria which files are
+its inputs:
+
+```text
+mod.extension = .rp
+```
+
+Freshness checks then walk only `.rp` files instead of every file under
+`archive.src`. The value also becomes the default for the project's
+`embedded.<n>` entries that do not set their own `.extension`.
+
+`extension` affects tracking only. The archive contents remain governed by
+`archive.pattern` and `archive.exclude`, so metadata files such as
+`module.json` stay in the tarball unless they are explicitly excluded.
+
 ## Embedded files
 
 A generated archive can be embedded into a binary/library:

@@ -117,8 +117,15 @@ bademod.extract = /tmp/rupa-system
 | `<alias>.extract` | tidak | `""` | diekspos sebagai field `extract` (dibutuhkan `embed_use.c`) |
 | `<alias>.variable` | tidak | UPPERCASE nama entri | prefix makro kompat `EMBED_<VAR>_*` (lihat Migrasi) |
 | `<alias>.pattern`, `<alias>.exclude`, `archive.*` | — | — | aturan penyaringan/arsip tetap seperti implementasi sekarang |
+| `<alias>.extension` | tidak | `<proyek>.extension` | ekstensi input freshness (mis. `.rp`); fallback ke `pattern`. Tidak memfilter isi arsip |
 
 \* salah satu dari `.file` atau `.src`.
+
+`<proyek>.extension` (mis. `.rp`) menjadi default `.extension` semua entri
+proyek; entri yang menulis `.extension` sendiri tidak ditimpa. Nilai ini
+mempersempit walk input freshness/record (sumber `embScanExt`: `extension` →
+`pattern` → `""`), sedangkan isi arsip tetap ditentukan `pattern`/`exclude`
+(lihat `embed_archive.c`) — metadata seperti `module.json` tidak ikut hilang.
 
 Tiga nama untuk satu entri (alias, nama entri, key) pada rancangan sebelumnya diganti default: **key = nama entri**, `.key` hanya override bila memang perlu.
 
