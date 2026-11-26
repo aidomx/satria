@@ -31,6 +31,7 @@
 #include <stdio.h>
 #ifndef _WIN32
 #include <signal.h>
+#include <unistd.h>
 #endif
 #include <stdlib.h>
 #include <string.h>
@@ -43,9 +44,36 @@
 static int rbActive = 0;
 static char rbCache[256] = ".satria/caches/fingerprint.cache";
 static double rbT0ms; /* portMonoMs: monotonic portabel (ms) */
+/* dup() stdout asli sebelum relay tee memasang pipe (POSIX). */
+static int rbSaved = -1;
 
 void reportBlobCachePath(const char *p) {
   if (p && *p) snprintf(rbCache, sizeof(rbCache), "%s", p);
+}
+
+bool reportBlobStdoutIsPipe(void) {
+#ifdef _WIN32
+  return false; /* tanpa relay tee: stdout apa adanya, Windows tak tty-pipe */
+#else
+  struct stat st;
+  /* Selama build stdout = pipe relay; yang menentukan realtime adalah stdout
+     ASLI yang disimpan di rbSaved. */
+  int fd = rbSaved >= 0 ? rbSaved : STDOUT_FILENO;
+  if (fstat(fd, &st) != 0) return false;
+  return S_ISFIFO(st.st_mode) || S_ISSOCK(st.st_mode);
+#endif
+}
+
+bool reportBlobStdoutIsTty(void) {
+#ifdef _WIN32
+  return false; /* tanpa tee: pemanggil memakai aturan platformnya sendiri */
+#else
+  /* Sama seperti IsPipe: tanya fd ASLI. Sesudah reportBlobBegin memasang pipe
+     tee, isatty(STDOUT_FILENO) selalu false — itulah sebab runner memilih
+     paralel di terminal dan progres berhenti sampai satu proyek selesai. */
+  int fd = rbSaved >= 0 ? rbSaved : STDOUT_FILENO;
+  return isatty(fd) != 0;
+#endif
 }
 
 #ifdef _WIN32
@@ -58,7 +86,6 @@ void reportBlobCachePath(const char *p) {
 #include <unistd.h>
 
 static pid_t rbRelay = -1;
-static int rbSaved = -1;
 
 /* Anak: baca pipe -> tulis ke stdout asli (terminal) + file tmp. */
 static void rbRelayLoop(int rd, int term, int file) {

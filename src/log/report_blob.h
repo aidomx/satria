@@ -24,6 +24,14 @@ bool reportBlobFinish(bool save);
 void reportBlobShow(void);
 /* true bila report.blob tersimpan dan berisi (ringkasan siap ditampilkan). */
 bool reportBlobHas(void);
+/* true bila stdout ASLI pemanggil (sebelum relay tee memasang pipe) adalah
+   pipe/soket. Pemilihan output runner memakai ini, bukan fstat(stdout):
+   selama build stdout selalu berupa pipe relay. */
+bool reportBlobStdoutIsPipe(void);
+/* true bila stdout ASLI pemanggil adalah terminal. Dipakai pemilihan runner:
+   isatty(STDOUT_FILENO) menipu selama build karena stdout sudah diganti pipe
+   tee, sehingga terminal ikut memilih runner paralel dan progres tertahan. */
+bool reportBlobStdoutIsTty(void);
 #endif
 
 /* Salin isi report.blob (free *buf oleh pemanggil). false bila tak ada. */

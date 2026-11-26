@@ -93,7 +93,13 @@ int cmdsBuildPassFinish(CmdsPassTail *t) {
      disertakan pada link .so: .a proyek lain belum tentu ada di titik ini
      dan shared library memang tidak perlu inline-kan kode proyek lain. */
   if (libOnly) {
-    if (!cmdsBuildLibraryEx2(&c, &srcs, false, sourceSetChanged)) {
+    /* Fase library workspace: .so ditunda ke fase binary supaya link-nya
+       menindih link binary (lihat cmds_internal.h). Proyek tanpa binary
+       (kemasan) tetap membangun .so di sini — fase binary melewatinya. */
+    cmdsLibraryDeferShared(wsModeActive() && c.binary);
+    bool libOk = cmdsBuildLibraryEx2(&c, &srcs, false, sourceSetChanged);
+    if (!libOk) {
+      cmdsLibraryDeferShared(false);
       free(inc);
       free(wf);
       depsFree(deps);
@@ -123,6 +129,7 @@ int cmdsBuildPassFinish(CmdsPassTail *t) {
     if (!wsModeActive()) cmdsFastStateSave(&c, &srcs, "", buildfilePath, true);
     /* Library & hitungan masuk Build Report (design/build_report.md). */
     buildReportProjectCounts(compiled, skipped, warnings);
+    cmdsLibraryDeferShared(false);
     free(inc);
     free(wf);
     profReport();
@@ -247,10 +254,22 @@ int cmdsBuildPassFinish(CmdsPassTail *t) {
      tidak dirujuk simbol lain. */
   bool useStaticArchive = false;
   bool libraryBuilt = false;
+  bool sharedDeferred = false;
   char staticLib[SATRIA_MAX_PATH * 2] = {0};
   if (c.libRequested && c.libStatic && !compilerIsMSVC(&c)) {
     cmdsLibStaticPath(&c, staticLib, sizeof(staticLib));
-    if (!cmdsBuildLibraryEx2(&c, &srcs, true, sourceSetChanged)) {
+    /* Fase binary workspace: .so belum dibangun (ditunda fase library). .a
+       disiapkan di sini karena dipakai link di bawah; .so dimulai setelah
+       perintah link siap agar kedua proses berjalan bersamaan. */
+#ifdef _WIN32
+    sharedDeferred = false; /* tanpa fork: .so dibangun di fase library */
+#else
+    sharedDeferred = wsModeActive() && c.libShared;
+#endif
+    if (sharedDeferred) cmdsLibraryDeferShared(true);
+    bool libOk = cmdsBuildLibraryEx2(&c, &srcs, true, sourceSetChanged);
+    cmdsLibraryDeferShared(false);
+    if (!libOk) {
       free(inc);
       free(wf);
       depsFree(deps);
@@ -258,7 +277,7 @@ int cmdsBuildPassFinish(CmdsPassTail *t) {
       return 1;
     }
     useStaticArchive = true;
-    libraryBuilt = true;
+    libraryBuilt = !sharedDeferred;
   }
 
   /* Single-project besar tanpa library pengguna: kemas object ke arsip privat
@@ -390,8 +409,18 @@ int cmdsBuildPassFinish(CmdsPassTail *t) {
     movedOld = true;
   }
   bgProgress(95, "Linking: %s/%s", c.outBinaryDir, c.outBinaryName); /* §3B */
+  /* Link .so (ditunda fase library) dimulai sebelum link binary: dua proses,
+     dua artefak berbeda, jadi waktu = max(.so, binary) bukan jumlahnya. */
+  int sharedPid = 0;
+#ifndef _WIN32
+  if (sharedDeferred) sharedPid = cmdsSharedJobStart(&c, &srcs, sourceSetChanged);
+#endif
   bool linked = runCmd(cmd);
   profMark("link");
+  int sharedState = 1; /* 1 = up-to-date / tak ditangani di sini */
+#ifndef _WIN32
+  if (sharedPid > 0) sharedState = cmdsSharedJobWait(sharedPid);
+#endif
   /* Diagnosa: bila link gagal, cetak perintah lengkap yang dijalankan
      (objek, /OUT, library) agar penyebabnya terlihat di log CI. */
   if (!linked) fprintf(stderr, "satria: link command: %s\n", cmd);
@@ -399,6 +428,28 @@ int cmdsBuildPassFinish(CmdsPassTail *t) {
   if (movedOld) {
     if (linked) remove(oldPath);                       /* best effort */
     else if (!fsFileExists(outPath)) rename(oldPath, outPath); /* kembalikan exe lama */
+  }
+  if (sharedDeferred) {
+    char sharedPath[SATRIA_MAX_PATH * 2];
+    cmdsLibSharedPath(&c, sharedPath, sizeof(sharedPath));
+    if (sharedPid > 0) {
+      if (sharedState < 0) {
+        fprintf(stderr, "satria: shared library build failed: %s\n", sharedPath);
+        statPlanFree(&plan);
+        return 1;
+      }
+      /* Catat di sini: Ex2 tidak lagi dipanggil untuk varian shared (status
+         "built" tidak boleh tertimpa REP_CACHED jalur no-op). */
+      buildReportAddLibrary(sharedPath,
+                            sharedState == 0 ? REP_BUILT : REP_CACHED,
+                            fsFileSize(sharedPath));
+    } else if (sharedPid < 0) {
+      /* fork gagal: bangun .so secara sinkron sebelum state sukses disimpan. */
+      if (!cmdsBuildLibraryEx2(&c, &srcs, true, sourceSetChanged)) {
+        statPlanFree(&plan);
+        return 1;
+      }
+    }
   }
   /* Link sukses: target aktual (dengan ".exe" di Windows) baru ada sekarang.
      Semua pencatat sesudah titik ini — state no-op, Build Report, pack —

@@ -59,10 +59,30 @@ matches is reported `cached`.
 When only a few members changed and the source set is stable, satria does not
 run `ar rcs` (which rewrites the whole archive): it writes the new archive
 itself, copying unchanged member blocks verbatim and rebuilding the GNU symbol
-index from the old index plus `nm` on the changed objects only. A 5,000-member
+index from the old index plus one `nm` call for all changed objects (`-p`, so
+symbol order matches `ar`). A 5,000-member
 archive goes from ~13 s to ~0.2 s on a slow-syscall host. Anything the writer
 does not recognize (MSVC, macOS, LTO objects, damaged archive, missing `nm`)
 falls back to `ar rcs`.
+
+## Workspace library and link overlap
+
+In a workspace build the library pass deliberately builds only the static
+archive. The executable does not need the shared library, so `lib<name>.so` is
+linked in the binary pass, started just before the executable link
+(`cmdsSharedJobStart`) — the two linkers run concurrently and the critical path
+becomes `max(.so, binary)` instead of their sum. A failed `.so` link still
+fails the run before any success state is saved, and the library state saved in
+the library pass does not record a missing `.so` as a removed artifact.
+
+While a workspace build runs, project output is streamed live when stdout is a
+pipe (for example `satria -w | satria -w`): each worker writes its own block
+line-buffered, so progress appears as objects compile. Redirecting stdout to a
+regular file keeps the deterministic worklist order instead, which CI logs and
+the unit suite rely on. On a terminal the scheduler uses the serial runner so
+per-object lines appear as each job finishes; TTY detection must read the
+original stdout, because the build report tees stdout into a pipe for the whole
+run (`reportBlobStdoutIsTty`).
 
 ## Why this matters
 

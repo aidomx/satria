@@ -241,6 +241,9 @@ bool wsPlanAdmit(const char *name, bool libOnly);
 void wsPlanEnd(int rc);
 int wsPlanFastConsume(const char *name, bool libOnly); /* 1 hit, 0 miss, -1 fallback */
 void wsPlanNoteBuilt(const char *name);
+/* Anak fork: verdict hit warisan tidak boleh dipercaya bila sudah ada proyek
+   selesai sebelum fork (input bersama bisa berubah). */
+void wsPlanInvalidate(void);
 bool wsSplitKV(char *line, char *key, size_t kn, char **val);
 uint64_t wsStartupHash(const char *path);
 bool wsStartupLoad(WsModel *m, const char *wsFile, const char *wsName, const char *cacheFile);

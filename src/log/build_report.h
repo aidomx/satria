@@ -100,6 +100,10 @@ void buildReportAddRelease(const char *path, RepArtStatus st, long long size);
 /* Blok proyek pada # Execution. upsert berdasarkan nama (bila sudah ada,
    proyek aktif dipindah ke entri itu — aman untuk dua pass workspace). */
 void buildReportProject(const char *name);
+/* Catat nama proyek TANPA mencetak heading (mode output live: heading blok
+   fase library dicetak anak fork; induk hanya perlu tahu proyek itu sudah
+   punya blok agar fase binary tidak mencetak `> Nama` kedua kali). */
+void buildReportProjectNote(const char *name);
 /* Baris "* ..." pada blok proyek berjalan (mis. catatan embedded). */
 void buildReportNote(const char *fmt, ...);
 /* Baris detail compile "[i/total] TAG X.XXs src" pada proyek berjalan. */

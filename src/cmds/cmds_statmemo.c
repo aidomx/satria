@@ -169,6 +169,23 @@ bool cmdsStatCached(const char *path, int64_t *mtimeNs, long long *size) {
   return memoStampNsSize(path, mtimeNs, size);
 }
 
+/* Lihat deklarasi: peek bebas syscall. Entri stale (dibuang karena file
+   ditulis/dihapus) dan entri "tidak ada" tidak dikembalikan — pemanggil
+   men-stat sendiri seperti biasa. */
+bool cmdsStatMemoPeek(const char *path, int64_t *mtimeNs, long long *size) {
+  if (statMemoCap == 0 || !path || !*path) return false;
+  char key[SATRIA_MAX_PATH * 4];
+  memoKeyFor(path, key, sizeof(key));
+  size_t j = statMemoHash(key) & (statMemoCap - 1);
+  while (statMemo[j].path && strcmp(statMemo[j].path, key) != 0)
+    j = (j + 1) & (statMemoCap - 1);
+  StatMemoEntry *e = &statMemo[j];
+  if (!e->path || e->stale || !e->exists) return false;
+  if (mtimeNs) *mtimeNs = e->mtime;
+  if (size) *size = e->size;
+  return true;
+}
+
 /* Catat hasil stat pihak lain (audit 30/10 — kandidat save-walk): gerbang no-op
    sudah men-stat sumber/header/Buildfile yang sama di awal run, tetapi hasilnya
    dibuang — induk lalu membayar stat ulang yang sama saat menulis

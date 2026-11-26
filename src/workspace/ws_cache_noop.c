@@ -584,6 +584,25 @@ static int wsCachePFast(WsCacheMap *m, long long srcMtime) {
       check[k++] = r;
     }
     wsCachePreStat(check, checkN, stats);
+    /* Isi memo stat untuk SELURUH input yang baru distat, sebelum validasi
+       dapat berhenti di entri pertama yang berubah. Hasil pre-stat sudah
+       lengkap; mengisinya di dalam loop validasi membuat entri sesudah
+       perubahan tidak pernah tercatat, sehingga rencana stat one-pass
+       (statPlanBuild) men-stat ulang ribuan source yang sama.
+       Audit 30/10 — kandidat save-walk: epoch memo == wsCacheStampNs di
+       non-Windows (fsStampNsSize).
+       Direktori ('D') TIDAK dicatat: mtime berubah saat build menulis file
+       ke dalamnya, dan anak yang menulis melupakannya di memorinya sendiri
+       (salinan fork) — memo induk tetap basi.
+       Output 'O' di bawah build/ tidak masuk daftar stat (divalidasi lewat
+       readdir); output di luar build/ (bin/lib) tidak dicatat: konsultan memo
+       lain (deps/wsstate) bisa membaca jalur itu setelah fase penulisnya
+       selesai di anak lain. */
+#if !defined(_WIN32)
+    for (size_t k = 0; k < checkN; k++)
+      if (check[k]->type != 'D' && stats[k].ok)
+        cmdsStatMemoPut(check[k]->path, stats[k].time, stats[k].size);
+#endif
   }
   int ret = -1;
   bool metadataChanged = false;
@@ -595,19 +614,6 @@ static int wsCachePFast(WsCacheMap *m, long long srcMtime) {
     if (!sr->ok) goto out;
     long long now = sr->time;
     long long size = sr->size;
-#if !defined(_WIN32)
-    /* Isi memo stat (audit 30/10 — kandidat save-walk): path input ini distat
-       ulang oleh induk saat menulis fingerprint.cache. Epoch memo ==
-       wsCacheStampNs di non-Windows (fsStampNsSize).
-       Direktori ('D') TIDAK dicatat: mtime berubah saat build menulis file
-       ke dalamnya, dan anak yang menulis melupakannya di memorinya sendiri
-       (salinan fork) — memo induk tetap basi.
-       Output 'O' di bawah build/ tidak masuk daftar stat (divalidasi lewat
-       readdir); output di luar build/ (bin/lib) tidak dicatat: konsultan memo
-       lain (deps/wsstate) bisa membaca jalur itu setelah fase penulisnya
-       selesai di anak lain. */
-    if (r->type != 'D') cmdsStatMemoPut(r->path, now, size);
-#endif
     /* Direktori tidak memiliki hash konten. Jika mtime berubah, validasi
        daftar entri langsung; jika tetap identik, hanya metadata waktunya yang
        perlu disegarkan. Penambahan/penghapusan/rename membuat fast path miss. */

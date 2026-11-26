@@ -23,9 +23,11 @@
  *   <= jobs (penting: memori di proot/Termux jangan meledak -> force close).
  *
  * Anak fork menstaging tiga hal:
- *   - output   : file slot, dicetak induk urut worklist setelah selesai;
- *                SATRIA_WS_PAR memaksa mode stream: slot selesai langsung
- *                dicetak (urutan selesai, blok per proyek tetap utuh);
+ *   - output   : file slot, dicetak induk urut worklist setelah selesai.
+ *                Mode stream (stdout pipe/soket atau SATRIA_WS_PAR=1) TIDAK
+ *                memakai slot: anak menulis langsung ke stdout induk
+ *                (line-buffered) sehingga progres per-objek terlihat saat
+ *                cold build — lihat runners.c runnerStreamOutput;
  *   - state    : stateBlob stage (digabung induk saat waitpid);
  *   - verdict  : file ws-verdict-*, berisi byte-object-verdict fase library
  *                (commands.c cmdsWsPhaseVerdict*). Verdict lama hanya di
@@ -39,10 +41,15 @@
  * lama.
  *
  * Kebijakan pemilihan runner (runners.c, runnerWantParallel):
- *   - foreground (default): SERIAL. Output proyek realtime; paralel tetap ada
- *     di dalam proyek lewat jobs (compile paralel).
- *   - child background (bgIsChild) dengan jobs>1 dan n>1: PARALEL (fork).
- *   - SATRIA_WS_PAR=1 memaksa paralel, =0 memaksa serial (untuk pengujian).
+ *   - DEFAULT: PARALEL (fork) untuk batch n>1 proyek dengan jobs>1, baik
+ *     foreground maupun child background. Satu panggilan link (cc/ld) berbiaya
+ *     tetap ~0,25-0,37 dtk dan tidak bisa dipecah, jadi runner serial membuat
+ *     link ar/so dan binary proyek-proyek berurutan (bench hedit/libhdr 2,9 ->
+ *     1,8 dtk setelah paralel). Output urut worklist (slot) untuk berkas
+ *     reguler; stdout pipe/soket memakai output live (lihat runners.c).
+ *   - SATRIA_WS_PAR=1: paksa paralel + output live (stream).
+ *   - SATRIA_WS_PAR=0: paksa serial (output proyek realtime, compile saja
+ *     yang paralel di dalam proyek) — untuk pengujian/fallback.
  * Serial: fase library bertingkat & fase binary datar, urutan output tetap.
  */
 
@@ -137,8 +144,14 @@ static void wsSlotDump(const WsModel *m, const WsWork *work, WsSlot *s, int idx)
      sementara arsip proyek SEBELUMNYA yang masih pending ikut dirender di
      sini — persis perilaku buildReportProject pada runner serial. Child dalam
      staging tidak mencetak heading (lihat buildReportProject). */
-  if (s->fd >= 0 && !wsProjectArchiveOnly(&m->projects[work[idx].idx]) &&
-      lseek(s->fd, 0, SEEK_END) > 0)
+  if (s->fd < 0) {
+    /* Mode live: heading sudah dicetak ANAK fase library. Induk hanya perlu
+       mencatat nama proyek di model report-nya supaya anak fase binary tidak
+       mencetak "> Nama" kedua kali (anak mewarisi model induk). */
+    if (!wsProjectArchiveOnly(&m->projects[work[idx].idx]))
+      buildReportProjectNote(work[idx].name);
+  } else if (!wsProjectArchiveOnly(&m->projects[work[idx].idx]) &&
+             lseek(s->fd, 0, SEEK_END) > 0)
     buildReportProject(work[idx].name); /* slot fast-state-hit kosong -> tanpa heading */
   if (s->rep[0]) {
     buildReportImport(s->rep);
@@ -207,10 +220,20 @@ int runnerParallel(const WsModel *m, const WsWork *work, int n, int jobs,
 
   int running = 0, compileRunning = 0, finished = 0, rc = 0, seq = 0;
   bool failed = false, degraded = false;
+  const bool live = runnerStreamOutput();
 
   profMark(pre);
   fflush(NULL);       /* buffer stdout/stderr induk tidak boleh ikut ke child */
   stateBlobFlush();   /* anak mewarisi base state dari file */
+  if (live) {
+    /* Output live: header + `# Execution` dicetak INDUK sebelum fork pertama,
+       sehingga setiap anak mewarisi keadaan "sudah dirender" dan hanya
+       mencetak blok proyeknya sendiri (`> Nama`, compile line, hitungan).
+       Tanpa ini, beberapa anak akan balapan mencetak header yang sama. */
+    buildReportRenderHeader();
+    buildReportBeginExecution();
+    fflush(stdout);
+  }
 
   while (finished < n) {
     /* ---- luncurkan semua proyek yang siap (dependensi selesai) ---- */
@@ -233,12 +256,15 @@ int runnerParallel(const WsModel *m, const WsWork *work, int n, int jobs,
           int share = jobs / (compileRunning + cap);
           pj = share > 0 ? share : 1;
         }
-        char tmpl[32];
-        snprintf(tmpl, sizeof(tmpl), ".satria/ws-par-XXXXXX");
-        int fd = mkstemp(tmpl);
-        if (fd < 0) {
-          degraded = true; /* disk penuh dst: sisa -> serial setelah drain */
-          break;
+        char tmpl[32] = {0};
+        int fd = -1;
+        if (!live) {
+          snprintf(tmpl, sizeof(tmpl), ".satria/ws-par-XXXXXX");
+          fd = mkstemp(tmpl);
+          if (fd < 0) {
+            degraded = true; /* disk penuh dst: sisa -> serial setelah drain */
+            break;
+          }
         }
         WsSlot *s = &slot[i];
         snprintf(s->stage, sizeof(s->stage), ".satria/ws-state-%ld-%d.cache",
@@ -252,15 +278,22 @@ int runnerParallel(const WsModel *m, const WsWork *work, int n, int jobs,
         fflush(NULL);
         pid_t pid = fork();
         if (pid == 0) {
-          dup2(fd, STDOUT_FILENO);
-          /* stderr TIDAK dialihkan ke slot: relay build.log
-             (buildLogBegin) menempel di stderr induk lewat pipe — bila anak
-             memindahkannya, diagnostik kompilasi tidak pernah sampai ke
-             relay dan .satria/build.log tidak terbentuk (uji
-             build_log_miniws). Keluaran proyek (stdout) tetap di slot agar
-             dicetak urut worklist; stderr mengalir langsung (live ke
-             terminal/ERRLOG) — tidak memengaruhi penggretan unit test. */
-          if (fd > STDERR_FILENO) close(fd);
+          if (!live) {
+            dup2(fd, STDOUT_FILENO);
+            /* stderr TIDAK dialihkan ke slot: relay build.log
+               (buildLogBegin) menempel di stderr induk lewat pipe — bila anak
+               memindahkannya, diagnostik kompilasi tidak pernah sampai ke
+               relay dan .satria/build.log tidak terbentuk (uji
+               build_log_miniws). Keluaran proyek (stdout) tetap di slot agar
+               dicetak urut worklist; stderr mengalir langsung (live ke
+               terminal/ERRLOG) — tidak memengaruhi penggretan unit test. */
+            if (fd > STDERR_FILENO) close(fd);
+          } else {
+            /* Pipa: stdout stdio penuh-buffer 4 KiB akan menahan ~20 baris
+               progres. Line-buffer membuat satu baris = satu write (atomik
+               < PIPE_BUF) sehingga progres benar-benar realtime. */
+            setvbuf(stdout, NULL, _IOLBF, 0);
+          }
           stateBlobForkChild(); /* buang warisan; tulisan anak ke stage sendiri */
           /* Memo stat induk TIDAK boleh diwarisi: ia memuat stamp file yang
              dibaca induk sebelum fork (mis. arsip embed saat gerbang no-op),
@@ -271,10 +304,16 @@ int runnerParallel(const WsModel *m, const WsWork *work, int n, int jobs,
              skenario mod/dep). Serial aman karena cmdsStatMemoForget di proses
              yang sama; di fork, tiap anak butuh memo bersih sendiri. */
           cmdsStatMemoReset();
+          /* Verdict fast-state precompute induk juga basi begitu satu proyek
+             selesai (mis. rupamod menulis ulang tar embed yang dibaca bade):
+             anak lanjutan memvalidasi sendiri seperti runner serial, anak
+             gelombang pertama tetap memakai verdict precompute. */
+          if (finished > 0) wsPlanInvalidate();
           /* Staging: record artefak anak TIDAK dirender live (heading & baris
              arsip adalah tanggung jawab induk saat flush worklist) — anak
-             cukup mengekspornya lewat file fragment di bawah. */
-          buildReportStaging(true);
+             cukup mengekspornya lewat file fragment di bawah. Mode live
+             kebalikannya: anak yang mencetak heading bloknya sendiri. */
+          buildReportStaging(!live);
           int crc = wsRunProject(m, work[i].name, cmd, pj, libOnly, compileOnly);
           fflush(NULL);
           stateBlobExport(s->stage);
@@ -287,8 +326,10 @@ int runnerParallel(const WsModel *m, const WsWork *work, int n, int jobs,
           _exit(crc); /* bukan exit(): hindari atexit ganda setelah fork */
         }
         if (pid < 0) { /* fork gagal: slot ini -> serial setelah drain */
-          close(fd);
-          unlink(tmpl);
+          if (fd >= 0) {
+            close(fd);
+            unlink(tmpl);
+          }
           s->tmpl[0] = '\0';
           degraded = true;
           break;

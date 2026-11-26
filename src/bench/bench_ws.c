@@ -129,8 +129,13 @@ static void benchGenSatriaWsBuildfile(Bench *b, const char *ws) {
   fputs("core.output.binaryName = rupa\n", f);
   fputs("core.output.libraryName = core\n", f);
   fputs("core.output.libraryShared = true\n", f);
-  fputs("bade.sources = manager, src\n", f);
-  fputs("bade.exclude = manager/main.c\n", f);
+  /* Paritas dengan CMakeLists di bawah: hanya bade/src, dan main.c milik
+     binary di-exclude dari library (cmake menghapusnya dari bade_obj).
+     Dulu buildfile ini menyebut direktori `manager` yang tidak pernah dibuat
+     fixture — satria memindai direktori hantu itu dan library-nya memuat
+     main.o yang tidak ada di bade_obj cmake. */
+  fputs("bade.sources = src\n", f);
+  fputs("bade.exclude = src/main.c\n", f);
   fputs("bade.output.binaryName = bade\n", f);
   fputs("bade.output.libraryName = bade\n", f);
   fputs("bade.output.libraryShared = true\n", f);

@@ -23,6 +23,52 @@
 #include "../portability.h"
 #include "../util.h"
 
+#ifndef _WIN32
+#include <errno.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
+#endif
+
+/* ==================== varian shared yang ditunda ==================== */
+
+/* Fase library workspace menunda .so ke fase binary (lihat cmds_internal.h);
+   flag ini hanya dibaca cmdsBuildLibraryEx2 dan wsFastStateSave. */
+static bool g_deferShared = false;
+
+void cmdsLibraryDeferShared(bool on) { g_deferShared = on; }
+bool cmdsLibrarySharedDeferred(void) { return g_deferShared; }
+
+#ifndef _WIN32
+int cmdsSharedJobStart(const Config *c, const List *srcs, bool sourceSetChanged) {
+  if (!c->libShared) return 0;
+  fflush(NULL); /* buffer induk tidak boleh ikut ke anak */
+  pid_t pid = fork();
+  if (pid != 0) return (int)pid;
+  /* Anak: objek + .a sudah siap dari fase library. Bangun HANYA .so, dengan
+     linkPathLibs=false seperti fase library (artefak proyek lain tidak ikut
+     di-inline ke shared library). Kode keluar: 0 dibangun, 2 up-to-date,
+     1 gagal. */
+  g_deferShared = false;
+  bool up = cmdsLibVariantUpToDate(c, false, srcs);
+  bool ok = up || cmdsBuildLibraryEx2(c, srcs, false, sourceSetChanged);
+  fflush(NULL);
+  _exit(!ok ? 1 : (up ? 2 : 0));
+}
+
+int cmdsSharedJobWait(int pid) {
+  int st = 0;
+  while (waitpid((pid_t)pid, &st, 0) < 0) {
+    if (errno != EINTR) return -1;
+  }
+  if (!WIFEXITED(st)) return -1;
+  int rc = WEXITSTATUS(st);
+  if (rc == 0) return 0;
+  if (rc == 2) return 1;
+  return -1;
+}
+#endif
+
 /* ==================== fase pack (proyek binary + pack.*) ==================== */
 
 /* Wrapper fase normal: library lintas-proyek disertakan pada link shared. */
@@ -981,14 +1027,42 @@ static bool arMemberName(const unsigned char *base, const ArMember *m, size_t st
   return true;
 }
 
-/* Simbol global yang didefinisikan satu object, via nm (hanya object berubah). */
-static bool arNmSymbols(const char *obj, List *names) {
-  if (strpbrk(obj, " \t\r\n'\"\\")) return false;
-  char cmd[SATRIA_MAX_PATH * 2 + 48];
-  int n = snprintf(cmd, sizeof(cmd), "nm -g --defined-only '%s'", obj);
-  if (n < 0 || (size_t)n >= sizeof(cmd)) return false;
+/* Simbol global semua object BERUBAH dalam SATU panggilan nm (-A = prefiks
+   nama file di tiap baris). Satu spawn nm berbiaya ~40-50 ms di mesin
+   bersyscall lambat; enam object berubah berarti ~0,27 dtk bila dipanggil per
+   object. Path yang tidak aman untuk shell (spasi/quote/backslash/kolon)
+   membuat fungsi ini menolak -> pemanggil memakai jalur `ar rcs` biasa. */
+static bool arNmSymbolsBatch(const List *objs, const bool *isChg, int nobj, List *out) {
+  size_t cap = 64;
+  int count = 0;
+  for (int i = 0; i < nobj; i++) {
+    if (!isChg[i]) continue;
+    const char *p = objs->items[i];
+    if (strpbrk(p, " \t\r\n'\"\\:")) return false;
+    cap += strlen(p) + 4;
+    count++;
+  }
+  if (count == 0) return true;
+  char *cmd = malloc(cap);
+  if (!cmd) return false;
+  /* -p: urutan tabel simbol object (bukan abjad). `ar` menyusun armap
+     menurut urutan itu, jadi arsip hasil tulis-ulang identik byte demi byte
+     dengan `ar rcs`. */
+  int n = snprintf(cmd, cap, "nm -p -g --defined-only -A");
+  for (int i = 0; i < nobj && n > 0; i++) {
+    if (!isChg[i]) continue;
+    n += snprintf(cmd + n, cap - (size_t)n, " '%s'", objs->items[i]);
+  }
+  if (n < 0 || (size_t)n >= cap) {
+    free(cmd);
+    return false;
+  }
   ProcHandle h;
-  if (!procStartCapture(cmd, &h)) return false;
+  if (!procStartCapture(cmd, &h)) {
+    free(cmd);
+    return false;
+  }
+  free(cmd);
   ProcHandle *fin = NULL;
   if (procWaitAny(&h, 1, &fin) < 0 || !fin || !fin->ok) {
     size_t drop = 0;
@@ -1000,12 +1074,33 @@ static bool arNmSymbols(const char *obj, List *names) {
   if (!buf) return true;
   bool ok = true;
   size_t i = 0;
-  while (i < len) {
+  while (i < len && ok) {
     size_t e = i;
     while (e < len && buf[e] != '\n') e++;
     size_t b = e;
     if (b > i && buf[b - 1] == '\r') b--;
-    size_t a = i;
+    /* Format -A: "<path>:<alamat> <tipe> <nama>". Kolon pertama memisahkan
+       path dari sisa; path dicocokkan persis dengan object yang diminta. */
+    size_t colon = i;
+    while (colon < b && buf[colon] != ':') colon++;
+    if (colon >= b) {
+      ok = false;
+      break;
+    }
+    size_t plen = colon - i;
+    int k = -1;
+    for (int j = 0; j < nobj; j++) {
+      if (!isChg[j]) continue;
+      if (strlen(objs->items[j]) == plen && memcmp(objs->items[j], buf + i, plen) == 0) {
+        k = j;
+        break;
+      }
+    }
+    if (k < 0) {
+      ok = false;
+      break;
+    }
+    size_t a = colon + 1;
     while (a < b && (buf[a] == ' ' || buf[a] == '\t')) a++;
     /* Nama simbol = token terakhir; baris tanpa kolom tipe (mis. "file:")
        dilewati karena t == a. */
@@ -1020,7 +1115,7 @@ static bool arNmSymbols(const char *obj, List *names) {
       }
       memcpy(sym, buf + t, sl);
       sym[sl] = '\0';
-      listAdd(names, sym);
+      listAdd(&out[k], sym);
     }
     i = e + 1;
   }
@@ -1055,9 +1150,9 @@ static int arOwnerAt(const ArMember *mem, size_t nmem, uint32_t off) {
  * Tulis ulang arsip statis secara inkremental. `changed` = object yang lebih
  * baru dari arsip (dipakai pemanggil untuk incrementalStatic).
  */
-/* Batas anggota berubah: tiap object berubah memanggil `nm` sekali. Di atas
-   batas ini `ar rcs` (satu proses untuk seluruh arsip) lebih murah daripada
-   ratusan spawn nm — perubahan header besar tetap memakai jalur lama. */
+/* Batas anggota berubah: semua object berubah dipindai dalam satu panggilan
+   `nm`, tetapi di atas batas ini `ar rcs` (satu proses untuk seluruh arsip)
+   tetap lebih murah — perubahan header besar memakai jalur lama. */
 #define AR_REWRITE_MAX_CHANGED 128
 
 static bool arRewriteIndexed(const char *archive, const List *objs, const List *changed) {
@@ -1072,7 +1167,7 @@ static bool arRewriteIndexed(const char *archive, const List *objs, const List *
   int *oldCount = NULL;
   bool *isChg = NULL;
   ArSymEnt *sym = NULL;
-  List owned = {0};
+  List *objSyms = NULL; /* simbol per object berubah (batch nm) */
   unsigned char *ibuf = NULL;
   size_t *objOff = NULL;
   const ArMember **objMem = NULL;
@@ -1190,14 +1285,14 @@ static bool arRewriteIndexed(const char *archive, const List *objs, const List *
     sym[nsym].seq = (int)nsym;
     nsym++;
   }
+  objSyms = calloc((size_t)nobj, sizeof(*objSyms));
+  if (!objSyms) goto done;
+  if (!arNmSymbolsBatch(objs, isChg, nobj, objSyms)) goto done;
   for (int i = 0; i < nobj; i++) {
     if (!isChg[i]) continue;
-    int before = owned.count;
-    if (!arNmSymbols(objs->items[i], &owned)) goto done;
-    int added = owned.count - before;
     /* Object lama punya simbol tapi nm kosong: objek LTO/format asing -> ar. */
-    if (oldCount[i] > 0 && added == 0) goto done;
-    for (int k = before; k < owned.count; k++) {
+    if (oldCount[i] > 0 && objSyms[i].count == 0) goto done;
+    for (int k = 0; k < objSyms[i].count; k++) {
       if (nsym == symCap) {
         size_t nc = symCap * 2;
         ArSymEnt *ns = realloc(sym, nc * sizeof(*ns));
@@ -1205,7 +1300,7 @@ static bool arRewriteIndexed(const char *archive, const List *objs, const List *
         sym = ns;
         symCap = nc;
       }
-      sym[nsym].name = owned.items[k];
+      sym[nsym].name = objSyms[i].items[k];
       sym[nsym].obj = i;
       sym[nsym].seq = (int)nsym;
       nsym++;
@@ -1336,7 +1431,10 @@ done:
   free(objMem);
   free(sym);
   free(ibuf);
-  listFree(&owned);
+  if (objSyms) {
+    for (int i = 0; i < nobj; i++) listFree(&objSyms[i]);
+    free(objSyms);
+  }
   if (map) fsMapClose(map, mapSize);
   return ok;
 }
@@ -1360,18 +1458,21 @@ bool cmdsBuildLibraryEx(const Config *c, const List *srcs, bool linkPathLibs) {
 bool cmdsBuildLibraryEx2(const Config *c, const List *srcs, bool linkPathLibs,
                          bool sourceSetChanged) {
   if (!c->libRequested) return true;
+  /* Varian shared yang ditunda (fase library workspace) diperlakukan sebagai
+     "tidak diminta" di sini: tidak divalidasi, tidak dibangun, tidak dicatat. */
+  bool wantShared = c->libShared && !g_deferShared;
 
   /* Jalur no-op: hindari membangun daftar object, alokasi string, dan mkdir
      bila kedua varian library sudah mutakhir. */
   bool staticUpToDate = !c->libStatic || cmdsLibVariantUpToDate(c, true, srcs);
-  bool sharedUpToDate = !c->libShared || cmdsLibVariantUpToDate(c, false, srcs);
+  bool sharedUpToDate = !wantShared || cmdsLibVariantUpToDate(c, false, srcs);
   if (staticUpToDate && sharedUpToDate) {
     char target[SATRIA_MAX_PATH * 2];
     if (c->libStatic) {
       cmdsLibStaticPath(c, target, sizeof(target));
       buildReportAddLibrary(target, REP_CACHED, fsFileSize(target));
     }
-    if (c->libShared) {
+    if (wantShared) {
       cmdsLibSharedPath(c, target, sizeof(target));
       buildReportAddLibrary(target, REP_CACHED, fsFileSize(target));
     }
@@ -1534,7 +1635,7 @@ bool cmdsBuildLibraryEx2(const Config *c, const List *srcs, bool linkPathLibs,
      inkremental, tunggu dulu; bila gagal, kembali ke object langsung agar
      kegagalan ar tidak menyeret link .so. */
   bool sharedFromArchive = false;
-  if (c->libShared && c->libStatic && !compilerIsMSVC(c) && !sourceSetChanged &&
+  if (wantShared && c->libStatic && !compilerIsMSVC(c) && !sourceSetChanged &&
       (staticUpToDate || incrementalStatic)) {
     if (staticSlot >= 0) {
       ProcHandle *fin = NULL;
@@ -1553,7 +1654,7 @@ bool cmdsBuildLibraryEx2(const Config *c, const List *srcs, bool linkPathLibs,
     sharedFromArchive = staticDone && fsFileExists(staticPath);
   }
 
-  if (c->libShared) {
+  if (wantShared) {
     cmdsLibSharedPath(c, target, sizeof(target));
     if (!sharedUpToDate) {
       size_t n = strlen(c->cc) + strlen(target) + 160;
@@ -1681,7 +1782,7 @@ bool cmdsBuildLibraryEx2(const Config *c, const List *srcs, bool linkPathLibs,
     else if (staticDone)
       buildReportAddLibrary(target, REP_BUILT, fsFileSize(target));
   }
-  if (c->libShared) {
+  if (wantShared) {
     cmdsLibSharedPath(c, target, sizeof(target));
     if (sharedUpToDate)
       buildReportAddLibrary(target, REP_CACHED, fsFileSize(target));

@@ -1,5 +1,5 @@
 /* ws_batch.c  Dispatcher batch workspace. Eksekusi per runner ada di
- * src/runners/ (serial: realtime, default; parallel: child background).
+ * src/runners/ (serial: realtime, SATRIA_WS_PAR=0; parallel: default).
  * Lihat runners/runners.h dan komentar modul di runners/parallel.c. */
 #include "ws_internal.h"
 #include "../runners/runners.h"

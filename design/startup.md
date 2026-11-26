@@ -339,6 +339,23 @@ Dependencies              ├─ sources.cache            ├─ embed.cache    
 
 > Perbaikan performa di atas merupakan **hipotesis/target**, bukan hasil benchmark terverifikasi.
 
+### Stat satu-lintasan (memo per proses)
+
+Gerbang no-op men-stat seluruh input `sources.cache` sekali (`wsCachePFast`,
+paralel lewat fork). Hasilnya sekarang disimpan di memo stat per proses, bukan
+dibuang: validasi fast-state fase library mengisi batch-nya hanya untuk path
+yang belum ada di memo, rencana stat (`statPlanBuild`) memakai memo untuk
+mtime sumber/object, dan penyimpanan state memakai memo yang sama. Tidak ada
+penulis di antara gerbang dan fase-fase itu — tulisan milik build sendiri
+(embedded, compile) memanggil `cmdsStatMemoForget` sehingga path yang berubah
+distat ulang. Output di bawah `build/` sengaja tidak dimasukkan memo gerbang:
+object ditulis proses anak, salinan memo induk akan basi.
+
+Efek pada workspace 5.000 sumber/proyek (fixture lambat-syscall): fase `plan`
+4,5–5,2 dtk -> 1,0–1,8 dtk, dan loop stamp fase library 2,2 dtk -> 1,2–1,8 dtk.
+Sisa biaya adalah stat object di `build/` (satu per object per run) yang tidak
+bisa dihindari tanpa daemon pemantau berkas.
+
 ## 8. Startup Output
 
 Output startup berbentuk blok dengan header `startup :`, lalu satu baris per fase yang selesai. Baris tetap terlihat setelah cold build selesai:

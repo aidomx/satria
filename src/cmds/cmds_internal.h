@@ -49,6 +49,23 @@ bool cmdsBuildLibraryEx(const Config *c, const List *srcs, bool linkPathLibs);
 bool cmdsBuildLibraryEx2(const Config *c, const List *srcs, bool linkPathLibs,
                          bool sourceSetChanged);
 
+/* Fase library workspace: tunda varian shared ke fase binary. Link .so lalu
+   dijalankan bersamaan dengan link binary (dua proses, dua artefak) sehingga
+   waktu total = max(.so, binary) alih-alih .so + binary. Fase library tetap
+   membangun .a karena binary membutuhkannya. */
+void cmdsLibraryDeferShared(bool on);
+/* true bila varian shared sedang ditunda (dipakai wsFastStateSave: .so belum
+   ada saat fase library, jadi jangan dicatat sebagai artefak hilang). */
+bool cmdsLibrarySharedDeferred(void);
+#ifndef _WIN32
+/* Mulai link .so di proses anak (linkPathLibs=false, sama dengan fase library)
+   supaya menindih link binary. 0 = tidak ada yang perlu dikerjakan/Windows.
+   >0 = pid job; <0 = fork gagal. */
+int cmdsSharedJobStart(const Config *c, const List *srcs, bool sourceSetChanged);
+/* Tunggu job: 0 = .so dibangun, 1 = sudah up-to-date, -1 = gagal. */
+int cmdsSharedJobWait(int pid);
+#endif
+
 /* Arsip link privat (single-project besar, POSIX/ELF): dikemas di dalam build
    dir dan hanya dipakai linker executable; bukan artefak library pengguna.
    Windows/macOS memakai daftar object langsung. */
@@ -266,6 +283,10 @@ bool wsFastStateValid(const char *buildfilePath, bool libOnly);
 /* Varian untuk rencana scheduler: sekaligus melaporkan verdict router. */
 bool wsFastStateValidOut(const char *buildfilePath, bool libOnly, bool *routeOk);
 bool cmdsStatCached(const char *path, int64_t *mtimeNs, long long *size);
+/* true bila memo sudah memuat stamp segar untuk path — TANPA syscall stat.
+   Dipakai rencana stat one-pass (statPlanBuild) agar path yang baru
+   diverifikasi gerbang no-op pada run yang sama tidak distat dua kali. */
+bool cmdsStatMemoPeek(const char *path, int64_t *mtimeNs, long long *size);
 void cmdsStatMemoSetCwd(void);
 void cmdsStatMemoForget(const char *path);
 /* Isi memo dari hasil stat pihak lain (audit 30/10 — lihat cmds_statmemo.c). */

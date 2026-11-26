@@ -16,9 +16,10 @@
    lama (invarian §4 design/router_centric.md).
 
    Verdict route/fast-state hanya dihitung di depan batch bila runner akan
-   paralel. Runner serial (foreground default) memvalidasi per proyek di
-   executor seperti jalur lama: precompute di depan hanya menggandakan kerja
-   ketika proyek dependensi membangun lebih dulu dan membuat verdict basi.
+   paralel (default sejak link lintas proyek ditindih). Anak fork yang
+   diluncurkan setelah ada proyek selesai membuang verdict warisan
+   (wsPlanInvalidate): proyek itu bisa menulis input bersama. Runner serial
+   (SATRIA_WS_PAR=0) tidak precompute dan memvalidasi per proyek di executor.
 */
 #include "ws_internal.h"
 
@@ -230,6 +231,13 @@ int wsPlanFastConsume(const char *name, bool libOnly) {
 void wsPlanNoteBuilt(const char *name) {
   if (wsPlanFind(name, false) || wsPlanFind(name, true)) g_planDirty = true;
 }
+
+/* Anak fork mewarisi verdict precompute INDUK. Bila sudah ada proyek yang
+   selesai sebelum anak ini diluncurkan, proyek itu bisa saja menulis input
+   bersama (tar embed rupamod, arsip/library) sehingga hit warisan bisa basi —
+   anak berikutnya wajib memvalidasi sendiri. Anak gelombang pertama tetap
+   memakai verdict precompute. */
+void wsPlanInvalidate(void) { g_planDirty = true; }
 
 /* Dipanggil executor tepat sebelum bekerja. true = sesuai rencana (penanda
    ditulis); false = di luar rencana. Nilai kembali bersifat informasional:

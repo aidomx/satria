@@ -140,8 +140,8 @@ Semua fase memakai env yang sama, `SATRIA_PLAN` (default aktif);
   Pembaca dalam proses yang sama melihat tulisan stage lewat overlay `csOpen`,
   jadi cache turunan (mis. `cmdsFastStateSave` yang membuka `DepCache` baru)
   tidak membaca ulang file `.d` sebelum merge. Stage workspace **hanya dibuka
-  untuk runner paralel**; runner serial (foreground default) menulis cache
-  langsung seperti jalur non-plan. Merge per proyek me-rewrite cache 10k dan
+  untuk runner paralel** (default batch n>1 dengan jobs>1); runner serial
+  (`SATRIA_WS_PAR=0`) menulis cache langsung seperti jalur non-plan. Merge per proyek me-rewrite cache 10k dan
   menambah 5-6 detik pada edit satu source, tanpa penulis paralel yang perlu
   dilindungi. Single-project memakai transaksi yang sama:
   `cmdBuildEx` membuka stage setelah gerbang no-op, mengikat grup ke alamat
@@ -230,7 +230,10 @@ memutuskan apa pun; ia hanya menampilkan ringkasan.
 ## 8. Kriteria penerimaan
 
 - `tests/unit/common/ws_plan.sh` hijau (serial + fork, 0 menyimpang).
-- Tanpa env: keluaran dan jumlah syscall tidak berubah.
+- Tanpa env: runner paralel default; berkas reguler tetap urut worklist,
+  stdout pipe/soket live (anak menulis langsung) — jumlah syscall gerbang
+  tidak berubah. Terminal (TTY) tetap serial realtime; TTY dibaca dari stdout
+  ASLI karena report_blob memasang pipe tee di stdout selama build.
 - Fase 2: setiap cache besar dibuka paling banyak sekali oleh induk per run
   (diverifikasi `strace -f -e openat` pada workspace 5k).
 - Benchmark CI `Workspace Benchmark` leaf/hedit/no-op tidak regresi; target
@@ -242,7 +245,7 @@ memutuskan apa pun; ia hanya menampilkan ringkasan.
 
 | Risiko | Mitigasi |
 | --- | --- |
-| Rencana basi karena anak lain menulis file | Fase 2 menghapus penulisan anak; fase 1 hanya verifikasi |
+| Rencana basi karena anak lain menulis file | Fase 2 menghapus penulisan anak; fase 1 hanya verifikasi. Anak fork yang diluncurkan sesudah ada proyek selesai membuang verdict hit warisan (`wsPlanInvalidate`) lalu memvalidasi sendiri |
 | Fork mewarisi memo stat induk | Anak fork tetap `cmdsStatMemoReset()`; runner serial memakai memo lintas proyek seperti non-plan, dan penulis output memanggil `cmdsStatMemoForget` |
 | Kegagalan di tengah batch | `wsPlanEnd(rc != 0)` memaafkan proyek yang tak sempat jalan; fase binary berhenti seperti batch biasa |
 | Format cache berubah | Stage memakai format cache_store yang sama; merge per grup |

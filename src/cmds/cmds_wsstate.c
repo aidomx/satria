@@ -265,7 +265,12 @@ void wsFastStateSave(struct DepCache *dc, const Config *c, const List *srcs, con
   char staticLib[WS_PATH_LEN] = "", sharedLib[WS_PATH_LEN] = "";
   if (c->libRequested) {
     if (c->libStatic) cmdsLibStaticPath(c, staticLib, sizeof(staticLib));
-    if (c->libShared) cmdsLibSharedPath(c, sharedLib, sizeof(sharedLib));
+    /* Fase library workspace menunda .so ke fase binary: saat save ini file-nya
+       memang BELUM ada, jadi jangan dicatat sebagai artefak hilang ('M') —
+       entri itu membuat validasi fase library selalu miss run berikutnya.
+       Up-to-date .so tetap diperiksa mtime-nya terhadap objek saat dibangun. */
+    if (c->libShared && !(libOnly && cmdsLibrarySharedDeferred()))
+      cmdsLibSharedPath(c, sharedLib, sizeof(sharedLib));
   }
   if (staticLib[0]) {
     addKind(&items, 'O', staticLib);
@@ -501,16 +506,30 @@ static bool wsFastStateValidLib(const char *buildfilePath, const char *cwd) {
      membuang early-exit dan menambah ~2,5 dtk pada edit satu source. */
   if (nst >= 256 && !gateStale) {
     const char **paths = malloc(sizeof(*paths) * (size_t)nst);
+    int *missIdx = malloc(sizeof(*missIdx) * (size_t)nst);
     int64_t *sm = malloc(sizeof(*sm) * (size_t)nst);
     long long *ss = malloc(sizeof(*ss) * (size_t)nst);
     unsigned char *sok = malloc((size_t)nst);
-    if (paths && sm && ss && sok) {
-      for (int i = 0; i < nst; i++) paths[i] = st[i].path;
-      cmdsStatBatchStamp(paths, nst, sm, ss, sok);
-      for (int i = 0; i < nst; i++)
-        if (sok[i]) cmdsStatMemoPut(st[i].path, sm[i], ss[i]);
+    int nmiss = 0;
+    if (paths && missIdx && sm && ss && sok) {
+      /* Stamp yang inputnya sudah dimemo gerbang no-op pada run yang sama tidak
+         perlu distat ulang: nilainya identik dan tidak ada penulis di antara
+         gerbang dan validasi ini. Gerbang tidak mencatat output build/, jadi
+         object tetap masuk batch seperti biasa. */
+      for (int i = 0; i < nst; i++) {
+        if (cmdsStatMemoPeek(st[i].path, NULL, NULL)) continue;
+        paths[nmiss] = st[i].path;
+        missIdx[nmiss] = i;
+        nmiss++;
+      }
+      if (nmiss) {
+        cmdsStatBatchStamp(paths, nmiss, sm, ss, sok);
+        for (int k = 0; k < nmiss; k++)
+          if (sok[k]) cmdsStatMemoPut(st[missIdx[k]].path, sm[k], ss[k]);
+      }
     }
     free(paths);
+    free(missIdx);
     free(sm);
     free(ss);
     free(sok);

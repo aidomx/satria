@@ -378,23 +378,45 @@ void statPlanBuild(StatPlan *p, const Config *c, const List *srcs) {
   int *dotdTask = malloc(sizeof(int) * (size_t)(n + 1));
   bool *dotdReq = calloc((size_t)(n + 1), sizeof(bool));
   bool *dotdAdded = calloc((size_t)(n + 1), sizeof(bool));
+  bool *objMemo = calloc((size_t)(n + 1), sizeof(bool));
   size_t taskN = 0;
-  if (!tasks || !srcTask || !objTask || !dotdTask || !dotdReq || !dotdAdded) {
+  if (!tasks || !srcTask || !objTask || !dotdTask || !dotdReq || !dotdAdded || !objMemo) {
     free(tasks);
     free(srcTask);
     free(objTask);
     free(dotdTask);
     free(dotdReq);
     free(dotdAdded);
+    free(objMemo);
     /* Alokasi gagal: kosongkan plan agar decide men-stat sendiri. */
     statPlanFree(p);
     return;
   }
+  /* Peta objPath -> slot. Sebelumnya pencarian linear O(n^2) atas string:
+     di workspace 5.000 sumber itu ~12,5 juta strcmp (~2,5 dtk pada FS lambat)
+     padahal objectPathFor deterministik. Hash FNV-1a yang sama dengan
+     cache_store; kegagalan alokasi jatuh ke pencarian linear (perilaku lama). */
+  size_t objHCap = 1;
+  while (objHCap < (size_t)n * 2 + 1) objHCap <<= 1;
+  int *objHSlot = malloc(objHCap * sizeof(*objHSlot));
+  if (objHSlot) memset(objHSlot, 0xff, objHCap * sizeof(*objHSlot));
   for (int i = 0; i < n; i++) {
     p->path[i] = srcs->items[i];
-    srcTask[i] = (int)taskN;
-    tasks[taskN].path = srcs->items[i];
-    taskN++;
+    /* Gerbang no-op pada run yang sama sudah men-stat seluruh input workspace
+       (dan mengisi memo). Pakai hasil itu tanpa syscall: stat ulang 5.000
+       sumber di direktori besar adalah biaya terbesar fase plan, padahal
+       nilainya identik — tidak ada penulis sumber di antara gerbang dan
+       pass. Path yang tidak ada di memo (single-project, proyek baru,
+       gerbang dilewati) tetap masuk tugas stat seperti biasa. */
+    int64_t mm = -1;
+    if (cmdsStatMemoPeek(srcs->items[i], &mm, NULL)) {
+      srcTask[i] = -1;
+      p->srcM[i] = mm;
+    } else {
+      srcTask[i] = (int)taskN;
+      tasks[taskN].path = srcs->items[i];
+      taskN++;
+    }
 
     char objPath[SATRIA_MAX_PATH];
     if (!objectPathFor(c, srcs->items[i], objPath, sizeof(objPath))) {
@@ -402,21 +424,38 @@ void statPlanBuild(StatPlan *p, const Config *c, const List *srcs) {
       continue;
     }
     int slot = -1;
-    for (int j = 0; j < p->objCount; j++) {
-      if (strcmp(p->objPath[j], objPath) == 0) {
-        slot = j;
-        break;
+    size_t h = 0;
+    if (objHSlot) {
+      h = (size_t)csHash(objPath) & (objHCap - 1);
+      while (objHSlot[h] >= 0 && strcmp(p->objPath[objHSlot[h]], objPath) != 0)
+        h = (h + 1) & (objHCap - 1);
+      slot = objHSlot[h];
+    } else {
+      for (int j = 0; j < p->objCount; j++) {
+        if (strcmp(p->objPath[j], objPath) == 0) {
+          slot = j;
+          break;
+        }
       }
     }
     if (slot < 0) {
       slot = p->objCount;
       snprintf(p->objPath[slot], SATRIA_MAX_PATH, "%s", objPath);
+      if (objHSlot) objHSlot[h] = slot;
       objTask[slot] = -1;
       dotdTask[slot] = -1;
       if (p->obsObj) {
-        objTask[slot] = (int)taskN;
-        tasks[taskN].path = p->objPath[slot];
-        taskN++;
+        /* Object yang sudah dimemo (mis. validasi fast-state fase ini)
+           tidak perlu stat lagi; mtime tetap segar untuk run yang sama. */
+        int64_t om = -1;
+        if (cmdsStatMemoPeek(p->objPath[slot], &om, NULL)) {
+          objMemo[slot] = true;
+          p->objM[slot] = om;
+        } else {
+          objTask[slot] = (int)taskN;
+          tasks[taskN].path = p->objPath[slot];
+          taskN++;
+        }
       } else {
         p->objM[slot] = -99; /* belum distat — konsumen WAJIB stat sendiri */
       }
@@ -425,7 +464,6 @@ void statPlanBuild(StatPlan *p, const Config *c, const List *srcs) {
     p->objIdx[i] = slot;
     if (p->obsObj && statSrcHasDotD(c, srcs->items[i])) dotdReq[slot] = true;
   }
-
   /* .d hanya perlu ADA/TIDAK. Bila semua object satu direktori (umumnya
      build/), satu readdir menggantikan n stat .d. Direktori campuran tetap
      memakai stat per .d seperti sebelumnya. */
@@ -474,6 +512,7 @@ void statPlanBuild(StatPlan *p, const Config *c, const List *srcs) {
      seperti jalur serial: save-walk sesudah pass membaca path yang sama.
      Object juga dicatat, lalu dibuang saat compile menulis ulang file. */
   for (int i = 0; i < n; i++) {
+    if (srcTask[i] < 0) continue; /* stamp dari memo — sudah final */
     StatTask *t = &tasks[srcTask[i]];
     p->srcM[i] = t->ok ? t->m : -1;
     if (t->ok) cmdsStatMemoPut(t->path, t->m, t->sz);
@@ -481,8 +520,16 @@ void statPlanBuild(StatPlan *p, const Config *c, const List *srcs) {
   for (int slot = 0; slot < p->objCount; slot++) {
     if (!p->obsObj) continue;
     int64_t om = -1;
-    if (objTask[slot] >= 0 && tasks[objTask[slot]].ok) {
+    bool have = objMemo[slot];
+    if (have)
+      om = p->objM[slot];
+    else if (objTask[slot] >= 0 && tasks[objTask[slot]].ok) {
       om = tasks[objTask[slot]].m;
+      have = true;
+      cmdsStatMemoPut(tasks[objTask[slot]].path, tasks[objTask[slot]].m,
+                      tasks[objTask[slot]].sz);
+    }
+    if (have) {
       if (dotdTask[slot] >= 0) {
         if (!tasks[dotdTask[slot]].ok)
           om = -1;
@@ -501,8 +548,6 @@ void statPlanBuild(StatPlan *p, const Config *c, const List *srcs) {
           if (!statSortedHas(&dotdSeen, dp)) om = -1;
         }
       }
-      cmdsStatMemoPut(tasks[objTask[slot]].path, tasks[objTask[slot]].m,
-                      tasks[objTask[slot]].sz);
     }
     p->objM[slot] = om;
   }
@@ -516,6 +561,8 @@ void statPlanBuild(StatPlan *p, const Config *c, const List *srcs) {
   free(dotdTask);
   free(dotdReq);
   free(dotdAdded);
+  free(objMemo);
+  free(objHSlot);
 }
 
 int cmdBuildEx(int jobs, const char *buildfilePath, bool libOnly) {

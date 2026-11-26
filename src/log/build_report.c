@@ -221,6 +221,33 @@ static RepProj *curProj(void) {
   return (R.active && R.cur >= 0 && R.cur < R.nProj) ? &R.proj[R.cur] : NULL;
 }
 
+/* Upsert entri proyek berdasarkan nama; *created true hanya bila entri baru
+   dibuat. Mengembalikan NULL bila alokasi gagal. */
+static RepProj *projEnsure(const char *name, bool *created) {
+  *created = false;
+  for (int i = 0; i < R.nProj; i++) {
+    if (strcmp(R.proj[i].name, name) == 0) {
+      R.cur = i;
+      return &R.proj[i];
+    }
+  }
+  if (R.nProj >= R.capProj &&
+      !repGrow((void **)&R.proj, &R.capProj, R.nProj + 1, sizeof(RepProj)))
+    return NULL;
+  RepProj *p = &R.proj[R.nProj++];
+  memset(p, 0, sizeof(*p));
+  copyStr(p->name, sizeof(p->name), name);
+  R.cur = R.nProj - 1;
+  *created = true;
+  return p;
+}
+
+void buildReportProjectNote(const char *name) {
+  if (!R.active || !name) return;
+  bool created = false;
+  projEnsure(name, &created); /* record saja: tanpa heading/arsip (induk live) */
+}
+
 void buildReportProject(const char *name) {
   /* name kosong = proyek tunggal tanpa header "> Name" (contoh single-project). */
   if (!R.active || !name) return;
@@ -229,20 +256,11 @@ void buildReportProject(const char *name) {
      heading # Execution dibuka lazy. Keduanya no-op saat staging (child). */
   buildReportRenderArchives();
   buildReportBeginExecution();
-  for (int i = 0; i < R.nProj; i++) {
-    if (strcmp(R.proj[i].name, name) == 0) {
-      R.cur = i; /* upsert: proyek sudah ada (fase binary) — TANPA cetak ulang
-         "> Name" agar fase library+binary jadi SATU blok (design §3). */
-      return;
-    }
-  }
-  if (R.nProj >= R.capProj &&
-      !repGrow((void **)&R.proj, &R.capProj, R.nProj + 1, sizeof(RepProj)))
-    return;
-  RepProj *p = &R.proj[R.nProj++];
-  memset(p, 0, sizeof(*p));
-  copyStr(p->name, sizeof(p->name), name);
-  R.cur = R.nProj - 1;
+  bool created = false;
+  RepProj *p = projEnsure(name, &created);
+  /* Upsert: proyek sudah ada (fase binary) — TANPA cetak ulang "> Name" agar
+     fase library+binary jadi SATU blok (design §3). */
+  if (!p || !created) return;
   /* Blok # Execution: cetak "> Name" HANYA untuk proyek baru (fase library
      pass). Fase binary pass memakai upsert di atas — tidak mencetak ulang.
      Baris kosong sebelum blok berikutnya (bukan pertama) memisahkan dari
