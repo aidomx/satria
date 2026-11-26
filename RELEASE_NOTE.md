@@ -1,89 +1,97 @@
-# Release Note - satria v0.6.4
+# Release Note - satria v0.6.8
 
-v0.6.4 is a performance and tooling release: incremental builds parse and
-write less, `satria init` becomes a guided scaffold, and the trace used by
-`satri bench` is now built in.
+v0.6.8 is a workspace performance release: project batches run in parallel by
+default, link steps overlap, and incremental planning stops paying for stat
+calls that were already answered. It also adds `<project>.extension` for
+projects whose content is not C source.
 
-## Faster incremental builds
+## Parallel workspace builds by default
 
-The cache layer was the main CPU cost on large workspaces. This release
-removes most of the repeated work without changing any cache format or
-build decision:
+The dependency-ready scheduler is now the default for workspace batches with
+more than one project and `-j` above one. A single `cc`/`ld` invocation costs
+roughly 0.25–0.37 s and cannot be split across cores, so overlapping project
+links removes most of the serial tail on rebuild scenarios such as `hedit`
+and `libhdr`.
 
-- **Cache files are read once and parsed in place.** `cache_store` no
-  longer allocates a buffer per line; nodes and payloads come from a
-  per-store arena, and the decimal parser replaces millions of `strtoll`
-  calls per run.
-- **The `opts.cache` router memo uses a file stamp** (path, mtime in ns,
-  size, project) instead of hashing multi-megabyte cache files 15-16 times
-  per run. Large `csOpen` parses dropped by roughly half.
-- **`sources.cache` is loaded once** and split into lines in memory, so
-  no-op validation no longer pays `fgets`/`strlen` per line for tens of
-  thousands of entries.
-- **One stat instead of two-to-three** for pack entries, link targets and
-  source resolution (`fsStatDirMTimeNs`).
-- **Libraries build static and shared in parallel**, with O(N log N)
-  de-duplication, and the MSVC link command is assembled in O(N).
-- **Executables link through the project's static archive**
-  (`--whole-archive`, `-all_load` on macOS) when one exists; `ld` reads an
-  indexed archive instead of opening every object.
-- **No clock calls on the save-walk path unless `SATRIA_PROFILE` is set**,
-  matching the documented contract.
+Output stays readable through three policies:
 
-CI `Workspace Benchmark` at this release (AMD EPYC runner, median of 3):
+- **Terminal (TTY):** serial runner, so per-object progress is realtime.
+- **Regular file:** parallel runner, printed in worklist order, so CI logs and
+  unit tests are deterministic.
+- **Pipe or socket:** parallel runner with live, line-buffered output
+  (`satria -w | tee build.log`, wrappers, and nested `satria | satria -w`).
 
-| Scenario | 1k cmake | 1k satria | 5k cmake | 5k satria |
-| --- | ---: | ---: | ---: | ---: |
-| cold | 10.883 ms | **10.434 ms** | 60.198 ms | 60.882 ms |
-| leaf | 690 | **587** | 4.139 | 4.352 |
-| bade | 695 | **595** | 4.160 | 4.376 |
-| hedit | 743 | **673** | 4.420 | 4.916 |
-| noop | 43 | **25** | 232 | **146** |
-| touch / libtouch | 798 / 776 | **36 / 36** | 4.577 / 4.362 | **213 / 208** |
+`SATRIA_WS_PAR=0` forces the serial runner; `SATRIA_WS_PAR=1` forces parallel
+with live output.
 
-Rates are only comparable inside one run (runner hardware differs between
-runs). At 1k satria wins every rebuild scenario; at 5k the leaf gap is
-about 5% and hedit about 11%. Cold builds remain a different kind of
-measurement (see `satria bench` report notes).
+The TTY check now reads the **original** stdout saved by the report relay
+(`reportBlobStdoutIsTty`). During a build `STDOUT_FILENO` is a tee pipe, so
+`isatty(STDOUT_FILENO)` was always false; terminal builds silently chose the
+parallel runner and progress stalled per project. Pipe detection uses the same
+saved descriptor.
 
-## `satria init` interactive scaffold
+## Overlapped links
 
-`satria init -p` now shows a summary before writing anything and asks for
-confirmation. On a terminal the scaffold is built and run immediately.
+- In the workspace library phase only `lib<name>.a` is built. The shared
+  variant (`.so`) is deferred to the binary phase, where its link starts just
+  before the binary link. Total time becomes `max(.so, binary)` instead of
+  `.so + binary`.
+- Independent project links overlap through the ready-dependency scheduler.
+- Static archives are rewritten incrementally: symbols of all changed objects
+  are resolved with a single `nm -A` call instead of one `nm` process per
+  object.
 
-- `--here` puts a single-project scaffold in the current directory instead
-  of `<name>/` (workspace mode still uses project folders).
-- `--no-run` skips the automatic build+run.
-- Nothing is written until the summary is confirmed; Ctrl+C or EOF cancels.
+## Faster planning and no-op validation
 
-## Trace and benchmark
+- `statPlanBuild` reuses the stat memo filled by the workspace no-op gate
+  (`cmdsStatMemoPeek`). Sources and objects already verified in the same run
+  are no longer stat'ed a second time.
+- Object-path lookup uses a hash map instead of the previous O(n²) string
+  scan. On a 5,000-source fixture the plan phase dropped from roughly
+  4.5–5.0 s to 1.0–1.8 s; the quadratic path went from 2,546 ms to 24 ms.
+- The gate fills the memo for **all** pre-stat entries before validation can
+  early-exit, so a miss near the front no longer forces the plan to re-stat
+  the rest.
+- Library fast-state validation skips paths already in the memo and evaluates
+  entries flagged stale by the gate first.
+- Forked children invalidate inherited plan verdicts once any project has
+  finished, because a completed project may have rewritten shared inputs
+  (embedded tarballs, archives, libraries).
 
-- `satria trace` is the default trace backend for `satria bench` on
-  POSIX: it uses `LD_PRELOAD`, works without ptrace, and records
-  **per-call durations** (total seconds, percent, and µs/call in the CSV).
-  `strace=true` remains available as an explicit opt-in.
-- Workspace trace now configures cmake/meson after resetting the build
-  directory (without tracing the configure step) and traces both `cold`
-  and `leaf`, with a `scenario` column in `workspace-syscalls.csv`.
-- Leaf trace no longer follows children (`-f`), so the number reflects
-  satria's own walk instead of being dominated by gcc/ld waiting.
-- The single-project benchmark generator caps the generated header include
-  chain at 64. CI runs with large `headers` values (e.g. 1000) no longer
-  exceed the compiler's include-depth limit.
-- Bench sanitizer labels are valid C identifiers.
+## `<project>.extension`
+
+Projects whose content is not C source can declare the extension that
+identifies their inputs:
+
+```text
+mod.extension = .rp
+```
+
+- Freshness walks and `sources.cache` records only touch files with that
+  extension, instead of every file under `archive.src` / `embedded.<n>.src`.
+- The project value is inherited by every `embedded.<n>` entry that does not
+  set its own `.extension`.
+- It affects tracking only. `archive.pattern`, `embedded.<n>.pattern`, and
+  `exclude` still decide what goes into the archive, so metadata such as
+  `module.json` stays in the tarball.
+- The archive configuration hash includes the field, and `startup.state` was
+  bumped to format 17, so the cache is regenerated once after upgrading.
 
 ## Fixes
 
-- The trace summary test now matches the top list ordered by total time.
-- The router-centric scheduler plan is on by default (`SATRIA_PLAN=1`); set
-  `SATRIA_PLAN=0` to use the legacy path. `SATRIA_WS_PLAN` remains a legacy
-  alias.
+- The workspace benchmark buildfile now mirrors the CMake fixture: `bade`
+  sources only `src`, and `main.c` is excluded from the library. The old file
+  named a `manager` directory that the fixture never creates.
+- A deferred `.so` is no longer recorded as a missing artifact in library
+  fast-state, which previously made the next library phase miss.
+- Added `.extension` to the archive config hash so changing it rebuilds the
+  archive state exactly once.
 
 ## Known limitations
 
-- Router-centric workspace orchestration (all cache decisions and writes
-  owned by the `opts.cache` router) is still experimental and not part of
-  this release.
-- `tup` participates in the single-project bench but is still rejected by
-  the CI workflow input until verified there.
-- `docs/` still reflects the v0.6.0 snapshot (with `init` updated).
+- `docs/` still reflects the v0.6.0 snapshot, with incremental changes for
+  newer features.
+- `tup` participates in the single-project bench but is still rejected by the
+  CI workflow input until verified there.
+- The CI `Workspace Benchmark` numbers for this release are attached to the
+  tag; local smoke runs are for diagnosis only.
