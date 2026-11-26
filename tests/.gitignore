@@ -3,6 +3,13 @@ cplusplus/*
 !include
 !src
 
+complexws/*
+!WsBuildfile
+!include
+!bade
+!core
+!README.md
+
 mini/*
 !Buildfile
 !include
@@ -18,6 +25,8 @@ miniws/*
 !README.md
 !rupamod
 !*.sh
+
+rupaws
 
 wstest/*
 !WsBuildfile
