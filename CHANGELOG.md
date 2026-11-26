@@ -1,4 +1,40 @@
+# v0.6.8
+- 9699b18 fix(watch): replace POSIX-only APIs with portable wrappers
+- 6e82eda chore: add fixed windows clock time
+- 51c9600 fix: windows clock time portable
+- 200008c chore(tests): batasi artefak fixture kompleks dan abaikan rupaws lokal
+- b673b07 chore(release): siapkan v0.6.8
+- ee8b2e5 docs(maps): petakan cold build, edit header, edit source, dan plan
+- d38ee31 feat(config): dukung <project>.extension untuk input arsip dan embed
+- d633dd3 perf(workspace): runner paralel default, link bertumpuk, dan rencana stat hemat
+- 5231f93 perf(workspace): ringkas peta P, tulis arsip inkremental, plan default
+- 8c8939d refactor(test): istilah aksi menjadi action di parser dan DSL
+- 9935b93 chore: cache and skip install dependency when satria only
+- b516f4f chore: remove debugging
+- 07957f0 fix(bench): miss mod,dep in benchmark
+- 4150a64 chore: enabled router-centric is default used
+- a4dce68 refactor: full migration unit test with bash to unit test dsl - archive unit test with bash - update docs for usage unit test with dsl
+- a186cd2 docs(todos): perbarui status M4 dan porting .test
+- 8723bbd test(unit): port 11 tes common ke DSL .test
+- bd38bdc refactor(test): ganti seleksi -t dengan -s/--select
+- 29b2930 feat(test): runner unit test native M4b-M4d
+- 19d73cd perf(workspace): paralelkan verdict rencana dan satukan batch binary
+- a7cdfa4 perf(state): percepat muat sources.cache dan fast-state
+- ee69d0a test(unit): port wsbuildfile_legacy ke DSL .test
+- 13faf7d test(unit): port cdeps_key_reject ke DSL .test
+- b1090db test(unit): port version_alias ke DSL .test
+- 34a93e4 feat(test): tambahkan parser DSL native M4a
+- 10a2ee6 up: archives
+- d682b9b refactor: improve filesystem portability
+- 055ef79 docs: update build architecture and implementation notes
+- 2dd776b feat: improve build execution reporting
+- 3249f19 refactor: introduce router-centric build lifecycle
+- d760721 perf: optimize library archive and linking
+- fabf301 perf: optimize workspace no-op validation
+- 658ba0f chore: clean up .gitignore and remove .rbot-version
+
 # v0.6.4
+- e21ef2f chore: changelog v0.6.4
 - d484148 chore: update to version 0.6.4
 - a124bf3 refactor(workspace): pisahkan rencana scheduler dari router opts.cache
 - dd14db7 docs(todos): catat uji ulang bench-compare headers=1000
