@@ -195,7 +195,7 @@ int cmdsBuildPassFinish(CmdsPassTail *t) {
   if (!linkNeeded) {
     /* Baris live ini dipertahankan oleh desain §7 ("Linking: ... (up-to-date)
        dicetak"); status `cached` dicatat terpisah pada Build Report. */
-    printf("%s Linking : %s (up-to-date)\n", repPrefix(), target);
+    // printf("%s Linking : %s (up-to-date)\n", repPrefix(), target);
     /* Library bisa jadi masih perlu dibangun (baru diaktifkan di
        Buildfile / terhapus manual) meski binary sudah up-to-date. */
     if (c.libRequested && !cmdsBuildLibraryEx2(&c, &srcs, true, sourceSetChanged)) {

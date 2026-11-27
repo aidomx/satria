@@ -2,7 +2,7 @@
 @purpose "Ringkasan binaries: up-to-date tercatat, bukan 0 linked, 0 up-to-date"
 
 file.write Buildfile <<T
-use project
+use project c
 T
 
 file.write src/main.c <<T
@@ -18,7 +18,7 @@ run.build as noop1
 file.append src/main.c /* komentar */
 run.build as touch
 @response touch
-  out.contains "(up-to-date)"
+  out.contains "cached"
 @end
 
 run.build as noop2
