@@ -91,12 +91,13 @@ uint64_t depPathHash(const char *s) {
   return h;
 }
 
-static void hashRebuild(DepCache *dc, int ncap) {
-  int *nb = calloc((size_t)ncap, sizeof(int));
-  if (!nb) return;
-  free(dc->hbucket);
-  dc->hbucket = nb;
-  dc->hbcap = ncap;
+static bool hashRebuild(DepCache *dc, int ncap) {
+  if (ncap <= 0 || (ncap & (ncap - 1)) != 0 ||
+      (size_t)ncap > SIZE_MAX / sizeof(int))
+    return false;
+
+  int *nb = calloc((size_t)ncap, sizeof(*nb));
+  if (!nb) return false;
 
   int mask = ncap - 1;
   for (int idx = 0; idx < dc->count; idx++) {
@@ -104,6 +105,22 @@ static void hashRebuild(DepCache *dc, int ncap) {
     while (nb[i]) i = (i + 1) & mask;
     nb[i] = idx + 1;
   }
+
+  free(dc->hbucket);
+  dc->hbucket = nb;
+  dc->hbcap = ncap;
+  return true;
+}
+
+/* Pastikan bucket cukup sebelum node baru dimasukkan. Kegagalan tidak
+   mengubah tabel lama, sehingga DepCache tetap dapat digunakan. */
+static bool hashEnsure(DepCache *dc, int needed) {
+  int ncap = dc->hbcap ? dc->hbcap : 256;
+  while ((size_t)needed > ((size_t)ncap * 3U) / 4U) {
+    if (ncap > INT_MAX / 2) return false;
+    ncap *= 2;
+  }
+  return ncap == dc->hbcap || hashRebuild(dc, ncap);
 }
 
 int depNodeFind(const DepCache *dc, const char *path) {
@@ -120,22 +137,38 @@ int depNodeFind(const DepCache *dc, const char *path) {
 }
 
 int depNodeAddM(DepCache *dc, const char *path, int64_t mtime) {
-  if (dc->count >= DEPS_MAX_NODES) return -1;
-  if (dc->count == dc->cap) {
-    int ncap = dc->cap ? dc->cap * 2 : 64;
-    DepNode *nn = realloc(dc->nodes, (size_t)ncap * sizeof(DepNode));
+  if (dc->count == INT_MAX) return -1;
+
+  int needed = dc->count + 1;
+  if (!hashEnsure(dc, needed)) return -1;
+
+  if (needed > dc->cap) {
+    int ncap;
+    if (!dc->cap) {
+      ncap = 64;
+    } else if (dc->cap > INT_MAX / 2) {
+      ncap = INT_MAX;
+    } else {
+      ncap = dc->cap * 2;
+    }
+    if (ncap < needed || (size_t)ncap > SIZE_MAX / sizeof(*dc->nodes)) return -1;
+
+    DepNode *nn = realloc(dc->nodes, (size_t)ncap * sizeof(*dc->nodes));
     if (!nn) return -1;
     dc->nodes = nn;
     dc->cap = ncap;
   }
-  DepNode *n = &dc->nodes[dc->count];
-  memset(n, 0, sizeof(*n));
-  n->path = strdup(path);
-  n->mtime = mtime;
-  int idx = dc->count++;
 
-  /* daftarkan ke hash table; tumbuh saat load factor > 0.75 */
-  if (!dc->hbcap || dc->count * 4 > dc->hbcap * 3) hashRebuild(dc, dc->hbcap ? dc->hbcap * 2 : 256);
+  char *pathCopy = strdup(path);
+  if (!pathCopy) return -1;
+
+  int idx = dc->count;
+  DepNode *n = &dc->nodes[idx];
+  memset(n, 0, sizeof(*n));
+  n->path = pathCopy;
+  n->mtime = mtime;
+  dc->count = needed;
+
   int mask = dc->hbcap - 1;
   int i = (int)(depPathHash(path) & (uint64_t)mask);
   while (dc->hbucket[i]) i = (i + 1) & mask;

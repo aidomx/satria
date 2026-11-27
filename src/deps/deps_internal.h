@@ -18,7 +18,6 @@
  * di-prefix dep* supaya unik lintas translation unit.
  */
 
-#define DEPS_MAX_NODES 8192
 #define DOTD_MAX_LINE 16384
 /* Cache terpusat (design/startup.md §3): semua proyek berbagi SATU file
    per jenis cache (WS_CACHES_DIR di cmds_internal.h); baris dikelompokkan
