@@ -84,7 +84,11 @@ void benchGenNinjaGraph(const Bench *b, const char *ws) {
   fputs("  depfile = $out.d\n", f);
   fputs("  deps = gcc\n", f);
   fputs("rule link\n", f);
-  fputs("  command = gcc $in -o $out\n\n", f);
+  /* Daftar object bisa melewati ARG_MAX pada proyek besar. Simpan input
+     linker ke response file agar command yang dijalankan Ninja tetap pendek. */
+  fputs("  command = gcc @$out.rsp -o $out\n", f);
+  fputs("  rspfile = $out.rsp\n", f);
+  fputs("  rspfile_content = $in\n\n", f);
   for (int i = 1; i <= b->source; i++)
     fprintf(f, "build build/t%d.o: cc src/t%d.c\n", i, i);
   fputs("build build/main.o: cc src/main.c\n", f);
