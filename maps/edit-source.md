@@ -70,3 +70,77 @@ simpan:
 - selective_noop_full
 - report_binaries_uptodate
 - watcher_staging
+
+## Single-project flow
+
+Edit sumber pada proyek tunggal tidak melewati gerbang/worklist/rencana
+workspace. Jalurnya memakai fast-state dan pass build tunggal:
+
+```text
+edit sumber
+  -> gerbang (`cmds_state.c` `cmdsFastStateValid`)
+       opts.cache + artifact.cache + fingerprint.cache/build.state
+       stamp sama -> Nothing to build
+       stamp beda -> fallback ke build normal
+  -> koleksi sumber (`cmds_build.c` / `cmds_pass.c`)
+       router `opts.cache` untuk daftar sumber
+       -> `statPlanBuild` (mtime source/object sekali)
+       -> fingerprint konfigurasi dan source set
+  -> decide (`cmds_pass.c`)
+       per source: mtime source/object
+       -> `depsNewestHeaderMTimeAt`
+       -> `depsContentUpToDate` (snapshot hash + edges `.d`)
+       -> compile hanya source yang benar-benar stale
+  -> library/archive + link (`cmds_lib.c`, `cmds_passfinish.c`)
+       object byte-identik tidak memicu relink binary
+       `.satria-link.a` diperbarui bila object berubah
+  -> simpan (`cmds_passfinish.c`)
+       `depsRecordUpdate` + `depsSave`
+       -> fingerprint
+       -> `cmdsFastStateSave` (`cmds_fast.c`)
+            input roots + closure header + artifact/link inputs
+            -> `fingerprint.cache/build.state`
+```
+
+## Single-project responsibilities
+
+gerbang:
+  `cmdsFastStateValid` memeriksa router, artefak, Buildfile, target, lalu
+  stamp seluruh input fast-state. Stamp file yang berubah tetapi hash sama
+  dipatch sebagai touch; perubahan konten, penambahan/penghapusan file, atau
+  direktori berubah membuat gate miss dan build normal mengambil alih.
+
+pass:
+  `statPlanBuild` menghindari stat ulang source/object, tetapi keputusan compile
+  tetap memeriksa seluruh translation unit. `depsNewestHeaderMTimeAt` memberi
+  batas mtime header; `depsContentUpToDate` membuktikan konten source dan
+  header transitif terhadap `deps.cache`. Karena itu edit satu source tidak
+  berarti semua source dikompilasi, walau semua source masih dievaluasi.
+
+simpan:
+  Fast-state menyimpan stamp file dan direktori untuk mendeteksi perubahan
+  filesystem pada run berikutnya. Hash konten dibutuhkan untuk bukti touch,
+  tetapi hash dari state sebelumnya dapat dipakai ulang bila path, mtime, dan
+  ukuran file tetap sama. File baru atau stamp yang berubah tetap di-hash.
+  Pengumpulan path memakai set hash agar deduplikasi tidak menjadi pencarian
+  linear berulang. Daftar path tetap dikoleksi ulang agar create/delete dan
+  perubahan direktori tidak luput.
+
+## Single-project invariants
+
+- Perubahan satu source hanya mengompilasi source tersebut, kecuali compile
+  configuration, source set, atau dependensi header memang berubah.
+- Touch tanpa perubahan konten tidak memicu compile/link.
+- Header eksternal di luar `sources`/`includeDirs` tetap tercakup melalui
+  closure dependensi `.d`/scanner.
+- Fast-state tidak boleh melewatkan file baru/hilang; direktori tetap menjadi
+  stamp input.
+- Hash lama hanya boleh dipakai ulang bila path, mtime, dan ukuran sama.
+- Build gagal tidak boleh diklaim sebagai snapshot sukses.
+
+## Single-project related tests
+
+- faststate_external_header
+- crud_touch_delete (bagian MODE SINGLE)
+- cache_noop (gate dan fallback)
+- report_binaries_uptodate

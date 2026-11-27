@@ -312,11 +312,11 @@ static bool subtreeUpToDate(DepCache *dc, int idx) {
 
   if (!nodeUpToDateShallow(dc, idx) && !depsSemAcceptNode(dc, dc->semRoot, idx)) return false;
 
-  /* salin kids dulu: depParseNodeIfNeeded anak bisa merealloc dc->nodes */
+  /* kids berada pada alokasi terpisah dari dc->nodes. Parse anak dapat
+     merealokasi array node, tetapi tidak memindahkan/mengubah daftar kids
+     milik parent; simpan pointer heap ini tanpa alokasi salinan per node. */
   int nkids = dc->nodes[idx].nkids;
-  int *kids = malloc((size_t)(nkids > 0 ? nkids : 1) * sizeof(int));
-  if (!kids) return false;
-  memcpy(kids, dc->nodes[idx].kids, (size_t)nkids * sizeof(int));
+  const int *kids = dc->nodes[idx].kids;
 
   bool ok = true;
   for (int i = 0; i < nkids; i++) {
@@ -330,7 +330,6 @@ static bool subtreeUpToDate(DepCache *dc, int idx) {
       break;
     }
   }
-  free(kids);
   return ok;
 }
 

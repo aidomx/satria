@@ -46,13 +46,66 @@ void fastStateFree(FastState *s) {
   memset(s, 0, sizeof(*s));
 }
 
-static bool fastStampAdd(List *paths, const char *path) {
-  for (int i = 0; i < paths->count; i++)
-    if (strcmp(paths->items[i], path) == 0) return true;
-  return listAdd(paths, path);
+typedef struct {
+  List list;
+  int *slots; /* index path + 1; 0 = kosong */
+  size_t cap;
+  bool failed;
+} FastPathSet;
+
+static uint64_t fastPathHash(const char *s) {
+  uint64_t h = 14695981039346656037ULL;
+  for (const unsigned char *p = (const unsigned char *)s; *p; p++) {
+    h ^= *p;
+    h *= 1099511628211ULL;
+  }
+  return h;
 }
 
-static void fastCollectTree(const char *dir, List *paths) {
+static bool fastPathSetGrow(FastPathSet *paths) {
+  size_t cap = paths->cap ? paths->cap * 2 : 256;
+  int *slots = calloc(cap, sizeof(*slots));
+  if (!slots) return false;
+  for (int i = 0; i < paths->list.count; i++) {
+    size_t at = (size_t)fastPathHash(paths->list.items[i]) & (cap - 1);
+    while (slots[at]) at = (at + 1) & (cap - 1);
+    slots[at] = i + 1;
+  }
+  free(paths->slots);
+  paths->slots = slots;
+  paths->cap = cap;
+  return true;
+}
+
+static bool fastStampAdd(FastPathSet *paths, const char *path) {
+  if (paths->failed) return false;
+  if (!paths->cap || ((size_t)paths->list.count + 1) * 10 >= paths->cap * 7) {
+    if (!fastPathSetGrow(paths)) {
+      paths->failed = true;
+      return false;
+    }
+  }
+  size_t at = (size_t)fastPathHash(path) & (paths->cap - 1);
+  while (paths->slots[at]) {
+    int idx = paths->slots[at] - 1;
+    if (strcmp(paths->list.items[idx], path) == 0) return true;
+    at = (at + 1) & (paths->cap - 1);
+  }
+  if (!listAdd(&paths->list, path)) {
+    paths->failed = true;
+    return false;
+  }
+  paths->slots[at] = paths->list.count;
+  return true;
+}
+
+static void fastPathSetFree(FastPathSet *paths) {
+  listFree(&paths->list);
+  free(paths->slots);
+  memset(paths, 0, sizeof(*paths));
+}
+
+static void fastCollectTree(const char *dir, FastPathSet *paths) {
   if (!fsDirExists(dir)) return;
   fastStampAdd(paths, dir);
   List dirs = {0}, files = {0};
@@ -72,7 +125,7 @@ static void fastCollectTree(const char *dir, List *paths) {
    yang sama dengan keputusan incremental (depfile .d bila tersedia, scanner
    sebagai fallback), bukan menelusuri semua direktori header secara global. */
 static void fastCollectDepPath(const char *path, void *ctx) {
-  List *paths = (List *)ctx;
+  FastPathSet *paths = (FastPathSet *)ctx;
   if (path && *path) fastStampAdd(paths, path);
 }
 
@@ -121,11 +174,68 @@ static void fastStampOne(const char *path, FastStampWire *w) {
   if (!w->isDir) w->content = fastStateHash(path);
 }
 
+/* Cari stamp state sebelumnya dalam O(1) rata-rata. Saat incremental relink,
+   hash konten file yang mtime+ukurannya tidak berubah dapat dipakai ulang;
+   gate dan deps snapshot memakai shortcut mtime yang sama. */
+static int *fastStampIndexBuild(const FastState *s, size_t *capOut) {
+  *capOut = 0;
+  if (!s || s->count <= 0) return NULL;
+  size_t cap = 512;
+  while (cap < (size_t)s->count * 2) cap <<= 1;
+  int *slots = calloc(cap, sizeof(*slots));
+  if (!slots) return NULL;
+  for (int i = 0; i < s->count; i++) {
+    size_t at = (size_t)fastPathHash(s->stamps[i].path) & (cap - 1);
+    while (slots[at]) at = (at + 1) & (cap - 1);
+    slots[at] = i + 1;
+  }
+  *capOut = cap;
+  return slots;
+}
+
+static const FastStamp *fastStampIndexFind(const FastState *s, const int *slots,
+                                           size_t cap, const char *path) {
+  if (!s || !slots || !cap) return NULL;
+  size_t at = (size_t)fastPathHash(path) & (cap - 1);
+  while (slots[at]) {
+    const FastStamp *st = &s->stamps[slots[at] - 1];
+    if (strcmp(st->path, path) == 0) return st;
+    at = (at + 1) & (cap - 1);
+  }
+  return NULL;
+}
+
+static void fastStampReuseOne(const char *path, const FastState *previous,
+                              const int *index, size_t indexCap,
+                              FastStampWire *w) {
+  w->mtime = -1;
+  w->size = 0;
+  w->content = 0;
+  w->isDir = 0;
+  int64_t mt = 0;
+  long long sz = 0;
+  bool isDir = false;
+  if (!fsStampNsSizeKind(path, &mt, &sz, &isDir)) return;
+  w->mtime = mt;
+  w->size = sz;
+  w->isDir = isDir ? 1 : 0;
+  if (w->isDir) return;
+  const FastStamp *old = fastStampIndexFind(previous, index, indexCap, path);
+  if (old && old->kind == 'F' && old->mtime == mt && old->size == sz) {
+    w->content = old->content;
+    return;
+  }
+  w->content = fastStateHash(path);
+}
+
 #ifndef _WIN32
-/* Hash isi file adalah biaya dominan save fast-state di proyek besar (proot:
-   ~2.100 file -> beberapa detik). Bagi path ke maksimal 8 child; gagal
-   fork/pipe -> seluruh irisan diulang serial oleh pemanggil. */
-static bool fastStampFork(const List *paths, FastStampWire *out) {
+/* Stamp input dalam jumlah besar diproses paralel (maksimal 8 child).
+   Pada save incremental, hash file yang stamp-nya tetap dipakai ulang;
+   cold save atau file baru/berubah tetap membaca isi. Gagal fork/pipe
+   -> seluruh irisan diulang serial oleh pemanggil. */
+static bool fastStampFork(const List *paths, FastStampWire *out,
+                          const FastState *previous, const int *previousIndex,
+                          size_t previousIndexCap) {
   int workers = cpuCount();
   if (workers < 2) return false;
   if (workers > 8) workers = 8;
@@ -148,8 +258,13 @@ static bool fastStampFork(const List *paths, FastStampWire *out) {
       size_t n = e - s, bytes = n * sizeof(*out);
       FastStampWire *local = bytes ? malloc(bytes) : NULL;
       if (local) {
-        for (size_t i = 0; i < n; i++)
-          fastStampOne(paths->items[s + i], &local[i]);
+        for (size_t i = 0; i < n; i++) {
+          if (previousIndex)
+            fastStampReuseOne(paths->items[s + i], previous, previousIndex,
+                              previousIndexCap, &local[i]);
+          else
+            fastStampOne(paths->items[s + i], &local[i]);
+        }
         size_t off = 0;
         while (off < bytes) {
           ssize_t wr = write(pfd[w][1], (char *)local + off, bytes - off);
@@ -477,7 +592,7 @@ void cmdsFastStateSave(const Config *c, const List *srcs, const char *target,
     }
   }
 
-  List paths = {0};
+  FastPathSet paths = {0};
   for (int i = 0; i < c->sources.count; i++)
     fastCollectTree(c->sources.items[i], &paths);
   List incDirs = {0};
@@ -517,7 +632,7 @@ void cmdsFastStateSave(const Config *c, const List *srcs, const char *target,
     } else {
       /* Gagal membentuk graph: jangan simpan fast-state yang bisa melewatkan
          header; kembali ke build normal pada run berikutnya. */
-      listFree(&paths);
+      fastPathSetFree(&paths);
       SAVE_BAIL("depsNew gagal");
     }
   }
@@ -572,15 +687,19 @@ void cmdsFastStateSave(const Config *c, const List *srcs, const char *target,
       if (strchr(lib, '/') || strchr(lib, '\\')) fastStampAdd(&paths, lib);
     }
 
-  FastStamp *stamps = calloc((size_t)paths.count, sizeof(FastStamp));
-  if (paths.count && !stamps) {
-    listFree(&paths);
+  if (paths.failed) {
+    fastPathSetFree(&paths);
+    SAVE_BAIL("path set allocation gagal");
+  }
+  FastStamp *stamps = calloc((size_t)paths.list.count, sizeof(FastStamp));
+  if (paths.list.count && !stamps) {
+    fastPathSetFree(&paths);
     SAVE_BAIL("calloc stamps gagal");
   }
   int count = 0;
   bool safePaths = true;
-  for (int i = 0; i < paths.count; i++) {
-    const char *path = paths.items[i];
+  for (int i = 0; i < paths.list.count; i++) {
+    const char *path = paths.list.items[i];
     if (strlen(path) >= sizeof(stamps[count].path) || strpbrk(path, " \t\r\n")) {
       safePaths = false;
       break;
@@ -589,21 +708,39 @@ void cmdsFastStateSave(const Config *c, const List *srcs, const char *target,
   }
   FastStampWire *wire = NULL;
   bool wireParallel = false;
-  if (safePaths && paths.count > 0) {
-    wire = calloc((size_t)paths.count, sizeof(*wire));
+  FastState previous;
+  memset(&previous, 0, sizeof(previous));
+  bool havePrevious = fastStateLoad(&previous, false) && previous.phase == 0 &&
+                      strcmp(previous.cwd, cwd) == 0;
+  size_t previousIndexCap = 0;
+  int *previousIndex = havePrevious ? fastStampIndexBuild(&previous, &previousIndexCap) : NULL;
+  if (safePaths && paths.list.count > 0) {
+    wire = calloc((size_t)paths.list.count, sizeof(*wire));
     if (wire) {
 #ifndef _WIN32
-      if (paths.count >= 256 && !envOff("SATRIA_FASTSAVE_PAR"))
-        wireParallel = fastStampFork(&paths, wire);
+      if (paths.list.count >= 256 && !envOff("SATRIA_FASTSAVE_PAR"))
+        wireParallel = fastStampFork(&paths.list, wire, havePrevious ? &previous : NULL,
+                                     previousIndex, previousIndexCap);
 #endif
-      if (!wireParallel)
-        for (int i = 0; i < paths.count; i++) fastStampOne(paths.items[i], &wire[i]);
+      if (!wireParallel) {
+        if (previousIndex) {
+          /* Incremental save: stat semua path untuk mendeteksi add/remove/touch,
+             tetapi baca isi hanya untuk file baru atau stamp yang berubah. */
+          for (int i = 0; i < paths.list.count; i++)
+            fastStampReuseOne(paths.list.items[i], &previous, previousIndex, previousIndexCap,
+                              &wire[i]);
+        } else {
+          for (int i = 0; i < paths.list.count; i++) fastStampOne(paths.list.items[i], &wire[i]);
+        }
+      }
     }
   }
+  free(previousIndex);
+  if (havePrevious) fastStateFree(&previous);
   if (safePaths) {
     int idx = 0;
-    for (int i = 0; i < paths.count; i++) {
-      const char *path = paths.items[i];
+    for (int i = 0; i < paths.list.count; i++) {
+      const char *path = paths.list.items[i];
       FastStampWire w;
       if (wire)
         w = wire[i];
@@ -623,10 +760,10 @@ void cmdsFastStateSave(const Config *c, const List *srcs, const char *target,
   free(wire);
   if (!safePaths) {
     free(stamps);
-    listFree(&paths);
+    fastPathSetFree(&paths);
     SAVE_BAIL("path tidak aman (spasi/terlalu panjang)");
   }
-  listFree(&paths);
+  fastPathSetFree(&paths);
   /* Fase library: simpan ke caches/lib.cache (design/startup.md §3) —
      entri meta + stamp per proyek, bukan file per fase. */
   if (libOnly) {

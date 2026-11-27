@@ -348,10 +348,10 @@ int64_t depNewestUnder(DepCache *dc, int idx) {
   int64_t best = dc->nodes[idx].mtime;
   if (best < 0) return INT64_MAX; /* file hilang */
 
+  /* Daftar kids adalah alokasi terpisah; recursive visit dapat merealokasi
+     dc->nodes tetapi tidak memindahkan daftar milik parent. */
   int nkids = dc->nodes[idx].nkids;
-  int *kids = malloc((size_t)(nkids > 0 ? nkids : 1) * sizeof(int));
-  if (!kids) return best;
-  memcpy(kids, dc->nodes[idx].kids, (size_t)nkids * sizeof(int));
+  const int *kids = dc->nodes[idx].kids;
 
   for (int i = 0; i < nkids; i++) {
     int kid = kids[i];
@@ -359,6 +359,5 @@ int64_t depNewestUnder(DepCache *dc, int idx) {
     int64_t m = depNewestUnder(dc, kid);
     if (m > best) best = m;
   }
-  free(kids);
   return best;
 }
